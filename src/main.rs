@@ -1,3 +1,22 @@
+//! Audio Bridge — a small CLI utility that decodes an audio file, resamples it to the
+//! output device sample rate, and plays it via CPAL.
+//!
+//! ## Pipeline
+//! 1. **Decode**: a background thread uses Symphonia to decode the input into interleaved `f32`.
+//! 2. **Resample**: a background thread uses Rubato to convert to the device sample rate.
+//! 3. **Playback**: the CPAL callback pulls resampled audio without blocking and writes to the device.
+//!
+//! Stages communicate via bounded queues (`queue::SharedAudio`) sized by `--buffer-seconds` to
+//! provide underrun resistance.
+//!
+//! ## Tuning
+//! - `--buffer-seconds`: larger values increase stability but add latency.
+//! - `--chunk-frames`: resampler processing granularity.
+//! - `--refill-max-frames`: how much the audio callback tries to pull per refill.
+//!
+//! ## Notes
+//! This tool aims for stable playback on typical USB DAC setups. Underruns are rendered as silence.
+
 mod cli;
 mod decode;
 mod device;
@@ -28,7 +47,7 @@ fn main() -> Result<()> {
     eprintln!("Device default config: {:?}", config);
     let stream_config: cpal::StreamConfig = config.clone().into();
 
-    let (src_spec, srcq) = decode::start_streaming_decode(&args.path)?;
+    let (src_spec, srcq) = decode::start_streaming_decode(&args.path, args.buffer_seconds)?;
     eprintln!(
         "Source: {}ch @ {} Hz (streaming decode)",
         src_spec.channels.count(),
@@ -36,14 +55,25 @@ fn main() -> Result<()> {
     );
 
     let dst_rate = stream_config.sample_rate;
-    let dstq = resample::start_resampler(srcq, src_spec, dst_rate)?;
+    let dstq = resample::start_resampler(
+        srcq,
+        src_spec,
+        dst_rate,
+        resample::ResampleConfig {
+            chunk_frames: args.chunk_frames,
+            buffer_seconds: args.buffer_seconds,
+        },
+    )?;
     eprintln!("Resampling to {} Hz", dst_rate);
 
     let stream = playback::build_output_stream(
         &device,
         &stream_config,
         config.sample_format(),
-        dstq.clone(),
+        &dstq,
+        playback::PlaybackConfig {
+            refill_max_frames: args.refill_max_frames,
+        },
     )?;
     stream.play()?;
 

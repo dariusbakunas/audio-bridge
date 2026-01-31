@@ -1,3 +1,9 @@
+//! Streaming resample stage.
+//!
+//! Uses Rubato to convert decoded interleaved `f32` audio from the source rate
+//! to the output device rate. Runs in a background thread and writes into a bounded
+//! [`SharedAudio`] queue consumed by the playback stage.
+
 use std::sync::Arc;
 use std::thread;
 
@@ -9,21 +15,47 @@ use rubato::{
 };
 use symphonia::core::audio::SignalSpec;
 
-use crate::queue::SharedAudio;
+use crate::queue::{calc_max_buffered_samples, SharedAudio};
 
-pub fn start_resampler(
+/// Configuration for the streaming resampler stage.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResampleConfig {
+    /// Input chunk size in frames used for the steady-state resampling loop.
+    ///
+    /// Larger values reduce per-call overhead and can improve stability at the cost of latency.
+    pub(crate) chunk_frames: usize,
+
+    /// Target buffering (seconds) for the resampler output queue.
+    ///
+    /// This provides headroom to keep the audio callback fed even if the resampler thread
+    /// is briefly delayed.
+    pub(crate) buffer_seconds: f32,
+}
+
+/// Start a background resampler thread.
+///
+/// Reads decoded interleaved `f32` samples from `srcq` (at `src_spec.rate`) and produces
+/// interleaved `f32` samples at `dst_rate` into a new [`SharedAudio`] queue.
+///
+/// ## Threading & shutdown
+/// - Spawns one thread.
+/// - When `srcq` closes and all buffered input is drained, this stage closes its output queue.
+///
+/// ## Notes
+/// This uses Rubato’s streaming sinc resampler. Quality/CPU trade-offs are governed by
+/// the internal sinc parameters.
+pub(crate) fn start_resampler(
     srcq: Arc<SharedAudio>,
     src_spec: SignalSpec,
     dst_rate: u32,
+    cfg: ResampleConfig,
 ) -> Result<Arc<SharedAudio>> {
     let src_rate = src_spec.rate;
     let channels = src_spec.channels.count();
 
-    let max_buffered_samples = (dst_rate as usize)
-        .saturating_mul(channels)
-        .saturating_mul(2);
-
+    let max_buffered_samples = calc_max_buffered_samples(dst_rate, channels, cfg.buffer_seconds);
     let dstq = Arc::new(SharedAudio::new(channels, max_buffered_samples));
+
     let f_ratio = dst_rate as f64 / src_rate as f64;
 
     let sinc_len = 128;
@@ -40,7 +72,7 @@ pub fn start_resampler(
         window,
     };
 
-    let chunk_in_frames = 1024usize;
+    let chunk_in_frames = cfg.chunk_frames.max(1);
 
     let dstq_thread = dstq.clone();
     thread::spawn(move || {

@@ -1,8 +1,32 @@
+//! Thread-safe bounded queues for interleaved audio samples.
+//!
+//! The rest of the crate uses [`SharedAudio`] as the “wire format” between stages:
+//! - decode thread → queue
+//! - resampler thread → queue
+//! - CPAL callback drains queue (non-blocking)
+//!
+//! The API is designed to make shutdown deterministic (`close()` + draining semantics)
+//! while keeping the playback callback real-time friendly.
+
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
-pub struct SharedAudio {
-    pub channels: usize,
+/// Thread-safe bounded queue for interleaved `f32` audio samples.
+///
+/// ## Design
+/// - **Multiple producers / multiple consumers**: safe to call from many threads.
+/// - **Bounded** by `max_buffered_samples` to cap memory and latency.
+/// - Uses a single [`Condvar`] as a general “state changed” signal.
+/// - A `done` flag is stored *under the same mutex* as the queue to avoid races.
+///
+/// ## Data model
+/// Samples are stored **interleaved**:
+/// `frame0[ch0], frame0[ch1], ..., frame1[ch0], frame1[ch1], ...`
+///
+/// The `channels` count is fixed for the lifetime of the queue.
+pub(crate) struct SharedAudio {
+    channels: usize,
     inner: Mutex<SharedInner>,
     cv: Condvar,
     max_buffered_samples: usize,
@@ -13,8 +37,29 @@ struct SharedInner {
     done: bool,
 }
 
+/// Compute a conservative queue capacity in **samples** for a `(rate, channels, seconds)` target.
+///
+/// This is used to size bounded queues for decode/resample stages.
+///
+/// - If `buffer_seconds` is non-finite or `<= 0.0`, a safe fallback is used.
+/// - The returned value is `ceil(rate_hz * buffer_seconds) * channels` (saturating).
+pub(crate) fn calc_max_buffered_samples(rate_hz: u32, channels: usize, buffer_seconds: f32) -> usize {
+    let secs = if buffer_seconds.is_finite() && buffer_seconds > 0.0 {
+        buffer_seconds
+    } else {
+        2.0
+    };
+
+    let frames = (rate_hz as f32 * secs).ceil() as usize;
+    frames.saturating_mul(channels)
+}
+
 impl SharedAudio {
-    pub fn new(channels: usize, max_buffered_samples: usize) -> Self {
+    /// Create a new bounded queue.
+    ///
+    /// `max_buffered_samples` is a cap in **samples** (not frames). If you want “N seconds
+    /// of audio”, prefer using [`calc_max_buffered_samples`].
+    pub(crate) fn new(channels: usize, max_buffered_samples: usize) -> Self {
         Self {
             channels,
             inner: Mutex::new(SharedInner {
@@ -26,19 +71,38 @@ impl SharedAudio {
         }
     }
 
-    pub fn close(&self) {
+    /// Number of channels for the interleaved sample stream carried by this queue.
+    pub(crate) fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Mark the queue as finished and wake all waiters.
+    ///
+    /// After calling this:
+    /// - Blocking pops will eventually return `None` once the queue drains.
+    /// - Blocking pushes will stop accepting data and return early.
+    ///
+    /// This is idempotent and safe to call multiple times.
+    pub(crate) fn close(&self) {
         let mut g = self.inner.lock().unwrap();
         g.done = true;
         drop(g);
         self.cv.notify_all();
     }
 
-    pub fn is_done_and_empty(&self) -> bool {
+    /// Returns `true` if the producer side has closed the queue and all buffered data is drained.
+    pub(crate) fn is_done_and_empty(&self) -> bool {
         let g = self.inner.lock().unwrap();
         g.done && g.queue.is_empty()
     }
 
-    pub fn push_interleaved_blocking(&self, samples: &[f32]) {
+    /// Push interleaved samples into the queue, blocking when the queue is full.
+    ///
+    /// - Blocks until enough capacity is available, unless the queue is closed.
+    /// - If the queue is closed while waiting, this returns early and drops remaining samples.
+    ///
+    /// Callers should push whole frames when possible, but this method accepts any slice length.
+    pub(crate) fn push_interleaved_blocking(&self, samples: &[f32]) {
         let mut offset = 0;
 
         while offset < samples.len() {
@@ -65,7 +129,14 @@ impl SharedAudio {
         }
     }
 
-    pub fn pop_interleaved_frames_blocking(&self, frames: usize) -> Option<Vec<f32>> {
+    /// Pop exactly `frames` frames (interleaved), blocking until enough data is available.
+    ///
+    /// Returns:
+    /// - `Some(Vec<f32>)` with length `frames * channels` when successful.
+    /// - `None` when the queue is closed and there isn’t enough buffered data to satisfy the request.
+    ///
+    /// Use this when a downstream stage expects fixed-size chunks.
+    pub(crate) fn pop_interleaved_frames_blocking(&self, frames: usize) -> Option<Vec<f32>> {
         let want = frames * self.channels;
         let mut g = self.inner.lock().unwrap();
 
@@ -87,9 +158,14 @@ impl SharedAudio {
         Some(out)
     }
 
-    /// Blocking: pop up to `max_frames` frames (interleaved).
-    /// Returns `None` only when `done && empty`.
-    pub fn pop_up_to_frames_blocking(&self, max_frames: usize) -> Option<Vec<f32>> {
+    /// Pop up to `max_frames` frames (interleaved), blocking until *some* data is available.
+    ///
+    /// Returns:
+    /// - `Some(Vec<f32>)` containing **at least one frame** and at most `max_frames` frames.
+    /// - `None` only when the queue is **closed** and **empty** (`done && empty`).
+    ///
+    /// This is ideal for draining “tail” audio without polling/sleep loops.
+    pub(crate) fn pop_up_to_frames_blocking(&self, max_frames: usize) -> Option<Vec<f32>> {
         let mut g = self.inner.lock().unwrap();
 
         while g.queue.is_empty() && !g.done {
@@ -114,8 +190,14 @@ impl SharedAudio {
         Some(out)
     }
 
-    /// Non-blocking: pop up to `max_frames` frames (interleaved).
-    pub fn try_pop_up_to_frames(&self, max_frames: usize) -> Option<Vec<f32>> {
+    /// Try to pop up to `max_frames` frames (interleaved) without blocking.
+    ///
+    /// Returns:
+    /// - `Some(Vec<f32>)` if any frames were available.
+    /// - `None` if the queue is currently empty (regardless of whether it is closed).
+    ///
+    /// This is designed for real-time contexts (e.g., CPAL callbacks) where blocking is not allowed.
+    pub(crate) fn try_pop_up_to_frames(&self, max_frames: usize) -> Option<Vec<f32>> {
         let mut g = self.inner.lock().unwrap();
 
         let available_frames = g.queue.len() / self.channels;
@@ -137,7 +219,11 @@ impl SharedAudio {
     }
 }
 
-pub fn wait_until_done_and_empty(q: &Arc<SharedAudio>) {
+/// Block the current thread until `q` is closed and fully drained.
+///
+/// This is typically used by `main` to wait for background decode/resample stages to finish
+/// before exiting the process.
+pub(crate) fn wait_until_done_and_empty(q: &Arc<SharedAudio>) {
     let mut g = q.inner.lock().unwrap();
     while !(g.done && g.queue.is_empty()) {
         g = q.cv.wait(g).unwrap();

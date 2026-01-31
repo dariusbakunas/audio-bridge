@@ -1,3 +1,11 @@
+//! Playback stage (CPAL output stream).
+//!
+//! Builds the CPAL output stream and provides the real-time audio callback.
+//! The callback:
+//! - refills a small local buffer from the shared queue without blocking
+//! - applies basic channel mapping (mono↔stereo, best-effort otherwise)
+//! - converts `f32` samples to the device sample format
+
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
@@ -5,24 +13,50 @@ use cpal::traits::DeviceTrait;
 
 use crate::queue::SharedAudio;
 
-pub fn build_output_stream(
+/// Configuration for the playback stage (CPAL output callback).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PlaybackConfig {
+    /// Maximum number of frames to pull from the queue per refill.
+    ///
+    /// Larger values reduce mutex/queue churn but can increase latency.
+    pub(crate) refill_max_frames: usize,
+}
+
+/// Build a CPAL output stream that plays audio from `dstq`.
+///
+/// `dstq` must contain **interleaved `f32` samples** already converted to the device sample rate.
+/// The callback performs:
+/// - a non-blocking refill from the queue
+/// - channel mapping (e.g., mono↔stereo)
+/// - conversion from `f32` to the device sample format
+///
+/// ## Real-time constraints
+/// The callback never blocks on locks longer than necessary and never waits on a condition variable.
+/// Underruns are filled with zeros (silence).
+pub(crate) fn build_output_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
-    dstq: Arc<SharedAudio>,
+    dstq: &Arc<SharedAudio>,
+    cfg: PlaybackConfig,
 ) -> Result<cpal::Stream> {
     match sample_format {
-        cpal::SampleFormat::F32 => build_stream::<f32>(device, config, dstq),
-        cpal::SampleFormat::I16 => build_stream::<i16>(device, config, dstq),
-        cpal::SampleFormat::U16 => build_stream::<u16>(device, config, dstq),
+        cpal::SampleFormat::F32 => build_stream::<f32>(device, config, dstq, cfg),
+        cpal::SampleFormat::I16 => build_stream::<i16>(device, config, dstq, cfg),
+        cpal::SampleFormat::U16 => build_stream::<u16>(device, config, dstq, cfg),
         other => Err(anyhow!("Unsupported sample format: {other:?}")),
     }
 }
 
+/// Type-specialized stream builder for CPAL sample formats.
+///
+/// This sets up a callback that drains `dstq` in bursts (up to `refill_max_frames`) and writes
+/// samples into the output buffer, applying simple channel mapping.
 fn build_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    dstq: Arc<SharedAudio>,
+    dstq: &Arc<SharedAudio>,
+    cfg: PlaybackConfig,
 ) -> Result<cpal::Stream>
 where
     T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
@@ -31,9 +65,12 @@ where
 
     let state = Arc::new(Mutex::new(PlaybackState {
         pos: 0,
-        src_channels: dstq.channels,
+        src_channels: dstq.channels(),
         src: Vec::new(),
     }));
+
+    let refill_max_frames = cfg.refill_max_frames.max(1);
+    let dstq_cb = dstq.clone();
 
     let err_fn = |err| eprintln!("Stream error: {err}");
 
@@ -47,8 +84,7 @@ where
                 st.pos = 0;
                 st.src.clear();
 
-                const REFILL_MAX_FRAMES: usize = 4096;
-                if let Some(v) = dstq.try_pop_up_to_frames(REFILL_MAX_FRAMES) {
+                if let Some(v) = dstq_cb.try_pop_up_to_frames(refill_max_frames) {
                     st.src = v;
                 }
             }
@@ -70,12 +106,23 @@ where
     Ok(stream)
 }
 
+/// Local playback buffer state for the CPAL callback.
+///
+/// We keep a small Vec of interleaved samples fetched from `SharedAudio` so the callback
+/// can run quickly without frequently locking the queue.
 struct PlaybackState {
     pos: usize,
     src_channels: usize,
     src: Vec<f32>,
 }
 
+/// Fetch the next output sample after applying basic channel mapping.
+///
+/// Mapping rules:
+/// - mono → stereo: duplicate channel 0
+/// - stereo → mono: average L/R
+/// - stereo → stereo: pass-through
+/// - other layouts: best-effort “clamp to available channels”
 fn next_sample_mapped_from_vec(st: &mut PlaybackState, dst_channels: usize, dst_ch: usize) -> f32 {
     if st.pos >= st.src.len() {
         return 0.0;

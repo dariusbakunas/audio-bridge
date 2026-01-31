@@ -1,3 +1,11 @@
+//! Streaming audio decode stage.
+//!
+//! Uses Symphonia to:
+//! - probe the input container/codec
+//! - decode packets into interleaved `f32` samples
+//! - push samples into a bounded [`SharedAudio`] queue from a background thread
+
+
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,9 +22,25 @@ use symphonia::core::{
 };
 use symphonia::core::audio::{SampleBuffer, Signal};
 
-use crate::queue::SharedAudio;
+use crate::queue::{calc_max_buffered_samples, SharedAudio};
 
-pub fn start_streaming_decode(path: &PathBuf) -> Result<(SignalSpec, Arc<SharedAudio>)> {
+/// Start a background decoder thread that streams interleaved `f32` samples from `path`.
+///
+/// Returns:
+/// - The detected [`SignalSpec`] (source sample rate + channel layout).
+/// - A [`SharedAudio`] queue containing decoded interleaved samples.
+///
+/// ## Threading & shutdown
+/// - Spawns one thread.
+/// - On EOF or error, the queue is closed via [`SharedAudio::close`].
+///
+/// ## Buffering
+/// `buffer_seconds` controls the bounded queue capacity, providing headroom to absorb
+/// jitter from disk I/O and decoding.
+pub(crate) fn start_streaming_decode(
+    path: &PathBuf,
+    buffer_seconds: f32,
+) -> Result<(SignalSpec, Arc<SharedAudio>)> {
     // Probe once to get spec.
     let file = File::open(path).with_context(|| format!("open {:?}", path))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -50,8 +74,8 @@ pub fn start_streaming_decode(path: &PathBuf) -> Result<(SignalSpec, Arc<SharedA
         .ok_or_else(|| anyhow!("Unknown sample rate"))?;
 
     let spec = SignalSpec::new(rate, track.codec_params.channels.unwrap());
-    let max_buffered_samples = (rate as usize).saturating_mul(channels).saturating_mul(2);
 
+    let max_buffered_samples = calc_max_buffered_samples(rate, channels, buffer_seconds);
     let shared = Arc::new(SharedAudio::new(channels, max_buffered_samples));
 
     let path_for_thread = path.clone();
@@ -67,6 +91,14 @@ pub fn start_streaming_decode(path: &PathBuf) -> Result<(SignalSpec, Arc<SharedA
     Ok((spec, shared))
 }
 
+/// Decoder thread main loop.
+///
+/// This function:
+/// - Opens the media container using Symphonia.
+/// - Decodes packets into interleaved `f32` frames.
+/// - Pushes samples into `shared`, blocking if the queue is full.
+///
+/// Errors are returned to the caller (thread wrapper prints + closes the queue).
 fn decode_thread_main(path: &PathBuf, shared: &Arc<SharedAudio>) -> Result<()> {
     let file = File::open(path).with_context(|| format!("open {:?}", path))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());

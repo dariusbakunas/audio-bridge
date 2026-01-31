@@ -1,6 +1,19 @@
+//! Output device discovery and selection.
+//!
+//! Thin wrappers around CPAL for:
+//! - listing available output devices
+//! - selecting either the default device or a device by substring match
+
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 
+/// Pick a CPAL output device.
+///
+/// - If `needle` is `Some`, chooses the first output device whose name contains the substring
+///   (case-insensitive).
+/// - Otherwise, returns the host default output device.
+///
+/// Returns an error if no matching device exists or if the host reports no output devices.
 pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Device> {
     let mut devices: Vec<cpal::Device> = host
         .output_devices()
@@ -24,6 +37,9 @@ pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Devi
         .ok_or_else(|| anyhow!("No default output device"))
 }
 
+/// Print available output devices to stderr.
+///
+/// This is intended for CLI UX (`--list-devices`) rather than structured output.
 pub fn list_devices(host: &cpal::Host) -> Result<()> {
     let devices = host.output_devices().context("No output devices")?;
     for (i, d) in devices.enumerate() {
