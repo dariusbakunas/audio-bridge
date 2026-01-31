@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use anyhow::{anyhow, Result};
 use cpal::traits::DeviceTrait;
 
-use crate::queue::SharedAudio;
+use crate::queue::{PopStrategy, SharedAudio};
 
 /// Configuration for the playback stage (CPAL output callback).
 #[derive(Clone, Debug)]
@@ -101,7 +101,7 @@ where
                 st.pos = 0;
                 st.src.clear();
 
-                if let Some(v) = dstq_cb.try_pop_up_to_frames(refill_max_frames) {
+                if let Some(v) = dstq_cb.pop(PopStrategy::NonBlocking { max_frames: refill_max_frames }) {
                     st.src = v;
                 }
             }

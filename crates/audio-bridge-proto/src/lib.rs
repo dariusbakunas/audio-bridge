@@ -91,14 +91,23 @@ pub fn read_prelude(mut r: impl Read) -> io::Result<()> {
 
 /// Write a frame header + payload.
 pub fn write_frame(mut w: impl Write, kind: FrameKind, payload: &[u8]) -> io::Result<()> {
-    w.write_all(&[kind as u8])?;
+    let frame = encode_frame(kind, payload)?;
+    w.write_all(&frame)?;
+    Ok(())
+}
+
+/// Encode a frame into a single buffer (header + payload).
+pub fn encode_frame(kind: FrameKind, payload: &[u8]) -> io::Result<Vec<u8>> {
     let len: u32 = payload
         .len()
         .try_into()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "payload too large"))?;
-    w.write_all(&len.to_le_bytes())?;
-    w.write_all(payload)?;
-    Ok(())
+
+    let mut out = Vec::with_capacity(1 + 4 + payload.len());
+    out.push(kind as u8);
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(payload);
+    Ok(out)
 }
 
 /// Read a frame header and return `(kind, len)`.

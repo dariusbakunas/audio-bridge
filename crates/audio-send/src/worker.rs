@@ -91,15 +91,8 @@ fn write_frame_interruptible(
     evt_tx: &Sender<Event>,
     paused: &mut bool,
 ) -> Result<Flow> {
-    let mut frame = Vec::with_capacity(1 + 4 + payload.len());
-    frame.push(kind as u8);
-    let len: u32 = payload
-        .len()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("payload too large"))?;
-    frame.extend_from_slice(&len.to_le_bytes());
-    frame.extend_from_slice(payload);
-
+    let frame = audio_bridge_proto::encode_frame(kind, payload)
+        .context("encode frame")?;
     write_all_interruptible(stream, &frame, cmd_rx, evt_tx, paused)
 }
 

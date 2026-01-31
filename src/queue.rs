@@ -39,6 +39,16 @@ struct SharedInner {
     done: bool,
 }
 
+/// Strategy for popping interleaved frames from the queue.
+pub(crate) enum PopStrategy {
+    /// Block until exactly `frames` are available, or return `None` if closed before enough data.
+    BlockingExact { frames: usize },
+    /// Block until at least one frame is available, then return up to `max_frames`.
+    BlockingUpTo { max_frames: usize },
+    /// Return immediately with up to `max_frames`, or `None` if currently empty.
+    NonBlocking { max_frames: usize },
+}
+
 /// Compute a conservative queue capacity in **samples** for a `(rate, channels, seconds)` target.
 ///
 /// This is used to size bounded queues for decode/resample stages.
@@ -125,93 +135,77 @@ impl SharedAudio {
         }
     }
 
-    /// Pop exactly `frames` frames (interleaved), blocking until enough data is available.
+    /// Pop interleaved frames using the requested strategy.
     ///
-    /// Returns:
-    /// - `Some(Vec<f32>)` with length `frames * channels` when successful.
-    /// - `None` when the queue is closed and there isn’t enough buffered data to satisfy the request.
-    ///
-    /// Use this when a downstream stage expects fixed-size chunks.
-    pub(crate) fn pop_interleaved_frames_blocking(&self, frames: usize) -> Option<Vec<f32>> {
-        let want = frames * self.channels;
-        let mut g = self.inner.lock().unwrap();
+    /// Returns `None` when the queue is closed and no data can satisfy the request.
+    pub(crate) fn pop(&self, strategy: PopStrategy) -> Option<Vec<f32>> {
+        match strategy {
+            PopStrategy::BlockingExact { frames } => {
+                let want = frames * self.channels;
+                let mut g = self.inner.lock().unwrap();
 
-        while g.queue.len() < want && !g.done {
-            g = self.cv.wait(g).unwrap();
+                while g.queue.len() < want && !g.done {
+                    g = self.cv.wait(g).unwrap();
+                }
+
+                if g.queue.len() < want {
+                    return None;
+                }
+
+                let mut out = Vec::with_capacity(want);
+                for _ in 0..want {
+                    out.push(g.queue.pop_front().unwrap_or(0.0));
+                }
+
+                drop(g);
+                self.cv.notify_all();
+                Some(out)
+            }
+            PopStrategy::BlockingUpTo { max_frames } => {
+                let mut g = self.inner.lock().unwrap();
+
+                while g.queue.is_empty() && !g.done {
+                    g = self.cv.wait(g).unwrap();
+                }
+
+                if g.queue.is_empty() && g.done {
+                    return None;
+                }
+
+                let available_frames = g.queue.len() / self.channels;
+                let take_frames = available_frames.min(max_frames);
+                let take_samples = take_frames * self.channels;
+
+                let mut out = Vec::with_capacity(take_samples);
+                for _ in 0..take_samples {
+                    out.push(g.queue.pop_front().unwrap_or(0.0));
+                }
+
+                drop(g);
+                self.cv.notify_all();
+                Some(out)
+            }
+            PopStrategy::NonBlocking { max_frames } => {
+                let mut g = self.inner.lock().unwrap();
+
+                let available_frames = g.queue.len() / self.channels;
+                let take_frames = available_frames.min(max_frames);
+                let take_samples = take_frames * self.channels;
+
+                if take_samples == 0 {
+                    return None;
+                }
+
+                let mut out = Vec::with_capacity(take_samples);
+                for _ in 0..take_samples {
+                    out.push(g.queue.pop_front().unwrap_or(0.0));
+                }
+
+                drop(g);
+                self.cv.notify_all();
+                Some(out)
+            }
         }
-
-        if g.queue.len() < want {
-            return None;
-        }
-
-        let mut out = Vec::with_capacity(want);
-        for _ in 0..want {
-            out.push(g.queue.pop_front().unwrap_or(0.0));
-        }
-
-        drop(g);
-        self.cv.notify_all();
-        Some(out)
-    }
-
-    /// Pop up to `max_frames` frames (interleaved), blocking until *some* data is available.
-    ///
-    /// Returns:
-    /// - `Some(Vec<f32>)` containing **at least one frame** and at most `max_frames` frames.
-    /// - `None` only when the queue is **closed** and **empty** (`done && empty`).
-    ///
-    /// This is ideal for draining “tail” audio without polling/sleep loops.
-    pub(crate) fn pop_up_to_frames_blocking(&self, max_frames: usize) -> Option<Vec<f32>> {
-        let mut g = self.inner.lock().unwrap();
-
-        while g.queue.is_empty() && !g.done {
-            g = self.cv.wait(g).unwrap();
-        }
-
-        if g.queue.is_empty() && g.done {
-            return None;
-        }
-
-        let available_frames = g.queue.len() / self.channels;
-        let take_frames = available_frames.min(max_frames);
-        let take_samples = take_frames * self.channels;
-
-        let mut out = Vec::with_capacity(take_samples);
-        for _ in 0..take_samples {
-            out.push(g.queue.pop_front().unwrap_or(0.0));
-        }
-
-        drop(g);
-        self.cv.notify_all();
-        Some(out)
-    }
-
-    /// Try to pop up to `max_frames` frames (interleaved) without blocking.
-    ///
-    /// Returns:
-    /// - `Some(Vec<f32>)` if any frames were available.
-    /// - `None` if the queue is currently empty (regardless of whether it is closed).
-    ///
-    /// This is designed for real-time contexts (e.g., CPAL callbacks) where blocking is not allowed.
-    pub(crate) fn try_pop_up_to_frames(&self, max_frames: usize) -> Option<Vec<f32>> {
-        let mut g = self.inner.lock().unwrap();
-
-        let available_frames = g.queue.len() / self.channels;
-        let take_frames = available_frames.min(max_frames);
-        let take_samples = take_frames * self.channels;
-
-        if take_samples == 0 {
-            return None;
-        }
-
-        let mut out = Vec::with_capacity(take_samples);
-        for _ in 0..take_samples {
-            out.push(g.queue.pop_front().unwrap_or(0.0));
-        }
-
-        drop(g);
-        self.cv.notify_all();
-        Some(out)
     }
 }
 

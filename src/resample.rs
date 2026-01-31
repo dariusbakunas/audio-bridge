@@ -15,7 +15,7 @@ use rubato::{
 };
 use symphonia::core::audio::SignalSpec;
 
-use crate::queue::{calc_max_buffered_samples, SharedAudio};
+use crate::queue::{calc_max_buffered_samples, PopStrategy, SharedAudio};
 
 /// Configuration for the streaming resampler stage.
 #[derive(Clone, Copy, Debug)]
@@ -102,7 +102,7 @@ pub(crate) fn start_resampler(
         };
 
         loop {
-            let interleaved = match srcq.pop_interleaved_frames_blocking(chunk_in_frames) {
+            let interleaved = match srcq.pop(PopStrategy::BlockingExact { frames: chunk_in_frames }) {
                 Some(v) => v,
                 None => break,
             };
@@ -149,7 +149,7 @@ pub(crate) fn start_resampler(
             dstq_thread.push_interleaved_blocking(&out_interleaved[..produced_samples]);
         }
 
-        while let Some(tail) = srcq.pop_up_to_frames_blocking(chunk_in_frames) {
+        while let Some(tail) = srcq.pop(PopStrategy::BlockingUpTo { max_frames: chunk_in_frames }) {
             let tail_frames = tail.len() / channels;
             if tail_frames == 0 {
                 continue;
