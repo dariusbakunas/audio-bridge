@@ -47,10 +47,14 @@ pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
 /// The file ends when `END_FILE` is received (not EOF).
 pub(crate) fn recv_one_framed_file_as_media_source(
     mut stream: TcpStream,
-) -> Result<(IncomingStreamInfo, Box<dyn MediaSource>, Arc<AtomicBool>)> {
+) -> Result<(IncomingStreamInfo, Box<dyn MediaSource>, Arc<AtomicBool>, Arc<AtomicBool>, TcpStream)> {
     audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
 
+    // Clone for receiver->sender messages (playback progress, etc.)
+    let peer_tx = stream.try_clone().context("try_clone TcpStream for peer_tx")?;
+
     let paused = Arc::new(AtomicBool::new(false));
+    let cancel = Arc::new(AtomicBool::new(false));
 
     // Expect BEGIN_FILE first.
     let (kind, len) = audio_bridge_proto::read_frame_header(&mut stream).context("read frame header")?;
@@ -89,8 +93,9 @@ pub(crate) fn recv_one_framed_file_as_media_source(
 
     let progress_writer = progress.clone();
     let paused_writer = paused.clone();
+    let cancel_writer = cancel.clone();
     thread::spawn(move || {
-        if let Err(e) = writer_thread_main_framed(&mut stream, &writer_path, &progress_writer, &paused_writer) {
+        if let Err(e) = writer_thread_main_framed(&mut stream, &writer_path, &progress_writer, &paused_writer, &cancel_writer) {
             eprintln!("Network writer error: {e:#}");
         }
         let (lock, cv) = &*progress_writer;
@@ -111,6 +116,8 @@ pub(crate) fn recv_one_framed_file_as_media_source(
         IncomingStreamInfo { hint, temp_path },
         source,
         paused,
+        cancel,
+        peer_tx
     ))
 }
 
@@ -119,6 +126,7 @@ fn writer_thread_main_framed(
     path: &PathBuf,
     progress: &Arc<(Mutex<Progress>, Condvar)>,
     paused: &Arc<AtomicBool>,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
     let mut f = OpenOptions::new()
         .append(true)
@@ -189,11 +197,21 @@ fn writer_thread_main_framed(
                 paused.store(false, Ordering::Relaxed);
             }
             audio_bridge_proto::FrameKind::Next => {
-                // Treat NEXT as “stop accepting control frames for this track/session”.
                 if len != 0 {
                     let mut junk = vec![0u8; len as usize];
                     stream.read_exact(&mut junk).ok();
                 }
+
+                // Signal "skip immediately".
+                cancel.store(true, Ordering::Relaxed);
+
+                // Also mark file done so decoder can stop waiting for more bytes.
+                let (lock, cv) = &**progress;
+                let mut g = lock.lock().unwrap();
+                g.done = true;
+                drop(g);
+                cv.notify_all();
+
                 break;
             }
             audio_bridge_proto::FrameKind::BeginFile => {
@@ -205,6 +223,14 @@ fn writer_thread_main_framed(
                 let mut msg = vec![0u8; len as usize];
                 stream.read_exact(&mut msg).ok();
                 return Err(anyhow!("Sender sent ERROR: {}", String::from_utf8_lossy(&msg)));
+            }
+            audio_bridge_proto::FrameKind::TrackInfo
+            | audio_bridge_proto::FrameKind::PlaybackPos => {
+                // These are receiver→sender frames; if a sender sends them, ignore but stay in sync.
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
             }
         }
     }

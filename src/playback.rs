@@ -7,7 +7,7 @@
 //! - converts `f32` samples to the device sample format
 
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use anyhow::{anyhow, Result};
 use cpal::traits::DeviceTrait;
 
@@ -25,6 +25,9 @@ pub(crate) struct PlaybackConfig {
     ///
     /// This implements “pause means pause” (no skipping ahead).
     pub(crate) paused: Option<Arc<AtomicBool>>,
+
+    /// When set, the callback increments this by the number of output frames produced.
+    pub(crate) played_frames: Option<Arc<AtomicU64>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -77,6 +80,7 @@ where
     let refill_max_frames = cfg.refill_max_frames.max(1);
     let dstq_cb = dstq.clone();
     let paused_flag = cfg.paused.clone();
+    let played_frames = cfg.played_frames.clone();
 
     let err_fn = |err| eprintln!("Stream error: {err}");
 
@@ -86,7 +90,6 @@ where
         move |data: &mut [T], _| {
             if let Some(p) = &paused_flag {
                 if p.load(Ordering::Relaxed) {
-                    // Output silence and do not drain `dstq_cb`.
                     data.fill(<T as cpal::Sample>::from_sample::<f32>(0.0));
                     return;
                 }
@@ -112,10 +115,15 @@ where
                         <T as cpal::Sample>::from_sample::<f32>(sample_f32);
                 }
             }
+
+            if let Some(counter) = &played_frames {
+                counter.fetch_add(frames as u64, Ordering::Relaxed);
+            }
         },
         err_fn,
         None,
     )?;
+
 
     Ok(stream)
 }

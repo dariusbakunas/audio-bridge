@@ -11,6 +11,8 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// Thread-safe bounded queue for interleaved `f32` audio samples.
 ///
@@ -227,5 +229,27 @@ pub(crate) fn wait_until_done_and_empty(q: &Arc<SharedAudio>) {
     let mut g = q.inner.lock().unwrap();
     while !(g.done && g.queue.is_empty()) {
         g = q.cv.wait(g).unwrap();
+    }
+}
+
+/// Block until `q` is closed+empty OR `cancel` becomes true.
+///
+/// Returns `true` if queue drained normally, `false` if cancelled.
+pub(crate) fn wait_until_done_and_empty_or_cancel(q: &Arc<SharedAudio>, cancel: &Arc<AtomicBool>) -> bool {
+    let mut g = q.inner.lock().unwrap();
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        if g.done && g.queue.is_empty() {
+            return true;
+        }
+
+        let (ng, _timeout) = q
+            .cv
+            .wait_timeout(g, Duration::from_millis(50))
+            .unwrap();
+        g = ng;
     }
 }

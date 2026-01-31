@@ -59,6 +59,12 @@ struct App {
 
     status: String,
     last_progress: Option<(u64, Option<u64>)>, // sent, total
+
+    remote_sample_rate: Option<u32>,
+    remote_channels: Option<u16>,
+    remote_duration_ms: Option<u64>,
+    remote_played_frames: Option<u64>,
+    remote_paused: Option<bool>,
 }
 
 impl App {
@@ -75,6 +81,11 @@ impl App {
             list_state,
             status: "Ready".into(),
             last_progress: None,
+            remote_sample_rate: None,
+            remote_channels: None,
+            remote_duration_ms: None,
+            remote_played_frames: None,
+            remote_paused: None,
         }
     }
 
@@ -130,6 +141,15 @@ fn ui_loop(
             match ev {
                 Event::Status(s) => app.status = s,
                 Event::Progress { sent, total } => app.last_progress = Some((sent, total)),
+                Event::RemoteTrackInfo { sample_rate, channels, duration_ms } => {
+                    app.remote_sample_rate = Some(sample_rate);
+                    app.remote_channels = Some(channels);
+                    app.remote_duration_ms = duration_ms;
+                }
+                Event::RemotePlaybackPos { played_frames, paused } => {
+                    app.remote_played_frames = Some(played_frames);
+                    app.remote_paused = Some(paused);
+                }
                 Event::Error(e) => app.status = format!("Error: {e}"),
             }
         }
@@ -188,6 +208,21 @@ fn ui_loop(
 }
 
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
+    let remote_line = match (app.remote_played_frames, app.remote_sample_rate, app.remote_duration_ms, app.remote_paused) {
+        (Some(fr), Some(sr), dur, Some(p)) if sr > 0 => {
+            let elapsed_ms = (fr as f64 * 1000.0) / (sr as f64);
+            let state = if p { "paused" } else { "playing" };
+            match dur {
+                Some(total_ms) if total_ms > 0 => {
+                    let pct = (elapsed_ms / total_ms as f64 * 100.0).clamp(0.0, 100.0);
+                    format!("remote: {:.1}s / {:.1}s ({:.1}%) [{state}]", elapsed_ms / 1000.0, total_ms as f64 / 1000.0, pct)
+                }
+                _ => format!("remote: {:.1}s [{state}]", elapsed_ms / 1000.0),
+            }
+        }
+        _ => "remote: -".to_string(),
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(5), Constraint::Length(3)])
@@ -224,6 +259,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let footer = Paragraph::new(vec![
         Line::from(format!("status: {}", app.status)),
         Line::from(progress_line),
+        Line::from(remote_line),
         Line::from("keys: ↑/↓ select | Enter play | Space pause | n next | r rescan | q quit"),
     ])
         .block(Block::default().borders(Borders::ALL).title("Status"));

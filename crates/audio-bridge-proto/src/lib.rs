@@ -29,6 +29,12 @@ pub enum FrameKind {
     Resume = 0x21,
     Next = 0x23,
 
+    /// Receiver → sender: basic track metadata (so UI can show duration/progress).
+    TrackInfo = 0x30,
+
+    /// Receiver → sender: playback position updates.
+    PlaybackPos = 0x31,
+
     Error = 0x7F,
 }
 
@@ -41,6 +47,8 @@ impl FrameKind {
             0x20 => FrameKind::Pause,
             0x21 => FrameKind::Resume,
             0x23 => FrameKind::Next,
+            0x30 => FrameKind::TrackInfo,
+            0x31 => FrameKind::PlaybackPos,
             0x7F => FrameKind::Error,
             _ => {
                 return Err(io::Error::new(
@@ -140,4 +148,50 @@ pub fn decode_begin_file_payload(mut payload: &[u8]) -> io::Result<String> {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "extension not utf-8"))?;
 
     Ok(ext.to_string())
+}
+
+/// Encode `TRACK_INFO` payload:
+/// - sample_rate: u32 LE
+/// - channels:    u16 LE
+/// - duration_ms: u64 LE (0 means unknown)
+pub fn encode_track_info(sample_rate: u32, channels: u16, duration_ms: Option<u64>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + 2 + 8);
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&duration_ms.unwrap_or(0).to_le_bytes());
+    out
+}
+
+/// Decode `TRACK_INFO` payload.
+pub fn decode_track_info(payload: &[u8]) -> io::Result<(u32, u16, Option<u64>)> {
+    if payload.len() != 14 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad TRACK_INFO length"));
+    }
+    let sr = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let ch = u16::from_le_bytes([payload[4], payload[5]]);
+    let dur = u64::from_le_bytes([
+        payload[6], payload[7], payload[8], payload[9], payload[10], payload[11], payload[12], payload[13],
+    ]);
+    Ok((sr, ch, if dur == 0 { None } else { Some(dur) }))
+}
+
+/// Encode `PLAYBACK_POS` payload:
+/// - played_frames: u64 LE (at device/output rate)
+/// - paused:        u8 (0/1)
+pub fn encode_playback_pos(played_frames: u64, paused: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + 1);
+    out.extend_from_slice(&played_frames.to_le_bytes());
+    out.push(if paused { 1 } else { 0 });
+    out
+}
+
+/// Decode `PLAYBACK_POS` payload.
+pub fn decode_playback_pos(payload: &[u8]) -> io::Result<(u64, bool)> {
+    if payload.len() != 9 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad PLAYBACK_POS length"));
+    }
+    let frames = u64::from_le_bytes([
+        payload[0], payload[1], payload[2], payload[3], payload[4], payload[5], payload[6], payload[7],
+    ]);
+    Ok((frames, payload[8] != 0))
 }
