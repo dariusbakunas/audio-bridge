@@ -3,14 +3,16 @@
 //! This module contains the `clap`-powered CLI surface area (args + defaults).
 //! It intentionally has no audio logic so the rest of the crate can stay reusable.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
+#[command(name = "audio-bridge")]
 pub struct Args {
-    /// Path to audio file (FLAC recommended)
-    pub path: PathBuf,
+    #[command(subcommand)]
+    pub cmd: Command,
 
     /// List output devices and exit
     #[arg(long)]
@@ -31,4 +33,20 @@ pub struct Args {
     /// Queue buffer target in seconds (per stage)
     #[arg(long, default_value_t = 2.0)]
     pub buffer_seconds: f32,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Play a local file (current behavior)
+    Play {
+        /// Path to audio file (FLAC recommended)
+        path: PathBuf,
+    },
+
+    /// Listen for a TCP connection and play exactly one streamed file per connection
+    Listen {
+        /// Address to bind, e.g. 0.0.0.0:5555
+        #[arg(long, default_value = "0.0.0.0:5555")]
+        bind: SocketAddr,
+    },
 }

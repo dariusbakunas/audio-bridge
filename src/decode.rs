@@ -21,34 +21,24 @@ use symphonia::core::{
     probe::Hint,
 };
 use symphonia::core::audio::{SampleBuffer, Signal};
-
+use symphonia::core::codecs::CodecParameters;
+use symphonia::core::io::MediaSource;
 use crate::queue::{calc_max_buffered_samples, SharedAudio};
 
-/// Start a background decoder thread that streams interleaved `f32` samples from `path`.
+/// Start decoding from an arbitrary Symphonia [`MediaSource`] (seekable or not).
 ///
-/// Returns:
-/// - The detected [`SignalSpec`] (source sample rate + channel layout).
-/// - A [`SharedAudio`] queue containing decoded interleaved samples.
+/// This is the shared entry point used by both:
+/// - local file playback
+/// - network-spooled playback
 ///
-/// ## Threading & shutdown
-/// - Spawns one thread.
-/// - On EOF or error, the queue is closed via [`SharedAudio::close`].
-///
-/// ## Buffering
-/// `buffer_seconds` controls the bounded queue capacity, providing headroom to absorb
-/// jitter from disk I/O and decoding.
-pub(crate) fn start_streaming_decode(
-    path: &PathBuf,
+/// The queue is closed on EOF or error.
+pub(crate) fn start_streaming_decode_from_media_source(
+    source: Box<dyn MediaSource>,
+    hint: Hint,
     buffer_seconds: f32,
 ) -> Result<(SignalSpec, Arc<SharedAudio>)> {
     // Probe once to get spec.
-    let file = File::open(path).with_context(|| format!("open {:?}", path))?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
+    let mss = MediaSourceStream::new(source, Default::default());
 
     let probed = symphonia::default::get_probe().format(
         &hint,
@@ -75,20 +65,64 @@ pub(crate) fn start_streaming_decode(
 
     let spec = SignalSpec::new(rate, track.codec_params.channels.unwrap());
 
+    let codec_params: CodecParameters = track.codec_params.clone();
+
     let max_buffered_samples = calc_max_buffered_samples(rate, channels, buffer_seconds);
     let shared = Arc::new(SharedAudio::new(channels, max_buffered_samples));
 
-    let path_for_thread = path.clone();
     let shared_for_thread = shared.clone();
 
     thread::spawn(move || {
-        if let Err(e) = decode_thread_main(&path_for_thread, &shared_for_thread) {
+        if let Err(e) = decode_format_loop(format, codec_params, &shared_for_thread) {
             eprintln!("Decoder thread error: {e:#}");
         }
         shared_for_thread.close();
     });
 
     Ok((spec, shared))
+}
+
+/// Start a background decoder thread that streams interleaved `f32` samples from `path`.
+pub(crate) fn start_streaming_decode(
+    path: &PathBuf,
+    buffer_seconds: f32,
+) -> Result<(SignalSpec, Arc<SharedAudio>)> {
+    let file = File::open(path).with_context(|| format!("open {:?}", path))?;
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    start_streaming_decode_from_media_source(Box::new(file), hint, buffer_seconds)
+}
+
+fn decode_format_loop(
+    mut format: Box<dyn symphonia::core::formats::FormatReader>,
+    codec_params: CodecParameters,
+    shared: &Arc<SharedAudio>,
+) -> Result<()> {
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&codec_params, &DecoderOptions::default())?;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(_) => break, // EOF
+        };
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let mut sample_buf = SampleBuffer::<f32>::new(decoded.frames() as u64, *decoded.spec());
+        sample_buf.copy_interleaved_ref(decoded);
+
+        shared.push_interleaved_blocking(sample_buf.samples());
+    }
+
+    Ok(())
 }
 
 /// Decoder thread main loop.
