@@ -2,7 +2,7 @@
 //!
 //! Design goals:
 //! - UI always stays responsive.
-//! - "Next" is immediate: abort current send by dropping the socket and reconnecting.
+//! - "Next" is immediate: cancel current session via NEXT frame (no reconnect).
 //! - Pause/resume uses protocol frames; receiver pauses playback by not draining audio.
 
 use std::fs::File;
@@ -31,14 +31,10 @@ pub enum Event {
     Error(String),
 }
 
-/// What `send_one_track_session` wants the outer loop to do next.
 #[derive(Debug)]
-enum SessionOutcome {
-    /// End the current session and wait for the next command.
-    Done,
-    /// Immediately start another track without requiring another keypress.
+enum Flow {
+    Continue,
     SwitchTo { path: PathBuf, ext_hint: String },
-    /// Quit the worker.
     Quit,
 }
 
@@ -48,36 +44,35 @@ fn write_all_interruptible(
     cmd_rx: &Receiver<Command>,
     evt_tx: &Sender<Event>,
     paused: &mut bool,
-) -> Result<SessionOutcome> {
+) -> Result<Flow> {
     let mut off = 0usize;
 
     while off < buf.len() {
-        // Allow control to interrupt a blocked send.
         match cmd_rx.try_recv() {
-            Ok(Command::Quit) => return Ok(SessionOutcome::Quit),
-            Ok(Command::Next) => return Ok(SessionOutcome::Done),
-            Ok(Command::Play { path, ext_hint }) => return Ok(SessionOutcome::SwitchTo { path, ext_hint }),
+            Ok(Command::Quit) => return Ok(Flow::Quit),
+            Ok(Command::Next) => return Ok(Flow::Continue), // caller will send NEXT
+            Ok(Command::Play { path, ext_hint }) => return Ok(Flow::SwitchTo { path, ext_hint }),
             Ok(Command::PauseToggle) => {
                 *paused = !*paused;
-                // We'll send PAUSE/RESUME as a separate control frame from the main loop;
-                // here we just update local state + UI.
+                let kind = if *paused {
+                    audio_bridge_proto::FrameKind::Pause
+                } else {
+                    audio_bridge_proto::FrameKind::Resume
+                };
+                audio_bridge_proto::write_frame(&mut *stream, kind, &[])
+                    .with_context(|| format!("write {kind:?}"))?;
                 evt_tx
                     .send(Event::Status(if *paused { "Paused".into() } else { "Playing".into() }))
                     .ok();
             }
             Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => return Ok(SessionOutcome::Quit),
+            Err(TryRecvError::Disconnected) => return Ok(Flow::Quit),
         }
 
         match stream.write(&buf[off..]) {
-            Ok(0) => {
-                return Err(anyhow::anyhow!("socket closed while writing")).map_err(Into::into);
-            }
-            Ok(n) => {
-                off += n;
-            }
+            Ok(0) => return Err(anyhow::anyhow!("socket closed while writing")).map_err(Into::into),
+            Ok(n) => off += n,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
-                // Backpressure: yield and retry (do NOT restart the frame).
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
@@ -85,7 +80,7 @@ fn write_all_interruptible(
         }
     }
 
-    Ok(SessionOutcome::Done)
+    Ok(Flow::Continue)
 }
 
 fn write_frame_interruptible(
@@ -95,7 +90,7 @@ fn write_frame_interruptible(
     cmd_rx: &Receiver<Command>,
     evt_tx: &Sender<Event>,
     paused: &mut bool,
-) -> Result<SessionOutcome> {
+) -> Result<Flow> {
     let mut frame = Vec::with_capacity(1 + 4 + payload.len());
     frame.push(kind as u8);
     let len: u32 = payload
@@ -108,72 +103,19 @@ fn write_frame_interruptible(
     write_all_interruptible(stream, &frame, cmd_rx, evt_tx, paused)
 }
 
-pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<Event>) {
-    let mut paused = false;
-    let mut pending: Option<Command> = None;
-
-    loop {
-        let cmd = if let Some(c) = pending.take() {
-            c
-        } else {
-            match cmd_rx.recv() {
-                Ok(c) => c,
-                Err(_) => break,
-            }
-        };
-
-        match cmd {
-            Command::Quit => break,
-
-            Command::PauseToggle => {
-                paused = !paused;
-                let _ = evt_tx.send(Event::Status(if paused { "Paused".into() } else { "Playing".into() }));
-            }
-
-            Command::Next => {
-                let _ = evt_tx.send(Event::Status("Next requested".into()));
-            }
-
-            Command::Play { path, ext_hint } => {
-                match send_one_track_session(addr, &cmd_rx, &evt_tx, &mut paused, path, ext_hint) {
-                    Ok(SessionOutcome::Done) => {}
-                    Ok(SessionOutcome::Quit) => break,
-                    Ok(SessionOutcome::SwitchTo { path, ext_hint }) => {
-                        pending = Some(Command::Play { path, ext_hint });
-                    }
-                    Err(e) => {
-                        let _ = evt_tx.send(Event::Error(format!("{e:#}")));
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn send_one_track_session(
-    addr: SocketAddr,
-    cmd_rx: &Receiver<Command>,
-    evt_tx: &Sender<Event>,
-    paused: &mut bool,
-    path: PathBuf,
-    ext_hint: String,
-) -> Result<SessionOutcome> {
+fn connect_and_spawn_rx(addr: SocketAddr, evt_tx: &Sender<Event>) -> Result<TcpStream> {
     evt_tx.send(Event::Status(format!("Connecting to {addr}..."))).ok();
 
     let mut stream = TcpStream::connect(addr).with_context(|| format!("connect {addr}"))?;
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_millis(200))).ok();
 
-    // Handshake: write then read (symmetric; avoids deadlocks and fails fast on mismatch).
+    // Handshake once per connection.
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
-
-    // Clone for receiver->sender frames.
     let mut stream_rx = stream.try_clone().context("try_clone stream for rx")?;
-
-    // Complete handshake before sending any frames like BEGIN_FILE.
     audio_bridge_proto::read_prelude(&mut stream_rx).context("read prelude")?;
 
-    // Read-back thread for receiver -> sender frames.
+    // One long-lived read-back thread: receiver -> sender frames.
     let evt_tx_rx = evt_tx.clone();
     std::thread::spawn(move || {
         loop {
@@ -197,7 +139,10 @@ fn send_one_track_session(
                 }
                 audio_bridge_proto::FrameKind::PlaybackPos => {
                     if let Ok((frames, paused)) = audio_bridge_proto::decode_playback_pos(&payload) {
-                        let _ = evt_tx_rx.send(Event::RemotePlaybackPos { played_frames: frames, paused });
+                        let _ = evt_tx_rx.send(Event::RemotePlaybackPos {
+                            played_frames: frames,
+                            paused,
+                        });
                     }
                 }
                 _ => {}
@@ -205,22 +150,36 @@ fn send_one_track_session(
         }
     });
 
-    let begin = audio_bridge_proto::encode_begin_file_payload(&ext_hint).context("encode BEGIN_FILE")?;
+    evt_tx.send(Event::Status("Connected".into())).ok();
+    Ok(stream)
+}
 
+fn send_one_track_over_existing_connection(
+    stream: &mut TcpStream,
+    cmd_rx: &Receiver<Command>,
+    evt_tx: &Sender<Event>,
+    paused: &mut bool,
+    path: PathBuf,
+    ext_hint: String,
+) -> Result<Flow> {
+    // Hard cut whatever the receiver is doing right now.
+    let _ = audio_bridge_proto::write_frame(&mut *stream, audio_bridge_proto::FrameKind::Next, &[]);
+
+    let begin = audio_bridge_proto::encode_begin_file_payload(&ext_hint).context("encode BEGIN_FILE")?;
     match write_frame_interruptible(
-        &mut stream,
+        stream,
         audio_bridge_proto::FrameKind::BeginFile,
         &begin,
         cmd_rx,
         evt_tx,
         paused,
     )? {
-        SessionOutcome::Done => {}
+        Flow::Continue => {}
         other => return Ok(other),
     }
 
     if *paused {
-        audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Pause, &[])
+        audio_bridge_proto::write_frame(&mut *stream, audio_bridge_proto::FrameKind::Pause, &[])
             .context("write PAUSE")?;
     }
 
@@ -232,116 +191,119 @@ fn send_one_track_session(
         .ok();
 
     let meta_len = std::fs::metadata(&path).ok().map(|m| m.len());
-
     let mut f = File::open(&path).with_context(|| format!("open {:?}", path))?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
 
-    'send_loop: loop {
-        loop {
-            match cmd_rx.try_recv() {
-                Ok(Command::Quit) => {
-                    evt_tx.send(Event::Status("Quit".into())).ok();
-                    return Ok(SessionOutcome::Quit);
-                }
-                Ok(Command::Next) => {
-                    evt_tx.send(Event::Status("Skipping (next)".into())).ok();
-                    *paused = false; // don't carry pause into the next track
-                    let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                    return Ok(SessionOutcome::Done);
-                }
-                Ok(Command::Play { path, ext_hint }) => {
-                    evt_tx.send(Event::Status("Switching track".into())).ok();
-                    *paused = false; // new track should start playing immediately
-                    let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                    return Ok(SessionOutcome::SwitchTo { path, ext_hint });
-                }
-                Ok(Command::PauseToggle) => {
-                    *paused = !*paused;
-                    let kind = if *paused {
-                        audio_bridge_proto::FrameKind::Pause
-                    } else {
-                        audio_bridge_proto::FrameKind::Resume
-                    };
-                    audio_bridge_proto::write_frame(&mut stream, kind, &[])
-                        .with_context(|| format!("write {kind:?}"))?;
-                    evt_tx.send(Event::Status(if *paused { "Paused".into() } else { "Playing".into() })).ok();
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return Ok(SessionOutcome::Quit),
-            }
-        }
-
+    loop {
         let n = f.read(&mut buf).context("read file")?;
         if n == 0 {
-            break 'send_loop;
+            break;
         }
 
         match write_frame_interruptible(
-            &mut stream,
+            stream,
             audio_bridge_proto::FrameKind::FileChunk,
             &buf[..n],
             cmd_rx,
             evt_tx,
             paused,
         )? {
-            SessionOutcome::Done => {
+            Flow::Continue => {
                 sent = sent.saturating_add(n as u64);
                 evt_tx.send(Event::Progress { sent, total: meta_len }).ok();
             }
-            other => {
-                // Interrupt: tell receiver to stop this session and propagate.
-                let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                return Ok(other);
+            Flow::Quit => return Ok(Flow::Quit),
+            Flow::SwitchTo { path, ext_hint } => {
+                // Cancel current session at receiver, then switch immediately.
+                let _ = audio_bridge_proto::write_frame(stream, audio_bridge_proto::FrameKind::Next, &[]);
+                return Ok(Flow::SwitchTo { path, ext_hint });
             }
         }
     }
 
     match write_frame_interruptible(
-        &mut stream,
+        stream,
         audio_bridge_proto::FrameKind::EndFile,
         &[],
         cmd_rx,
         evt_tx,
         paused,
     )? {
-        SessionOutcome::Done => {}
+        Flow::Continue => {}
         other => return Ok(other),
     }
-    evt_tx.send(Event::Status("Sent (remote playing; controls active)".into())).ok();
 
-    // Control-only phase: keep connection open so PAUSE/RESUME works during playback.
+    evt_tx.send(Event::Status("Sent (remote playing; controls active)".into())).ok();
+    Ok(Flow::Continue)
+}
+
+pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<Event>) {
+    let mut paused = false;
+
+    let mut stream = match connect_and_spawn_rx(addr, &evt_tx) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = evt_tx.send(Event::Error(format!("{e:#}")));
+            return;
+        }
+    };
+
+    // Main control loop: no reconnects; just reuse the same stream.
     loop {
-        match cmd_rx.recv() {
-            Ok(Command::Quit) => {
+        let cmd = match cmd_rx.recv() {
+            Ok(c) => c,
+            Err(_) => break,
+        };
+
+        match cmd {
+            Command::Quit => {
                 let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                return Ok(SessionOutcome::Quit);
+                break;
             }
-            Ok(Command::Next) => {
-                *paused = false; // next track should start unpaused
-                let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                return Ok(SessionOutcome::Done);
-            }
-            Ok(Command::Play { path, ext_hint }) => {
-                *paused = false; // new track should start unpaused
-                let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                return Ok(SessionOutcome::SwitchTo { path, ext_hint });
-            }
-            Ok(Command::PauseToggle) => {
-                *paused = !*paused;
-                let kind = if *paused {
+            Command::PauseToggle => {
+                paused = !paused;
+                let kind = if paused {
                     audio_bridge_proto::FrameKind::Pause
                 } else {
                     audio_bridge_proto::FrameKind::Resume
                 };
-                if audio_bridge_proto::write_frame(&mut stream, kind, &[]).is_err() {
-                    return Ok(SessionOutcome::Done);
-                }
-                evt_tx.send(Event::Status(if *paused { "Paused".into() } else { "Playing".into() })).ok();
+                let _ = audio_bridge_proto::write_frame(&mut stream, kind, &[]);
+                let _ = evt_tx.send(Event::Status(if paused { "Paused".into() } else { "Playing".into() }));
             }
-            Err(_) => {
+            Command::Next => {
+                paused = false;
                 let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
-                return Ok(SessionOutcome::Quit);
+                let _ = evt_tx.send(Event::Status("Skipping (next)".into()));
+            }
+            Command::Play { path, ext_hint } => {
+                // New track should start playing (do not carry pause across tracks).
+                paused = false;
+
+                // Drive a sequence of immediate switches without requiring extra keypresses.
+                let mut pending = Some((path, ext_hint));
+                while let Some((p, e)) = pending.take() {
+                    match send_one_track_over_existing_connection(
+                        &mut stream,
+                        &cmd_rx,
+                        &evt_tx,
+                        &mut paused,
+                        p,
+                        e,
+                    ) {
+                        Ok(Flow::Continue) => {}
+                        Ok(Flow::Quit) => return,
+                        Ok(Flow::SwitchTo { path, ext_hint }) => {
+                            // Switching tracks should also start unpaused.
+                            paused = false;
+                            pending = Some((path, ext_hint));
+                        }
+                        Err(err) => {
+                            let _ = evt_tx.send(Event::Error(format!("{err:#}")));
+                            return;
+                        }
+                    }
+                }
             }
         }
     }

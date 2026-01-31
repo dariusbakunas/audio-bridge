@@ -52,7 +52,7 @@ fn main() -> Result<()> {
         }
         cli::Command::Listen { bind } => {
             let listener = TcpListener::bind(*bind).with_context(|| format!("bind {bind}"))?;
-            eprintln!("Listening on {bind} (one file per connection) ...");
+            eprintln!("Listening on {bind} (one client; many tracks per connection) ...");
 
             loop {
                 let stream = match net::accept_one(&listener) {
@@ -63,16 +63,89 @@ fn main() -> Result<()> {
                     }
                 };
 
-                if let Err(e) = play_one_network(&device, &config, &stream_config, &args, stream) {
-                    eprintln!("Playback error: {e:#}");
+                if let Err(e) = serve_one_client(&device, &config, &stream_config, &args, stream) {
+                    eprintln!("Client session error: {e:#}");
                 }
 
-                eprintln!("Ready for next connection...");
+                eprintln!("Client disconnected; ready for next connection...");
             }
         }
     }
 
     Ok(())
+}
+
+fn serve_one_client(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    stream_config: &cpal::StreamConfig,
+    args: &cli::Args,
+    stream: std::net::TcpStream,
+) -> Result<()> {
+    let session_rx = net::run_one_client(stream)?;
+
+    while let Ok(sess) = session_rx.recv() {
+        if let Err(e) = play_one_network_session(device, config, stream_config, args, sess) {
+            eprintln!("Session playback error: {e:#}");
+        }
+    }
+
+    Ok(())
+}
+
+fn play_one_network_session(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    stream_config: &cpal::StreamConfig,
+    args: &cli::Args,
+    sess: net::NetSession,
+) -> Result<()> {
+    eprintln!("Incoming stream spooling to {:?}", sess.temp_path);
+
+    let file_for_read = std::fs::OpenOptions::new()
+        .read(true)
+        .open(&sess.temp_path)
+        .with_context(|| format!("open temp file for read {:?}", sess.temp_path))?;
+
+    // Reuse your existing blocking MediaSource idea.
+    let source: Box<dyn symphonia::core::io::MediaSource> =
+        Box::new(net::BlockingFileSource::new(file_for_read, sess.progress.clone()));
+
+    let (src_spec, srcq) = decode::start_streaming_decode_from_media_source(
+        source,
+        sess.hint.clone(),
+        args.buffer_seconds,
+    )?;
+
+    let track_info_payload = audio_bridge_proto::encode_track_info(
+        src_spec.rate,
+        src_spec.channels.count() as u16,
+        None,
+    );
+    let mut peer_tx = sess.peer_tx;
+    let _ = audio_bridge_proto::write_frame(
+        &mut peer_tx,
+        audio_bridge_proto::FrameKind::TrackInfo,
+        &track_info_payload,
+    );
+
+    let result = play_decoded_source_with_pause_and_progress(
+        device,
+        config,
+        stream_config,
+        args,
+        src_spec,
+        srcq,
+        sess.paused,
+        sess.cancel,
+        peer_tx,
+    );
+
+    if let Err(e) = std::fs::remove_file(&sess.temp_path) {
+        eprintln!("Temp cleanup warning: {e}");
+    }
+
+    result
 }
 
 fn play_one_local(

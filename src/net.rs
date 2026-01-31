@@ -14,6 +14,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
+use crossbeam_channel::{unbounded, Receiver};
 use symphonia::core::io::MediaSource;
 use symphonia::core::probe::Hint;
 
@@ -24,10 +25,256 @@ pub(crate) struct IncomingStreamInfo {
 }
 
 #[derive(Debug)]
-struct Progress {
+pub(crate) struct Progress {
     bytes_written: u64,
     done: bool,
 }
+
+/// A network session representing exactly one BEGIN_FILE..(FILE_CHUNK..)..(END_FILE or NEXT).
+///
+/// The TCP connection outlives sessions; sessions are created by the reader thread whenever it
+/// sees a new BEGIN_FILE.
+#[derive(Debug)]
+pub(crate) struct NetSession {
+    pub(crate) hint: Hint,
+    pub(crate) temp_path: PathBuf,
+    pub(crate) progress: Arc<(Mutex<Progress>, Condvar)>,
+    pub(crate) paused: Arc<AtomicBool>,
+    pub(crate) cancel: Arc<AtomicBool>,
+    pub(crate) peer_tx: TcpStream,
+}
+
+/// Start handling a single client connection, returning a channel of per-track sessions.
+///
+/// The returned channel yields one [`NetSession`] per `BEGIN_FILE`.
+/// When the client disconnects, the channel closes.
+pub(crate) fn run_one_client(mut stream: TcpStream) -> Result<Receiver<NetSession>> {
+    // Handshake once per connection.
+    audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
+    audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
+
+    // Clone for receiver->sender messages (TrackInfo, PlaybackPos).
+    let peer_tx = stream.try_clone().context("try_clone TcpStream for peer_tx")?;
+
+    let (session_tx, session_rx) = unbounded::<NetSession>();
+
+    thread::spawn(move || {
+        if let Err(e) = reader_thread_main(stream, peer_tx, session_tx) {
+            eprintln!("Connection reader ended: {e:#}");
+        }
+    });
+
+    Ok(session_rx)
+}
+
+fn reader_thread_main(
+    mut stream: TcpStream,
+    peer_tx: TcpStream,
+    session_tx: crossbeam_channel::Sender<NetSession>,
+) -> Result<()> {
+    loop {
+        // Wait for the next BEGIN_FILE.
+        let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream) {
+            Ok(x) => x,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(e).context("read frame header"),
+        };
+
+        match kind {
+            audio_bridge_proto::FrameKind::BeginFile => {
+                let mut payload = vec![0u8; len as usize];
+                stream.read_exact(&mut payload).context("read BEGIN_FILE payload")?;
+                let ext = audio_bridge_proto::decode_begin_file_payload(&payload).context("decode BEGIN_FILE")?;
+
+                let mut hint = Hint::new();
+                if !ext.is_empty() {
+                    hint.with_extension(&ext);
+                }
+
+                let temp_path = make_temp_path("audio-bridge-stream");
+                {
+                    let _ = OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(&temp_path)
+                        .with_context(|| format!("create temp file {:?}", temp_path))?;
+                }
+
+                let progress: Arc<(Mutex<Progress>, Condvar)> = Arc::new((
+                    Mutex::new(Progress {
+                        bytes_written: 0,
+                        done: false,
+                    }),
+                    Condvar::new(),
+                ));
+
+                let paused = Arc::new(AtomicBool::new(false));
+                let cancel = Arc::new(AtomicBool::new(false));
+
+                // Emit session immediately so playback can start while bytes arrive.
+                let session = NetSession {
+                    hint,
+                    temp_path: temp_path.clone(),
+                    progress: progress.clone(),
+                    paused: paused.clone(),
+                    cancel: cancel.clone(),
+                    peer_tx: peer_tx.try_clone().context("try_clone peer_tx for session")?,
+                };
+                if session_tx.send(session).is_err() {
+                    return Ok(());
+                }
+
+                // Now read frames for this session.
+                //
+                // IMPORTANT: after END_FILE we MUST keep reading control frames (NEXT/PAUSE/RESUME)
+                // while playback drains, otherwise "next track" won't cancel anything.
+                let mut writer = OpenOptions::new()
+                    .append(true)
+                    .open(&temp_path)
+                    .with_context(|| format!("open temp file for append {:?}", temp_path))?;
+
+                loop {
+                    let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream) {
+                        Ok(x) => x,
+                        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                            mark_done(&progress);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            mark_done(&progress);
+                            return Err(e).context("read frame header");
+                        }
+                    };
+
+                    match kind {
+                        audio_bridge_proto::FrameKind::FileChunk => {
+                            let mut buf = vec![0u8; len as usize];
+                            stream.read_exact(&mut buf).context("read FILE_CHUNK payload")?;
+
+                            // If already done/canceled, drop bytes but stay in sync.
+                            if cancel.load(Ordering::Relaxed) || is_done(&progress) {
+                                continue;
+                            }
+
+                            writer.write_all(&buf).context("write to temp file")?;
+                            writer.flush().ok();
+
+                            let (lock, cv) = &*progress;
+                            let mut g = lock.lock().unwrap();
+                            g.bytes_written = g.bytes_written.saturating_add(buf.len() as u64);
+                            drop(g);
+                            cv.notify_all();
+                        }
+
+                        audio_bridge_proto::FrameKind::EndFile => {
+                            if len != 0 {
+                                let mut junk = vec![0u8; len as usize];
+                                stream.read_exact(&mut junk).ok();
+                            }
+                            // Mark spooling done, but DO NOT exit the session loop.
+                            // We keep handling control frames while playback drains.
+                            mark_done(&progress);
+                        }
+
+                        audio_bridge_proto::FrameKind::Pause => {
+                            if len != 0 {
+                                let mut junk = vec![0u8; len as usize];
+                                stream.read_exact(&mut junk).ok();
+                            }
+                            paused.store(true, Ordering::Relaxed);
+                        }
+
+                        audio_bridge_proto::FrameKind::Resume => {
+                            if len != 0 {
+                                let mut junk = vec![0u8; len as usize];
+                                stream.read_exact(&mut junk).ok();
+                            }
+                            paused.store(false, Ordering::Relaxed);
+                        }
+
+                        audio_bridge_proto::FrameKind::Next => {
+                            if len != 0 {
+                                let mut junk = vec![0u8; len as usize];
+                                stream.read_exact(&mut junk).ok();
+                            }
+
+                            // Hard cut: cancel playback + stop caring about this session immediately.
+                            cancel.store(true, Ordering::Relaxed);
+                            mark_done(&progress);
+                            break; // back to outer loop, waiting for next BEGIN_FILE
+                        }
+
+                        audio_bridge_proto::FrameKind::BeginFile => {
+                            // Sender started a new track without an explicit NEXT.
+                            // Treat this as a hard cut + immediately start the next session.
+                            //
+                            // We already consumed the header; now consume its payload and then
+                            // cancel this session and "replay" by switching to the outer loop logic.
+                            let mut junk = vec![0u8; len as usize];
+                            stream.read_exact(&mut junk).ok();
+
+                            cancel.store(true, Ordering::Relaxed);
+                            mark_done(&progress);
+                            break;
+                        }
+
+                        audio_bridge_proto::FrameKind::Error => {
+                            let mut msg = vec![0u8; len as usize];
+                            stream.read_exact(&mut msg).ok();
+                            cancel.store(true, Ordering::Relaxed);
+                            mark_done(&progress);
+                            return Err(anyhow!("Sender sent ERROR: {}", String::from_utf8_lossy(&msg)));
+                        }
+
+                        audio_bridge_proto::FrameKind::TrackInfo | audio_bridge_proto::FrameKind::PlaybackPos => {
+                            if len != 0 {
+                                let mut junk = vec![0u8; len as usize];
+                                stream.read_exact(&mut junk).ok();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Ignore control frames while idle (no current session).
+            audio_bridge_proto::FrameKind::Pause
+            | audio_bridge_proto::FrameKind::Resume
+            | audio_bridge_proto::FrameKind::Next => {
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+                continue;
+            }
+
+            other => {
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+                eprintln!("Ignoring unexpected frame while idle: {other:?}");
+                continue;
+            }
+        }
+    }
+}
+
+fn mark_done(progress: &Arc<(Mutex<Progress>, Condvar)>) {
+    let (lock, cv) = &**progress;
+    let mut g = lock.lock().unwrap();
+    g.done = true;
+    drop(g);
+    cv.notify_all();
+}
+
+fn is_done(progress: &Arc<(Mutex<Progress>, Condvar)>) -> bool {
+    let (lock, _) = &**progress;
+    let g = lock.lock().unwrap();
+    g.done
+}
+
+
 
 /// Accept a single TCP connection from `listener`.
 pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
@@ -264,14 +511,14 @@ fn make_temp_path(prefix: &str) -> PathBuf {
 ///
 /// Reads will block (via a condition variable) until at least 1 byte is available at the
 /// current read position, or the writer marks the stream done.
-struct BlockingFileSource {
+pub(crate) struct BlockingFileSource {
     file: File,
     progress: Arc<(Mutex<Progress>, Condvar)>,
     pos: u64,
 }
 
 impl BlockingFileSource {
-    fn new(file: File, progress: Arc<(Mutex<Progress>, Condvar)>) -> Self {
+    pub(crate) fn new(file: File, progress: Arc<(Mutex<Progress>, Condvar)>) -> Self {
         Self { file, progress, pos: 0 }
     }
 
