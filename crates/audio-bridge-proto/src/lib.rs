@@ -204,3 +204,123 @@ pub fn decode_playback_pos(payload: &[u8]) -> io::Result<(u64, bool)> {
     ]);
     Ok((frames, payload[8] != 0))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn prelude_roundtrip_ok() {
+        let mut buf = Vec::new();
+        write_prelude(&mut buf).unwrap();
+        let mut cur = Cursor::new(buf);
+        read_prelude(&mut cur).unwrap();
+    }
+
+    #[test]
+    fn prelude_rejects_bad_magic() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"NOPE");
+        buf.extend_from_slice(&VERSION.to_le_bytes());
+        let mut cur = Cursor::new(buf);
+        let err = read_prelude(&mut cur).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn prelude_rejects_bad_version() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&MAGIC);
+        buf.extend_from_slice(&(VERSION + 1).to_le_bytes());
+        let mut cur = Cursor::new(buf);
+        let err = read_prelude(&mut cur).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn frame_encode_and_header_roundtrip() {
+        let payload = b"hello";
+        let frame = encode_frame(FrameKind::FileChunk, payload).unwrap();
+        let mut cur = Cursor::new(frame);
+        let (kind, len) = read_frame_header(&mut cur).unwrap();
+        assert_eq!(kind, FrameKind::FileChunk);
+        assert_eq!(len, payload.len() as u32);
+
+        let mut read_payload = vec![0u8; len as usize];
+        cur.read_exact(&mut read_payload).unwrap();
+        assert_eq!(read_payload, payload);
+    }
+
+    #[test]
+    fn write_frame_roundtrip() {
+        let payload = b"abc123";
+        let mut buf = Vec::new();
+        write_frame(&mut buf, FrameKind::BeginFile, payload).unwrap();
+
+        let mut cur = Cursor::new(buf);
+        let (kind, len) = read_frame_header(&mut cur).unwrap();
+        assert_eq!(kind, FrameKind::BeginFile);
+        assert_eq!(len, payload.len() as u32);
+        let mut read_payload = vec![0u8; len as usize];
+        cur.read_exact(&mut read_payload).unwrap();
+        assert_eq!(read_payload, payload);
+    }
+
+    #[test]
+    fn begin_file_payload_roundtrip() {
+        let ext = "flac";
+        let payload = encode_begin_file_payload(ext).unwrap();
+        let decoded = decode_begin_file_payload(&payload).unwrap();
+        assert_eq!(decoded, ext);
+    }
+
+    #[test]
+    fn begin_file_payload_rejects_short() {
+        let err = decode_begin_file_payload(&[0x00]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn begin_file_payload_rejects_len_mismatch() {
+        let payload = [0x02, 0x00, b'a']; // says len=2, only 1 byte provided
+        let err = decode_begin_file_payload(&payload).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn track_info_roundtrip() {
+        let payload = encode_track_info(48_000, 2, Some(123_456));
+        let (sr, ch, dur) = decode_track_info(&payload).unwrap();
+        assert_eq!(sr, 48_000);
+        assert_eq!(ch, 2);
+        assert_eq!(dur, Some(123_456));
+    }
+
+    #[test]
+    fn track_info_unknown_duration() {
+        let payload = encode_track_info(44_100, 1, None);
+        let (_sr, _ch, dur) = decode_track_info(&payload).unwrap();
+        assert_eq!(dur, None);
+    }
+
+    #[test]
+    fn track_info_rejects_bad_len() {
+        let err = decode_track_info(&[0u8; 10]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn playback_pos_roundtrip() {
+        let payload = encode_playback_pos(987_654, true);
+        let (frames, paused) = decode_playback_pos(&payload).unwrap();
+        assert_eq!(frames, 987_654);
+        assert!(paused);
+    }
+
+    #[test]
+    fn playback_pos_rejects_bad_len() {
+        let err = decode_playback_pos(&[0u8; 8]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+}

@@ -7,6 +7,20 @@
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 
+/// Select an output device and its default output config.
+///
+/// - If `needle` is `Some`, chooses the first output device whose name contains the substring
+///   (case-insensitive).
+/// - Otherwise, returns the host default output device.
+pub fn select_output(
+    host: &cpal::Host,
+    needle: Option<&str>,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
+    let device = pick_device(host, needle)?;
+    let config = device.default_output_config()?;
+    Ok((device, config))
+}
+
 /// Pick a CPAL output device.
 ///
 /// - If `needle` is `Some`, chooses the first output device whose name contains the substring

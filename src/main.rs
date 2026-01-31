@@ -38,10 +38,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let device = device::pick_device(&host, args.device.as_deref())?;
+    let (device, config) = device::select_output(&host, args.device.as_deref())?;
     eprintln!("Output device: {}", device.description()?);
-
-    let config = device.default_output_config()?;
     eprintln!("Device default config: {:?}", config);
     let stream_config: cpal::StreamConfig = config.clone().into();
 
