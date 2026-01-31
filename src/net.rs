@@ -32,10 +32,22 @@ pub(crate) struct Progress {
 pub(crate) struct NetSession {
     pub(crate) hint: Hint,
     pub(crate) temp_path: PathBuf,
+    pub(crate) control: SessionControl,
+    pub(crate) peer_tx: TcpStream,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SessionControl {
     pub(crate) progress: Arc<(Mutex<Progress>, Condvar)>,
     pub(crate) paused: Arc<AtomicBool>,
     pub(crate) cancel: Arc<AtomicBool>,
-    pub(crate) peer_tx: TcpStream,
+}
+
+impl SessionControl {
+    pub(crate) fn cancel_and_mark_done(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        mark_done(&self.progress);
+    }
 }
 
 /// Start handling a single client connection, returning a channel of per-track sessions.
@@ -105,14 +117,18 @@ fn reader_thread_main(
 
                 let paused = Arc::new(AtomicBool::new(false));
                 let cancel = Arc::new(AtomicBool::new(false));
+                let control = SessionControl {
+                    progress: progress.clone(),
+                    paused: paused.clone(),
+                    cancel: cancel.clone(),
+                };
+                let control_for_reader = control.clone();
 
                 // Emit session immediately so playback can start while bytes arrive.
                 let session = NetSession {
                     hint,
                     temp_path: temp_path.clone(),
-                    progress: progress.clone(),
-                    paused: paused.clone(),
-                    cancel: cancel.clone(),
+                    control,
                     peer_tx: peer_tx.try_clone().context("try_clone peer_tx for session")?,
                 };
                 if session_tx.send(session).is_err() {
@@ -162,40 +178,27 @@ fn reader_thread_main(
                         }
 
                         audio_bridge_proto::FrameKind::EndFile => {
-                            if len != 0 {
-                                let mut junk = vec![0u8; len as usize];
-                                stream.read_exact(&mut junk).ok();
-                            }
+                            drain_payload(&mut stream, len);
                             // Mark spooling done, but DO NOT exit the session loop.
                             // We keep handling control frames while playback drains.
                             mark_done(&progress);
                         }
 
                         audio_bridge_proto::FrameKind::Pause => {
-                            if len != 0 {
-                                let mut junk = vec![0u8; len as usize];
-                                stream.read_exact(&mut junk).ok();
-                            }
+                            drain_payload(&mut stream, len);
                             paused.store(true, Ordering::Relaxed);
                         }
 
                         audio_bridge_proto::FrameKind::Resume => {
-                            if len != 0 {
-                                let mut junk = vec![0u8; len as usize];
-                                stream.read_exact(&mut junk).ok();
-                            }
+                            drain_payload(&mut stream, len);
                             paused.store(false, Ordering::Relaxed);
                         }
 
                         audio_bridge_proto::FrameKind::Next => {
-                            if len != 0 {
-                                let mut junk = vec![0u8; len as usize];
-                                stream.read_exact(&mut junk).ok();
-                            }
+                            drain_payload(&mut stream, len);
 
                             // Hard cut: cancel playback + stop caring about this session immediately.
-                            cancel.store(true, Ordering::Relaxed);
-                            mark_done(&progress);
+                            control_for_reader.cancel_and_mark_done();
                             break; // back to outer loop, waiting for next BEGIN_FILE
                         }
 
@@ -205,27 +208,21 @@ fn reader_thread_main(
                             //
                             // We already consumed the header; now consume its payload and then
                             // cancel this session and "replay" by switching to the outer loop logic.
-                            let mut junk = vec![0u8; len as usize];
-                            stream.read_exact(&mut junk).ok();
+                            drain_payload(&mut stream, len);
 
-                            cancel.store(true, Ordering::Relaxed);
-                            mark_done(&progress);
+                            control_for_reader.cancel_and_mark_done();
                             break;
                         }
 
                         audio_bridge_proto::FrameKind::Error => {
                             let mut msg = vec![0u8; len as usize];
                             stream.read_exact(&mut msg).ok();
-                            cancel.store(true, Ordering::Relaxed);
-                            mark_done(&progress);
+                            control_for_reader.cancel_and_mark_done();
                             return Err(anyhow!("Sender sent ERROR: {}", String::from_utf8_lossy(&msg)));
                         }
 
                         audio_bridge_proto::FrameKind::TrackInfo | audio_bridge_proto::FrameKind::PlaybackPos => {
-                            if len != 0 {
-                                let mut junk = vec![0u8; len as usize];
-                                stream.read_exact(&mut junk).ok();
-                            }
+                            drain_payload(&mut stream, len);
                         }
                     }
                 }
@@ -235,18 +232,12 @@ fn reader_thread_main(
             audio_bridge_proto::FrameKind::Pause
             | audio_bridge_proto::FrameKind::Resume
             | audio_bridge_proto::FrameKind::Next => {
-                if len != 0 {
-                    let mut junk = vec![0u8; len as usize];
-                    stream.read_exact(&mut junk).ok();
-                }
+                drain_payload(&mut stream, len);
                 continue;
             }
 
             other => {
-                if len != 0 {
-                    let mut junk = vec![0u8; len as usize];
-                    stream.read_exact(&mut junk).ok();
-                }
+                drain_payload(&mut stream, len);
                 eprintln!("Ignoring unexpected frame while idle: {other:?}");
                 continue;
             }
@@ -268,6 +259,14 @@ fn is_done(progress: &Arc<(Mutex<Progress>, Condvar)>) -> bool {
     g.done
 }
 
+fn drain_payload(stream: &mut TcpStream, len: u32) {
+    if len == 0 {
+        return;
+    }
+
+    let mut junk = vec![0u8; len as usize];
+    let _ = stream.read_exact(&mut junk);
+}
 
 
 /// Accept a single TCP connection from `listener`.

@@ -20,15 +20,14 @@ mod playback;
 mod queue;
 mod resample;
 mod net;
+mod pipeline;
 
-use std::{thread};
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cpal::traits::{DeviceTrait, StreamTrait};
+use cpal::traits::{DeviceTrait};
+use pipeline::{PlaybackSessionOptions, play_decoded_source};
 
 fn main() -> Result<()> {
     let args = cli::Args::parse();
@@ -109,7 +108,7 @@ fn play_one_network_session(
 
     // Reuse your existing blocking MediaSource idea.
     let source: Box<dyn symphonia::core::io::MediaSource> =
-        Box::new(net::BlockingFileSource::new(file_for_read, sess.progress.clone()));
+        Box::new(net::BlockingFileSource::new(file_for_read, sess.control.progress.clone()));
 
     let (src_spec, srcq) = decode::start_streaming_decode_from_media_source(
         source,
@@ -129,16 +128,18 @@ fn play_one_network_session(
         &track_info_payload,
     );
 
-    let result = play_decoded_source_with_pause_and_progress(
+    let result = play_decoded_source(
         device,
         config,
         stream_config,
         args,
         src_spec,
         srcq,
-        sess.paused,
-        sess.cancel,
-        peer_tx,
+        PlaybackSessionOptions {
+            paused: Some(sess.control.paused),
+            cancel: Some(sess.control.cancel),
+            peer_tx: Some(peer_tx),
+        },
     );
 
     if let Err(e) = std::fs::remove_file(&sess.temp_path) {
@@ -162,131 +163,17 @@ fn play_one_local(
         src_spec.rate
     );
 
-    play_decoded_source(device, config, stream_config, args, src_spec, srcq)
-}
-
-fn play_decoded_source_with_pause_and_progress(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
-    args: &cli::Args,
-    src_spec: symphonia::core::audio::SignalSpec,
-    srcq: std::sync::Arc<queue::SharedAudio>,
-    paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    mut peer_tx: std::net::TcpStream,
-) -> Result<()> {
-    let srcq_for_cancel = srcq.clone();
-
-    let dst_rate = stream_config.sample_rate;
-    let dstq = resample::start_resampler(
-        srcq,
-        src_spec,
-        dst_rate,
-        resample::ResampleConfig {
-            chunk_frames: args.chunk_frames,
-            buffer_seconds: args.buffer_seconds,
-        },
-    )?;
-
-    let played_frames = std::sync::Arc::new(AtomicU64::new(0));
-    let played_frames_thread = played_frames.clone();
-    let paused_thread = paused.clone();
-
-    // Stop flag for reporter so we never block accept() waiting for it.
-    let stop_reporter = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let stop_reporter_thread = stop_reporter.clone();
-
-    // Progress reporter thread (receiver -> sender).
-    peer_tx.set_nodelay(true).ok();
-    let reporter = std::thread::spawn(move || {
-        loop {
-            if stop_reporter_thread.load(Ordering::Relaxed) {
-                break;
-            }
-
-            let frames = played_frames_thread.load(Ordering::Relaxed);
-            let is_paused = paused_thread.load(Ordering::Relaxed);
-
-            let payload = audio_bridge_proto::encode_playback_pos(frames, is_paused);
-            if audio_bridge_proto::write_frame(
-                &mut peer_tx,
-                audio_bridge_proto::FrameKind::PlaybackPos,
-                &payload,
-            )
-                .is_err()
-            {
-                break;
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
-
-    let stream = playback::build_output_stream(
+    play_decoded_source(
         device,
+        config,
         stream_config,
-        config.sample_format(),
-        &dstq,
-        playback::PlaybackConfig {
-            refill_max_frames: args.refill_max_frames,
-            paused: Some(paused.clone()),
-            played_frames: Some(played_frames),
-        },
-    )?;
-    stream.play()?;
-
-    let finished_normally = queue::wait_until_done_and_empty_or_cancel(&dstq, &cancel);
-
-    if !finished_normally {
-        paused.store(true, Ordering::Relaxed);
-        srcq_for_cancel.close();
-        dstq.close();
-    }
-
-    // Stop reporter regardless of normal finish vs cancel, then join it.
-    stop_reporter.store(true, Ordering::Relaxed);
-    let _ = reporter.join();
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    Ok(())
-}
-
-fn play_decoded_source(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
-    args: &cli::Args,
-    src_spec: symphonia::core::audio::SignalSpec,
-    srcq: std::sync::Arc<queue::SharedAudio>,
-) -> Result<()> {
-    let dst_rate = stream_config.sample_rate;
-    let dstq = resample::start_resampler(
-        srcq,
+        args,
         src_spec,
-        dst_rate,
-        resample::ResampleConfig {
-            chunk_frames: args.chunk_frames,
-            buffer_seconds: args.buffer_seconds,
-        },
-    )?;
-    eprintln!("Resampling to {} Hz", dst_rate);
-
-    let stream = playback::build_output_stream(
-        device,
-        stream_config,
-        config.sample_format(),
-        &dstq,
-        playback::PlaybackConfig {
-            refill_max_frames: args.refill_max_frames,
+        srcq,
+        PlaybackSessionOptions {
             paused: None,
-            played_frames: None,
+            cancel: None,
+            peer_tx: None,
         },
-    )?;
-    stream.play()?;
-
-    queue::wait_until_done_and_empty(&dstq);
-
-    thread::sleep(Duration::from_millis(100));
-    Ok(())
+    )
 }
