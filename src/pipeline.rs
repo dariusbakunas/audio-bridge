@@ -15,6 +15,45 @@ pub(crate) struct PlaybackSessionOptions {
     pub(crate) peer_tx: Option<std::net::TcpStream>,
 }
 
+struct PlaybackState {
+    paused: Option<Arc<std::sync::atomic::AtomicBool>>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    played_frames: Option<Arc<AtomicU64>>,
+    reporter: Option<ProgressReporter>,
+}
+
+impl PlaybackState {
+    fn new(opts: PlaybackSessionOptions) -> Self {
+        let played_frames = opts
+            .peer_tx
+            .as_ref()
+            .map(|_| Arc::new(AtomicU64::new(0)));
+
+        let reporter = if let Some(peer_tx) = opts.peer_tx {
+            Some(start_progress_reporter(
+                peer_tx,
+                played_frames.clone().unwrap(),
+                opts.paused.clone(),
+            ))
+        } else {
+            None
+        };
+
+        Self {
+            paused: opts.paused,
+            cancel: opts.cancel,
+            played_frames,
+            reporter,
+        }
+    }
+
+    fn stop_reporter(self) {
+        if let Some(reporter) = self.reporter {
+            reporter.stop();
+        }
+    }
+}
+
 struct ProgressReporter {
     stop: Arc<std::sync::atomic::AtomicBool>,
     handle: thread::JoinHandle<()>,
@@ -74,6 +113,7 @@ pub(crate) fn play_decoded_source(
     opts: PlaybackSessionOptions,
 ) -> Result<()> {
     let srcq_for_cancel = srcq.clone();
+    let state = PlaybackState::new(opts);
 
     let dst_rate = stream_config.sample_rate;
     let dstq = resample::start_resampler(
@@ -87,21 +127,6 @@ pub(crate) fn play_decoded_source(
     )?;
     eprintln!("Resampling to {} Hz", dst_rate);
 
-    let played_frames = opts
-        .peer_tx
-        .as_ref()
-        .map(|_| Arc::new(AtomicU64::new(0)));
-
-    let reporter = if let Some(peer_tx) = opts.peer_tx {
-        Some(start_progress_reporter(
-            peer_tx,
-            played_frames.clone().unwrap(),
-            opts.paused.clone(),
-        ))
-    } else {
-        None
-    };
-
     let stream = playback::build_output_stream(
         device,
         stream_config,
@@ -109,17 +134,17 @@ pub(crate) fn play_decoded_source(
         &dstq,
         playback::PlaybackConfig {
             refill_max_frames: args.refill_max_frames,
-            paused: opts.paused.clone(),
-            played_frames,
+            paused: state.paused.clone(),
+            played_frames: state.played_frames.clone(),
         },
     )?;
     stream.play()?;
 
-    if let Some(cancel) = opts.cancel {
-        let finished_normally = queue::wait_until_done_and_empty_or_cancel(&dstq, &cancel);
+    if let Some(cancel) = &state.cancel {
+        let finished_normally = queue::wait_until_done_and_empty_or_cancel(&dstq, cancel);
 
         if !finished_normally {
-            if let Some(paused) = &opts.paused {
+            if let Some(paused) = &state.paused {
                 paused.store(true, Ordering::Relaxed);
             }
             srcq_for_cancel.close();
@@ -130,9 +155,7 @@ pub(crate) fn play_decoded_source(
     }
 
     // Stop reporter regardless of normal finish vs cancel, then join it.
-    if let Some(reporter) = reporter {
-        reporter.stop();
-    }
+    state.stop_reporter();
 
     thread::sleep(Duration::from_millis(100));
     Ok(())
