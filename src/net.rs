@@ -9,6 +9,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,21 +39,37 @@ pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
     Ok(stream)
 }
 
-/// Receive one streamed file from `stream`, spooling it to a temp file.
+/// Receive exactly one streamed file over a framed connection (protocol v2),
+/// spooling it to a temp file, and return a MediaSource that blocks until bytes are available.
 ///
-/// Returns:
-/// - A Symphonia [`Hint`] derived from the sent extension.
-/// - The temp file path.
-/// - A boxed [`MediaSource`] that blocks until bytes are available (and is seekable).
-pub(crate) fn recv_one_file_as_media_source(
+/// Control frames (PAUSE/RESUME) update the returned `paused` flag.
+///
+/// The file ends when `END_FILE` is received (not EOF).
+pub(crate) fn recv_one_framed_file_as_media_source(
     mut stream: TcpStream,
-) -> Result<(IncomingStreamInfo, Box<dyn MediaSource>)> {
-    let hint = read_header_make_hint(&mut stream)?;
+) -> Result<(IncomingStreamInfo, Box<dyn MediaSource>, Arc<AtomicBool>)> {
+    audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
+
+    let paused = Arc::new(AtomicBool::new(false));
+
+    // Expect BEGIN_FILE first.
+    let (kind, len) = audio_bridge_proto::read_frame_header(&mut stream).context("read frame header")?;
+    if kind != audio_bridge_proto::FrameKind::BeginFile {
+        return Err(anyhow!("Expected BEGIN_FILE, got {kind:?}"));
+    }
+
+    let mut payload = vec![0u8; len as usize];
+    stream.read_exact(&mut payload).context("read BEGIN_FILE payload")?;
+    let ext = audio_bridge_proto::decode_begin_file_payload(&payload).context("decode BEGIN_FILE")?;
+
+    let mut hint = Hint::new();
+    if !ext.is_empty() {
+        hint.with_extension(&ext);
+    }
 
     let temp_path = make_temp_path("audio-bridge-stream");
     let writer_path = temp_path.clone();
 
-    // Create/truncate temp file up front.
     {
         let _ = OpenOptions::new()
             .create(true)
@@ -70,13 +87,12 @@ pub(crate) fn recv_one_file_as_media_source(
         Condvar::new(),
     ));
 
-    // Writer thread: read from socket, append to temp file, signal readers.
     let progress_writer = progress.clone();
+    let paused_writer = paused.clone();
     thread::spawn(move || {
-        if let Err(e) = writer_thread_main(&mut stream, &writer_path, &progress_writer) {
+        if let Err(e) = writer_thread_main_framed(&mut stream, &writer_path, &progress_writer, &paused_writer) {
             eprintln!("Network writer error: {e:#}");
         }
-        // Ensure readers eventually stop waiting even on error.
         let (lock, cv) = &*progress_writer;
         let mut g = lock.lock().unwrap();
         g.done = true;
@@ -84,7 +100,6 @@ pub(crate) fn recv_one_file_as_media_source(
         cv.notify_all();
     });
 
-    // Reader handle for Symphonia.
     let file_for_read = OpenOptions::new()
         .read(true)
         .open(&temp_path)
@@ -93,23 +108,115 @@ pub(crate) fn recv_one_file_as_media_source(
     let source = Box::new(BlockingFileSource::new(file_for_read, progress.clone()));
 
     Ok((
-        IncomingStreamInfo {
-            hint,
-            temp_path,
-        },
+        IncomingStreamInfo { hint, temp_path },
         source,
+        paused,
     ))
 }
 
-/// Read the simple header and convert it into a Symphonia [`Hint`].
-fn read_header_make_hint(stream: &mut TcpStream) -> Result<Hint> {
-    let ext = audio_bridge_proto::read_header(stream).context("read protocol header")?;
+fn writer_thread_main_framed(
+    stream: &mut TcpStream,
+    path: &PathBuf,
+    progress: &Arc<(Mutex<Progress>, Condvar)>,
+    paused: &Arc<AtomicBool>,
+) -> Result<()> {
+    let mut f = OpenOptions::new()
+        .append(true)
+        .open(path)
+        .with_context(|| format!("open temp file for append {:?}", path))?;
 
-    let mut hint = Hint::new();
-    if !ext.is_empty() {
-        hint.with_extension(&ext);
+    loop {
+        let (kind, len) = match audio_bridge_proto::read_frame_header(&mut *stream) {
+            Ok(x) => x,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e).context("read frame header"),
+        };
+
+        match kind {
+            audio_bridge_proto::FrameKind::FileChunk => {
+                // If we've already finished the file (END_FILE), we should not receive more chunks.
+                // Drain payload to stay in sync and ignore.
+                let (lock, _) = &**progress;
+                let done_already = lock.lock().unwrap().done;
+                drop(lock);
+
+                let mut buf = vec![0u8; len as usize];
+                stream
+                    .read_exact(&mut buf)
+                    .context("read FILE_CHUNK payload")?;
+
+                if done_already {
+                    continue;
+                }
+
+                f.write_all(&buf).context("write to temp file")?;
+                f.flush().ok();
+
+                let (lock, cv) = &**progress;
+                let mut g = lock.lock().unwrap();
+                g.bytes_written = g.bytes_written.saturating_add(buf.len() as u64);
+                drop(g);
+                cv.notify_all();
+            }
+            audio_bridge_proto::FrameKind::EndFile => {
+                // Mark the file as complete so the MediaSource reaches EOF,
+                // but keep the TCP connection open to accept PAUSE/RESUME/NEXT.
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+
+                let (lock, cv) = &**progress;
+                let mut g = lock.lock().unwrap();
+                g.done = true;
+                drop(g);
+                cv.notify_all();
+
+                // Continue loop (control frames may follow).
+            }
+            audio_bridge_proto::FrameKind::Pause => {
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+                paused.store(true, Ordering::Relaxed);
+            }
+            audio_bridge_proto::FrameKind::Resume => {
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+                paused.store(false, Ordering::Relaxed);
+            }
+            audio_bridge_proto::FrameKind::Next => {
+                // Treat NEXT as “stop accepting control frames for this track/session”.
+                if len != 0 {
+                    let mut junk = vec![0u8; len as usize];
+                    stream.read_exact(&mut junk).ok();
+                }
+                break;
+            }
+            audio_bridge_proto::FrameKind::BeginFile => {
+                let mut junk = vec![0u8; len as usize];
+                stream.read_exact(&mut junk).ok();
+                return Err(anyhow!("Unexpected BEGIN_FILE while already receiving a file"));
+            }
+            audio_bridge_proto::FrameKind::Error => {
+                let mut msg = vec![0u8; len as usize];
+                stream.read_exact(&mut msg).ok();
+                return Err(anyhow!("Sender sent ERROR: {}", String::from_utf8_lossy(&msg)));
+            }
+        }
     }
-    Ok(hint)
+
+    // Ensure done is set even if the connection drops without END_FILE.
+    let (lock, cv) = &**progress;
+    let mut g = lock.lock().unwrap();
+    g.done = true;
+    drop(g);
+    cv.notify_all();
+
+    Ok(())
 }
 
 fn make_temp_path(prefix: &str) -> PathBuf {
@@ -123,43 +230,6 @@ fn make_temp_path(prefix: &str) -> PathBuf {
 
     p.push(format!("{prefix}-{nanos}.bin"));
     p
-}
-
-fn writer_thread_main(
-    stream: &mut TcpStream,
-    path: &PathBuf,
-    progress: &Arc<(Mutex<Progress>, Condvar)>,
-) -> Result<()> {
-    let mut f = OpenOptions::new()
-        .append(true)
-        .open(path)
-        .with_context(|| format!("open temp file for append {:?}", path))?;
-
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = match stream.read(&mut buf) {
-            Ok(0) => break, // EOF: one file per connection
-            Ok(n) => n,
-            Err(e) => return Err(e).context("read from socket"),
-        };
-
-        f.write_all(&buf[..n]).context("write to temp file")?;
-        f.flush().ok(); // best-effort
-
-        let (lock, cv) = &**progress;
-        let mut g = lock.lock().unwrap();
-        g.bytes_written = g.bytes_written.saturating_add(n as u64);
-        drop(g);
-        cv.notify_all();
-    }
-
-    let (lock, cv) = &**progress;
-    let mut g = lock.lock().unwrap();
-    g.done = true;
-    drop(g);
-    cv.notify_all();
-
-    Ok(())
 }
 
 /// A seekable media source backed by a file that is being appended to concurrently.

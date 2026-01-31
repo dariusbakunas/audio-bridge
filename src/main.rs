@@ -98,7 +98,7 @@ fn play_one_network(
     args: &cli::Args,
     stream: std::net::TcpStream,
 ) -> Result<()> {
-    let (info, source) = net::recv_one_file_as_media_source(stream)?;
+    let (info, source, paused) = net::recv_one_framed_file_as_media_source(stream)?;
     eprintln!("Incoming stream spooling to {:?}", info.temp_path);
 
     let (src_spec, srcq) = decode::start_streaming_decode_from_media_source(
@@ -113,14 +113,52 @@ fn play_one_network(
         src_spec.rate
     );
 
-    let result = play_decoded_source(device, config, stream_config, args, src_spec, srcq);
+    let result = play_decoded_source_with_pause(device, config, stream_config, args, src_spec, srcq, paused);
 
-    // Best-effort cleanup of the temp file after playback finishes.
-    if let Err(e) = fs::remove_file(&info.temp_path) {
+    if let Err(e) = std::fs::remove_file(&info.temp_path) {
         eprintln!("Temp cleanup warning: {e}");
     }
 
     result
+}
+
+fn play_decoded_source_with_pause(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    stream_config: &cpal::StreamConfig,
+    args: &cli::Args,
+    src_spec: symphonia::core::audio::SignalSpec,
+    srcq: std::sync::Arc<queue::SharedAudio>,
+    paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<()> {
+    let dst_rate = stream_config.sample_rate;
+    let dstq = resample::start_resampler(
+        srcq,
+        src_spec,
+        dst_rate,
+        resample::ResampleConfig {
+            chunk_frames: args.chunk_frames,
+            buffer_seconds: args.buffer_seconds,
+        },
+    )?;
+    eprintln!("Resampling to {} Hz", dst_rate);
+
+    let stream = playback::build_output_stream(
+        device,
+        stream_config,
+        config.sample_format(),
+        &dstq,
+        playback::PlaybackConfig {
+            refill_max_frames: args.refill_max_frames,
+            paused: Some(paused),
+        },
+    )?;
+    stream.play()?;
+
+    queue::wait_until_done_and_empty(&dstq);
+
+    thread::sleep(Duration::from_millis(100));
+    Ok(())
 }
 
 fn play_decoded_source(
@@ -150,6 +188,7 @@ fn play_decoded_source(
         &dstq,
         playback::PlaybackConfig {
             refill_max_frames: args.refill_max_frames,
+            paused: None,
         },
     )?;
     stream.play()?;

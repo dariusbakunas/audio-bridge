@@ -7,19 +7,24 @@
 //! - converts `f32` samples to the device sample format
 
 use std::sync::{Arc, Mutex};
-
+use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{anyhow, Result};
 use cpal::traits::DeviceTrait;
 
 use crate::queue::SharedAudio;
 
 /// Configuration for the playback stage (CPAL output callback).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PlaybackConfig {
     /// Maximum number of frames to pull from the queue per refill.
     ///
     /// Larger values reduce mutex/queue churn but can increase latency.
     pub(crate) refill_max_frames: usize,
+
+    /// When set and `true`, the callback outputs silence and **does not drain** the queue.
+    ///
+    /// This implements “pause means pause” (no skipping ahead).
+    pub(crate) paused: Option<Arc<AtomicBool>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -71,6 +76,7 @@ where
 
     let refill_max_frames = cfg.refill_max_frames.max(1);
     let dstq_cb = dstq.clone();
+    let paused_flag = cfg.paused.clone();
 
     let err_fn = |err| eprintln!("Stream error: {err}");
 
@@ -78,6 +84,14 @@ where
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| {
+            if let Some(p) = &paused_flag {
+                if p.load(Ordering::Relaxed) {
+                    // Output silence and do not drain `dstq_cb`.
+                    data.fill(<T as cpal::Sample>::from_sample::<f32>(0.0));
+                    return;
+                }
+            }
+
             let mut st = state_cb.lock().unwrap();
 
             if st.pos >= st.src.len() {

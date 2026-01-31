@@ -1,11 +1,20 @@
-//! Send a single audio file to an `audio-bridge` listener (one file per connection).
+//! `audio-send` — a small TUI to stream audio files to `audio-bridge`.
+//!
+//! MVP features:
+//! - list `.flac`/`.wav` files in current directory (non-recursive)
+//! - Enter: play selected (immediately starts sending)
+//! - Space: pause/resume (sends PAUSE/RESUME frames)
+//! - n: next (skip immediately)
+//! - q: quit
 
-use std::fs::File;
-use std::io;
-use std::net::{SocketAddr, TcpStream};
+mod library;
+mod ui;
+mod worker;
+
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -15,32 +24,12 @@ struct Args {
     #[arg(long)]
     addr: SocketAddr,
 
-    /// Path to the audio file to send
-    #[arg(long)]
-    path: PathBuf,
-
-    /// Override extension hint (e.g. flac, wav). Defaults to path extension.
-    #[arg(long)]
-    ext: Option<String>,
+    /// Directory to scan for audio files (non-recursive). Defaults to current directory.
+    #[arg(long, default_value = ".")]
+    dir: PathBuf,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-
-    let mut f = File::open(&args.path).with_context(|| format!("open {:?}", args.path))?;
-
-    let ext = args
-        .ext
-        .as_deref()
-        .or_else(|| args.path.extension().and_then(|s| s.to_str()))
-        .unwrap_or("");
-
-    let mut stream = TcpStream::connect(args.addr).with_context(|| format!("connect {}", args.addr))?;
-    stream.set_nodelay(true).ok();
-
-    audio_bridge_proto::write_header(&mut stream, ext).context("write header")?;
-
-    io::copy(&mut f, &mut stream).context("send file bytes")?;
-    // Drop closes the connection; receiver treats EOF as end-of-file.
-    Ok(())
+    ui::run_tui(args.addr, args.dir)
 }
