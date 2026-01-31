@@ -241,3 +241,75 @@ pub(crate) fn wait_until_done_and_empty_or_cancel(q: &Arc<SharedAudio>, cancel: 
         g = ng;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn calc_max_buffered_samples_fallbacks() {
+        assert_eq!(calc_max_buffered_samples(48_000, 2, 2.0), 192_000);
+        assert_eq!(calc_max_buffered_samples(48_000, 2, -1.0), 192_000);
+        assert_eq!(calc_max_buffered_samples(48_000, 2, f32::NAN), 192_000);
+        assert_eq!(calc_max_buffered_samples(48_000, 2, f32::INFINITY), 192_000);
+    }
+
+    #[test]
+    fn pop_nonblocking_empty() {
+        let q = SharedAudio::new(2, 16);
+        let out = q.pop(PopStrategy::NonBlocking { max_frames: 4 });
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn pop_blocking_exact_waits_for_full_frames() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        let q_push = q.clone();
+
+        let handle = thread::spawn(move || {
+            let out = q.pop(PopStrategy::BlockingExact { frames: 3 }).unwrap();
+            assert_eq!(out.len(), 6);
+        });
+
+        thread::sleep(Duration::from_millis(20));
+        q_push.push_interleaved_blocking(&[0.1, 0.2, 0.3, 0.4]);
+        thread::sleep(Duration::from_millis(20));
+        q_push.push_interleaved_blocking(&[0.5, 0.6]);
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn pop_blocking_up_to_drains_tail_and_respects_close() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        let q_pop = q.clone();
+
+        let handle = thread::spawn(move || {
+            let out = q_pop
+                .pop(PopStrategy::BlockingUpTo { max_frames: 8 })
+                .unwrap();
+            assert_eq!(out.len(), 4);
+            let out2 = q_pop
+                .pop(PopStrategy::BlockingUpTo { max_frames: 8 });
+            assert!(out2.is_none());
+        });
+
+        thread::sleep(Duration::from_millis(20));
+        q.push_interleaved_blocking(&[1.0, 2.0, 3.0, 4.0]);
+        q.close();
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn pop_nonblocking_returns_available_frames() {
+        let q = SharedAudio::new(2, 64);
+        q.push_interleaved_blocking(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let out = q.pop(PopStrategy::NonBlocking { max_frames: 2 }).unwrap();
+        assert_eq!(out.len(), 4);
+        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+}
