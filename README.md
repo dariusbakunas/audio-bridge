@@ -98,7 +98,9 @@ listen --bind 0.0.0.0:5555
 This repo includes a `cross` Docker image setup for Linux builds.
 
 ```bash
-docker build --platform linux/amd64 -t audio-bridge-cross:x86_64-gnu -f Dockerfile.cross . cargo install cross rustup toolchain install stable-x86_64-unknown-linux-gnu --force-non-host
+docker build --platform linux/amd64 -t audio-bridge-cross:x86_64-gnu -f Dockerfile.cross . 
+cargo install cross 
+rustup toolchain install stable-x86_64-unknown-linux-gnu --force-non-host
 CROSS_CONTAINER_OPTS="--platform linux/amd64"
 cross build --release --target x86_64-unknown-linux-gnu -p audio-bridge -p audio-send
 ```
