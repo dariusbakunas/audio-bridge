@@ -20,7 +20,7 @@ use symphonia::core::{
     meta::MetadataOptions,
     probe::Hint,
 };
-use symphonia::core::audio::{SampleBuffer, Signal};
+use symphonia::core::audio::{SampleBuffer};
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::io::MediaSource;
 use crate::queue::{calc_max_buffered_samples, SharedAudio};
@@ -47,7 +47,7 @@ pub(crate) fn start_streaming_decode_from_media_source(
         &MetadataOptions::default(),
     )?;
 
-    let mut format = probed.format;
+    let format = probed.format;
     let track = format
         .default_track()
         .ok_or_else(|| anyhow!("No default audio track"))?;
@@ -104,58 +104,6 @@ fn decode_format_loop(
 ) -> Result<()> {
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())?;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break, // EOF
-        };
-
-        let decoded = match decoder.decode(&packet) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let mut sample_buf = SampleBuffer::<f32>::new(decoded.frames() as u64, *decoded.spec());
-        sample_buf.copy_interleaved_ref(decoded);
-
-        shared.push_interleaved_blocking(sample_buf.samples());
-    }
-
-    Ok(())
-}
-
-/// Decoder thread main loop.
-///
-/// This function:
-/// - Opens the media container using Symphonia.
-/// - Decodes packets into interleaved `f32` frames.
-/// - Pushes samples into `shared`, blocking if the queue is full.
-///
-/// Errors are returned to the caller (thread wrapper prints + closes the queue).
-fn decode_thread_main(path: &PathBuf, shared: &Arc<SharedAudio>) -> Result<()> {
-    let file = File::open(path).with_context(|| format!("open {:?}", path))?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-
-    let probed = symphonia::default::get_probe().format(
-        &hint,
-        mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
-    )?;
-
-    let mut format = probed.format;
-    let track = format
-        .default_track()
-        .ok_or_else(|| anyhow!("No default audio track"))?;
-
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())?;
 
     loop {
         let packet = match format.next_packet() {

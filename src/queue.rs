@@ -92,12 +92,6 @@ impl SharedAudio {
         self.cv.notify_all();
     }
 
-    /// Returns `true` if the producer side has closed the queue and all buffered data is drained.
-    pub(crate) fn is_done_and_empty(&self) -> bool {
-        let g = self.inner.lock().unwrap();
-        g.done && g.queue.is_empty()
-    }
-
     /// Push interleaved samples into the queue, blocking when the queue is full.
     ///
     /// - Blocks until enough capacity is available, unless the queue is closed.

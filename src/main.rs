@@ -21,14 +21,14 @@ mod queue;
 mod resample;
 mod net;
 
-use std::{fs, thread};
+use std::{thread};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 
 fn main() -> Result<()> {
     let args = cli::Args::parse();
@@ -163,52 +163,6 @@ fn play_one_local(
     );
 
     play_decoded_source(device, config, stream_config, args, src_spec, srcq)
-}
-
-fn play_one_network(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
-    args: &cli::Args,
-    stream: std::net::TcpStream,
-) -> Result<()> {
-    let (info, source, paused, cancel, mut peer_tx) = net::recv_one_framed_file_as_media_source(stream)?;
-    eprintln!("Incoming stream spooling to {:?}", info.temp_path);
-
-    let (src_spec, srcq) = decode::start_streaming_decode_from_media_source(
-        source,
-        info.hint,
-        args.buffer_seconds,
-    )?;
-
-    let track_info_payload = audio_bridge_proto::encode_track_info(
-        src_spec.rate,
-        src_spec.channels.count() as u16,
-        None,
-    );
-    let _ = audio_bridge_proto::write_frame(
-        &mut peer_tx,
-        audio_bridge_proto::FrameKind::TrackInfo,
-        &track_info_payload,
-    );
-
-    let result = play_decoded_source_with_pause_and_progress(
-        device,
-        config,
-        stream_config,
-        args,
-        src_spec,
-        srcq,
-        paused,
-        cancel,
-        peer_tx,
-    );
-
-    if let Err(e) = std::fs::remove_file(&info.temp_path) {
-        eprintln!("Temp cleanup warning: {e}");
-    }
-
-    result
 }
 
 fn play_decoded_source_with_pause_and_progress(
