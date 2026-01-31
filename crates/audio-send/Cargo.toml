@@ -1,0 +1,9 @@
+[package]
+name = "audio-send"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.56", features = ["derive"] }
+audio-bridge-proto = { path = "../audio-bridge-proto" }

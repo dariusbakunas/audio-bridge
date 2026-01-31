@@ -16,9 +16,6 @@ use anyhow::{anyhow, Context, Result};
 use symphonia::core::io::MediaSource;
 use symphonia::core::probe::Hint;
 
-const MAGIC: &[u8; 4] = b"ABRD";
-const VERSION: u16 = 1;
-
 #[derive(Debug, Clone)]
 pub(crate) struct IncomingStreamInfo {
     pub(crate) hint: Hint,
@@ -106,35 +103,13 @@ pub(crate) fn recv_one_file_as_media_source(
 
 /// Read the simple header and convert it into a Symphonia [`Hint`].
 fn read_header_make_hint(stream: &mut TcpStream) -> Result<Hint> {
-    let mut magic = [0u8; 4];
-    stream.read_exact(&mut magic).context("read magic")?;
-    if &magic != MAGIC {
-        return Err(anyhow!("Bad magic (expected {:?})", MAGIC));
-    }
+    let ext = audio_bridge_proto::read_header(stream).context("read protocol header")?;
 
-    let version = read_u16_le(stream).context("read version")?;
-    if version != VERSION {
-        return Err(anyhow!("Unsupported protocol version {version}"));
-    }
-
-    let ext_len = read_u16_le(stream).context("read ext_len")? as usize;
-    let mut ext_bytes = vec![0u8; ext_len];
-    stream
-        .read_exact(&mut ext_bytes)
-        .context("read extension bytes")?;
-
-    let ext = std::str::from_utf8(&ext_bytes).context("extension not utf-8")?;
     let mut hint = Hint::new();
     if !ext.is_empty() {
-        hint.with_extension(ext);
+        hint.with_extension(&ext);
     }
     Ok(hint)
-}
-
-fn read_u16_le(r: &mut impl Read) -> io::Result<u16> {
-    let mut b = [0u8; 2];
-    r.read_exact(&mut b)?;
-    Ok(u16::from_le_bytes(b))
 }
 
 fn make_temp_path(prefix: &str) -> PathBuf {
