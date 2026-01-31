@@ -42,6 +42,72 @@ enum SessionOutcome {
     Quit,
 }
 
+fn write_all_interruptible(
+    stream: &mut TcpStream,
+    buf: &[u8],
+    cmd_rx: &Receiver<Command>,
+    evt_tx: &Sender<Event>,
+    paused: &mut bool,
+) -> Result<SessionOutcome> {
+    let mut off = 0usize;
+
+    while off < buf.len() {
+        // Allow control to interrupt a blocked send.
+        match cmd_rx.try_recv() {
+            Ok(Command::Quit) => return Ok(SessionOutcome::Quit),
+            Ok(Command::Next) => return Ok(SessionOutcome::Done),
+            Ok(Command::Play { path, ext_hint }) => return Ok(SessionOutcome::SwitchTo { path, ext_hint }),
+            Ok(Command::PauseToggle) => {
+                *paused = !*paused;
+                // We'll send PAUSE/RESUME as a separate control frame from the main loop;
+                // here we just update local state + UI.
+                evt_tx
+                    .send(Event::Status(if *paused { "Paused".into() } else { "Playing".into() }))
+                    .ok();
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => return Ok(SessionOutcome::Quit),
+        }
+
+        match stream.write(&buf[off..]) {
+            Ok(0) => {
+                return Err(anyhow::anyhow!("socket closed while writing")).map_err(Into::into);
+            }
+            Ok(n) => {
+                off += n;
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+                // Backpressure: yield and retry (do NOT restart the frame).
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(e) => return Err(e).context("write to socket").map_err(Into::into),
+        }
+    }
+
+    Ok(SessionOutcome::Done)
+}
+
+fn write_frame_interruptible(
+    stream: &mut TcpStream,
+    kind: audio_bridge_proto::FrameKind,
+    payload: &[u8],
+    cmd_rx: &Receiver<Command>,
+    evt_tx: &Sender<Event>,
+    paused: &mut bool,
+) -> Result<SessionOutcome> {
+    let mut frame = Vec::with_capacity(1 + 4 + payload.len());
+    frame.push(kind as u8);
+    let len: u32 = payload
+        .len()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("payload too large"))?;
+    frame.extend_from_slice(&len.to_le_bytes());
+    frame.extend_from_slice(payload);
+
+    write_all_interruptible(stream, &frame, cmd_rx, evt_tx, paused)
+}
+
 pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<Event>) {
     let mut paused = false;
     let mut pending: Option<Command> = None;
@@ -98,13 +164,18 @@ fn send_one_track_session(
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_millis(200))).ok();
 
-    // Read-back thread for receiver -> sender frames (optional; keep if you already added it).
+    // Handshake: write then read (symmetric; avoids deadlocks and fails fast on mismatch).
+    audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
+
+    // Clone for receiver->sender frames.
     let mut stream_rx = stream.try_clone().context("try_clone stream for rx")?;
+
+    // Complete handshake before sending any frames like BEGIN_FILE.
+    audio_bridge_proto::read_prelude(&mut stream_rx).context("read prelude")?;
+
+    // Read-back thread for receiver -> sender frames.
     let evt_tx_rx = evt_tx.clone();
     std::thread::spawn(move || {
-        if audio_bridge_proto::read_prelude(&mut stream_rx).is_err() {
-            return;
-        }
         loop {
             let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
                 Ok(x) => x,
@@ -134,11 +205,19 @@ fn send_one_track_session(
         }
     });
 
-    audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
-
     let begin = audio_bridge_proto::encode_begin_file_payload(&ext_hint).context("encode BEGIN_FILE")?;
-    audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::BeginFile, &begin)
-        .context("write BEGIN_FILE")?;
+
+    match write_frame_interruptible(
+        &mut stream,
+        audio_bridge_proto::FrameKind::BeginFile,
+        &begin,
+        cmd_rx,
+        evt_tx,
+        paused,
+    )? {
+        SessionOutcome::Done => {}
+        other => return Ok(other),
+    }
 
     if *paused {
         audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Pause, &[])
@@ -198,20 +277,37 @@ fn send_one_track_session(
             break 'send_loop;
         }
 
-        match audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::FileChunk, &buf[..n]) {
-            Ok(()) => {
+        match write_frame_interruptible(
+            &mut stream,
+            audio_bridge_proto::FrameKind::FileChunk,
+            &buf[..n],
+            cmd_rx,
+            evt_tx,
+            paused,
+        )? {
+            SessionOutcome::Done => {
                 sent = sent.saturating_add(n as u64);
                 evt_tx.send(Event::Progress { sent, total: meta_len }).ok();
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
-                continue 'send_loop;
+            other => {
+                // Interrupt: tell receiver to stop this session and propagate.
+                let _ = audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::Next, &[]);
+                return Ok(other);
             }
-            Err(e) => return Err(e).context("write FILE_CHUNK").map_err(Into::into),
         }
     }
 
-    audio_bridge_proto::write_frame(&mut stream, audio_bridge_proto::FrameKind::EndFile, &[])
-        .context("write END_FILE")?;
+    match write_frame_interruptible(
+        &mut stream,
+        audio_bridge_proto::FrameKind::EndFile,
+        &[],
+        cmd_rx,
+        evt_tx,
+        paused,
+    )? {
+        SessionOutcome::Done => {}
+        other => return Ok(other),
+    }
     evt_tx.send(Event::Status("Sent (remote playing; controls active)".into())).ok();
 
     // Control-only phase: keep connection open so PAUSE/RESUME works during playback.

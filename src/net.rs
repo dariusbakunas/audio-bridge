@@ -48,6 +48,8 @@ pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
 pub(crate) fn recv_one_framed_file_as_media_source(
     mut stream: TcpStream,
 ) -> Result<(IncomingStreamInfo, Box<dyn MediaSource>, Arc<AtomicBool>, Arc<AtomicBool>, TcpStream)> {
+    // Handshake: write then read (symmetric with sender; avoids deadlocks).
+    audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
 
     // Clone for receiver->sender messages (playback progress, etc.)

@@ -225,7 +225,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(5), Constraint::Length(3)])
+        .constraints([Constraint::Length(4), Constraint::Min(5), Constraint::Length(7)])
         .split(f.area());
 
     let header = Paragraph::new(vec![

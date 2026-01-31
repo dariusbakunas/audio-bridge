@@ -166,16 +166,29 @@ fn play_decoded_source_with_pause_and_progress(
     let played_frames_thread = played_frames.clone();
     let paused_thread = paused.clone();
 
+    // Stop flag for reporter so we never block accept() waiting for it.
+    let stop_reporter = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_reporter_thread = stop_reporter.clone();
+
     // Progress reporter thread (receiver -> sender).
-    // Stops naturally when socket errors (client disconnected) or when playback ends.
     peer_tx.set_nodelay(true).ok();
     let reporter = std::thread::spawn(move || {
         loop {
+            if stop_reporter_thread.load(Ordering::Relaxed) {
+                break;
+            }
+
             let frames = played_frames_thread.load(Ordering::Relaxed);
             let is_paused = paused_thread.load(Ordering::Relaxed);
 
             let payload = audio_bridge_proto::encode_playback_pos(frames, is_paused);
-            if audio_bridge_proto::write_frame(&mut peer_tx, audio_bridge_proto::FrameKind::PlaybackPos, &payload).is_err() {
+            if audio_bridge_proto::write_frame(
+                &mut peer_tx,
+                audio_bridge_proto::FrameKind::PlaybackPos,
+                &payload,
+            )
+                .is_err()
+            {
                 break;
             }
 
@@ -204,8 +217,10 @@ fn play_decoded_source_with_pause_and_progress(
         dstq.close();
     }
 
-    // Let reporter thread exit once the connection drops; don't block shutdown on it.
+    // Stop reporter regardless of normal finish vs cancel, then join it.
+    stop_reporter.store(true, Ordering::Relaxed);
     let _ = reporter.join();
+
     std::thread::sleep(std::time::Duration::from_millis(100));
     Ok(())
 }

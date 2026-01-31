@@ -16,7 +16,7 @@
 use std::io::{self, Read, Write};
 
 pub const MAGIC: [u8; 4] = *b"ABRD";
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
