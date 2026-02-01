@@ -1,10 +1,8 @@
 //! Scan local directories for playable files (MVP: non-recursive `.flac`/`.wav`).
 
-use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
@@ -15,7 +13,6 @@ use symphonia::core::probe::Hint;
 pub struct Track {
     pub path: PathBuf,
     pub file_name: String,
-    pub ext_hint: String,
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
     pub album: Option<String>,
@@ -65,66 +62,6 @@ impl LibraryItem {
     pub fn is_dir(&self) -> bool {
         matches!(self, LibraryItem::Dir { .. })
     }
-}
-
-/// List folders + playable tracks in `dir`, sorted by name (dirs first).
-pub fn list_entries(dir: &Path) -> Result<Vec<LibraryItem>> {
-    let mut dirs = Vec::new();
-    let mut tracks = Vec::new();
-
-    for entry in fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
-        let entry = entry.context("read_dir entry")?;
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .and_then(OsStr::to_str)
-                .unwrap_or("<unknown>")
-                .to_string();
-            dirs.push(LibraryItem::Dir { path, name });
-            continue;
-        }
-        if !path.is_file() {
-            continue;
-        }
-
-        let ext = path
-            .extension()
-            .and_then(OsStr::to_str)
-            .unwrap_or("")
-            .to_ascii_lowercase();
-
-        if ext != "flac" && ext != "wav" {
-            continue;
-        }
-
-        let file_name = path
-            .file_name()
-            .and_then(OsStr::to_str)
-            .unwrap_or("<unknown>")
-            .to_string();
-
-        let meta = probe_track_meta(&path, &ext);
-
-        tracks.push(LibraryItem::Track(Track {
-            path,
-            file_name,
-            ext_hint: ext,
-            duration_ms: meta.duration_ms,
-            sample_rate: meta.sample_rate,
-            album: meta.album,
-            artist: meta.artist,
-            format: meta.format.unwrap_or_else(|| "<unknown>".into()),
-        }));
-    }
-
-    dirs.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
-    tracks.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
-
-    let mut out = Vec::with_capacity(dirs.len() + tracks.len());
-    out.extend(dirs);
-    out.extend(tracks);
-    Ok(out)
 }
 
 /// Best-effort probe for duration + tags.

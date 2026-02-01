@@ -8,50 +8,38 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
 };
 
-use crate::library::{LibraryItem, TrackMeta};
+use crate::library::LibraryItem;
 
 use super::app::App;
 
 pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     app.refresh_auto_preview_if_needed();
 
-    let remote_status = match (
-        app.remote_played_frames,
-        app.remote_sample_rate,
-        app.remote_duration_ms,
-        app.remote_paused,
-    ) {
-        (Some(fr), Some(sr), dur, Some(p)) if sr > 0 => {
-            let elapsed_ms = (fr as f64 * 1000.0) / (sr as f64);
+    let remote_status = match (app.remote_elapsed_ms, app.remote_duration_ms, app.remote_paused) {
+        (Some(elapsed_ms), dur, Some(p)) => {
             let state = if p { "paused" } else { "playing" };
             match dur {
                 Some(total_ms) if total_ms > 0 => {
-                    let elapsed = format_duration_ms(elapsed_ms as u64);
+                    let elapsed = format_duration_ms(elapsed_ms);
                     let total = format_duration_ms(total_ms);
-                    let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms as u64));
-                    let pct = (elapsed_ms / total_ms as f64 * 100.0).clamp(0.0, 100.0);
+                    let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms));
+                    let pct = (elapsed_ms as f64 / total_ms as f64 * 100.0).clamp(0.0, 100.0);
                     format!(
                         "remote: {elapsed} / {total} (left {remaining}, {pct:.1}%) [{state}]"
                     )
                 }
-                _ => format!("remote: {:.1}s [{state}]", elapsed_ms / 1000.0),
+                _ => format!("remote: {:.1}s [{state}]", elapsed_ms as f64 / 1000.0),
             }
         }
         _ => "remote: -".to_string(),
     };
 
-    let remote_gauge = match (
-        app.remote_played_frames,
-        app.remote_sample_rate,
-        app.remote_duration_ms,
-        app.remote_paused,
-    ) {
-        (Some(fr), Some(sr), Some(total_ms), Some(p)) if sr > 0 && total_ms > 0 => {
-            let elapsed_ms = (fr as f64 * 1000.0) / (sr as f64);
-            let ratio = (elapsed_ms / total_ms as f64).clamp(0.0, 1.0);
+    let remote_gauge = match (app.remote_elapsed_ms, app.remote_duration_ms, app.remote_paused) {
+        (Some(elapsed_ms), Some(total_ms), Some(p)) if total_ms > 0 => {
+            let ratio = (elapsed_ms as f64 / total_ms as f64).clamp(0.0, 1.0);
             let state = if p { "paused" } else { "playing" };
-            let elapsed = format_duration_ms(elapsed_ms as u64);
-            let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms as u64));
+            let elapsed = format_duration_ms(elapsed_ms);
+            let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms));
             Some((
                 ratio,
                 format!("{elapsed} elapsed • {remaining} left [{state}]"),
@@ -71,7 +59,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .split(chunks[0]);
 
     let header = Paragraph::new(vec![
-        Line::from(format!("audio-send  →  {}", app.addr)),
+        Line::from(format!("audio-send  →  {}", app.server)),
         Line::from(format!("dir: {:?}", app.dir)),
     ])
         .block(Block::default().borders(Borders::ALL).title("Target"));
@@ -110,12 +98,9 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .now_playing_meta
         .as_ref()
         .and_then(|m| m.sample_rate);
-    let output_sr = app.remote_sample_rate;
-    let sr_line = match (source_sr, output_sr) {
-        (Some(src), Some(out)) => format!("sample rate: {src} Hz → {out} Hz"),
-        (Some(src), None) => format!("sample rate: {src} Hz → -"),
-        (None, Some(out)) => format!("sample rate: - → {out} Hz"),
-        (None, None) => "sample rate: -".into(),
+    let sr_line = match source_sr {
+        Some(src) => format!("sample rate: {src} Hz"),
+        None => "sample rate: -".into(),
     };
 
     let now_playing = Paragraph::new(vec![

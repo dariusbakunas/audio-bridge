@@ -8,10 +8,10 @@
 //! - q: quit
 
 mod library;
+mod server_api;
 mod ui;
 mod worker;
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -20,16 +20,16 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(name = "audio-send")]
 struct Args {
-    /// Address of the receiver, e.g. 192.168.1.10:5555
+    /// Base URL of the audio server, e.g. http://192.168.1.10:8080
     #[arg(long)]
-    addr: SocketAddr,
+    server: String,
 
-    /// Directory to scan for audio files (non-recursive). Defaults to current directory.
+    /// Directory on the server to start browsing from.
     #[arg(long, default_value = ".")]
     dir: PathBuf,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    ui::run_tui(args.addr, args.dir)
+    ui::run_tui(args.server, args.dir)
 }

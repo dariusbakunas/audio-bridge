@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -17,7 +16,8 @@ use ratatui::{
     Terminal,
 };
 
-use crate::library::{self, LibraryItem, Track, TrackMeta};
+use crate::library::{self, LibraryItem, TrackMeta};
+use crate::server_api;
 use crate::worker::{self, Command, Event};
 
 use super::render;
@@ -50,8 +50,8 @@ struct MetaResp {
 }
 
 /// Launch the TUI, spawn the worker thread, and drive the event loop.
-pub(crate) fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
-    let entries = list_entries_with_parent(&dir)?;
+pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
+    let entries = list_entries_with_parent(&server, &dir)?;
     let (cmd_tx, cmd_rx) = unbounded::<Command>();
     let (evt_tx, evt_rx) = unbounded::<Event>();
     let (scan_tx, scan_rx) = unbounded::<ScanReq>();
@@ -59,9 +59,44 @@ pub(crate) fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
     let (meta_tx, meta_rx) = unbounded::<MetaReq>();
     let (meta_done_tx, meta_done_rx) = unbounded::<MetaResp>();
 
+    let evt_tx_worker = evt_tx.clone();
     std::thread::spawn({
-        let addr = addr;
-        move || worker::worker_main(addr, cmd_rx, evt_tx)
+        let server = server.clone();
+        move || worker::worker_main(server, cmd_rx, evt_tx_worker)
+    });
+
+    std::thread::spawn({
+        let server = server.clone();
+        let evt_tx = evt_tx.clone();
+        move || {
+            let mut delay = Duration::from_millis(250);
+            loop {
+                std::thread::sleep(delay);
+                match server_api::status(&server) {
+                    Ok(status) => {
+                        delay = Duration::from_millis(250);
+                        if evt_tx
+                            .send(Event::RemoteStatus {
+                                now_playing: status.now_playing,
+                                elapsed_ms: status.elapsed_ms,
+                                duration_ms: status.duration_ms,
+                                paused: status.paused,
+                                title: status.title,
+                                artist: status.artist,
+                                album: status.album,
+                                format: status.format,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        delay = (delay * 2).min(Duration::from_secs(2));
+                    }
+                }
+            }
+        }
     });
 
     std::thread::spawn(move || {
@@ -74,20 +109,23 @@ pub(crate) fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
         }
     });
 
-    std::thread::spawn(move || {
-        while let Ok(req) = scan_rx.recv() {
-            let entries = list_entries_with_parent(&req.dir)
-                .map_err(|e| format!("{e:#}"));
-            let _ = scan_done_tx.send(ScanResp {
-                dir: req.dir,
-                kind: req.kind,
-                entries,
-            });
+    std::thread::spawn({
+        let server = server.clone();
+        move || {
+            while let Ok(req) = scan_rx.recv() {
+                let entries = list_entries_with_parent(&server, &req.dir)
+                    .map_err(|e| format!("{e:#}"));
+                let _ = scan_done_tx.send(ScanResp {
+                    dir: req.dir,
+                    kind: req.kind,
+                    entries,
+                });
+            }
         }
     });
 
     let mut app = App::new(
-        addr,
+        server,
         dir,
         entries,
         scan_tx,
@@ -105,7 +143,7 @@ pub(crate) fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
 
 /// In-memory UI state for rendering + interaction.
 pub(crate) struct App {
-    pub(crate) addr: SocketAddr,
+    pub(crate) server: String,
     pub(crate) dir: PathBuf,
     pub(crate) entries: Vec<LibraryItem>,
     pub(crate) list_state: ListState,
@@ -117,7 +155,6 @@ pub(crate) struct App {
     pub(crate) queued_next: VecDeque<PathBuf>,
     pub(crate) auto_preview: Vec<PathBuf>,
     pub(crate) queue_revision: u64,
-    pub(crate) auto_preview_revision: u64,
     pub(crate) meta_cache: HashMap<PathBuf, TrackMeta>,
     auto_base_path: Option<PathBuf>,
     auto_preview_dirty: bool,
@@ -135,16 +172,14 @@ pub(crate) struct App {
     pub(crate) status: String,
     pub(crate) last_progress: Option<(u64, Option<u64>)>, // sent, total
 
-    pub(crate) remote_sample_rate: Option<u32>,
-    pub(crate) remote_channels: Option<u16>,
     pub(crate) remote_duration_ms: Option<u64>,
-    pub(crate) remote_played_frames: Option<u64>,
     pub(crate) remote_paused: Option<bool>,
+    pub(crate) remote_elapsed_ms: Option<u64>,
 }
 
 impl App {
-    pub(crate) fn new(
-        addr: SocketAddr,
+    fn new(
+        server: String,
         dir: PathBuf,
         entries: Vec<LibraryItem>,
         scan_tx: Sender<ScanReq>,
@@ -174,7 +209,7 @@ impl App {
         }
 
         Self {
-            addr,
+            server,
             dir,
             entries,
             list_state,
@@ -186,7 +221,6 @@ impl App {
             queued_next: VecDeque::new(),
             auto_preview: Vec::new(),
             queue_revision: 1,
-            auto_preview_revision: 0,
             meta_cache,
             auto_base_path: None,
             auto_preview_dirty: true,
@@ -202,23 +236,14 @@ impl App {
             auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
-            remote_sample_rate: None,
-            remote_channels: None,
             remote_duration_ms: None,
-            remote_played_frames: None,
             remote_paused: None,
+            remote_elapsed_ms: None,
         }
     }
 
     fn selected_index(&self) -> Option<usize> {
         self.list_state.selected()
-    }
-
-    fn selected_track(&self) -> Option<&Track> {
-        self.selected_index().and_then(|i| match self.entries.get(i) {
-            Some(LibraryItem::Track(track)) => Some(track),
-            _ => None,
-        })
     }
 
     fn mark_queue_dirty(&mut self) {
@@ -430,6 +455,9 @@ impl App {
     }
 
     fn rescan(&mut self) -> Result<()> {
+        if let Err(e) = server_api::rescan(&self.server) {
+            self.status = format!("Rescan request failed: {e:#}");
+        }
         self.request_scan(self.dir.clone())?;
         Ok(())
     }
@@ -508,7 +536,6 @@ impl App {
             return;
         };
         let track_path = track.path.clone();
-        let track_ext = track.ext_hint.clone();
         let track_meta = TrackMeta {
             duration_ms: track.duration_ms,
             sample_rate: track.sample_rate,
@@ -531,7 +558,6 @@ impl App {
         cmd_tx
             .send(Command::Play {
                 path: track_path.clone(),
-                ext_hint: track_ext,
             })
             .ok();
         self.ensure_meta_for_path(&track_path);
@@ -542,24 +568,18 @@ impl App {
         self.playing_queue_index = queue_index;
         self.auto_advance_armed = true;
         self.remote_duration_ms = track_duration;
-        self.remote_played_frames = Some(0);
+        self.remote_elapsed_ms = Some(0);
         self.remote_paused = Some(false);
         self.mark_queue_dirty();
     }
 
     fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>, clear_queue: bool) {
-        let ext_hint = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
         if clear_queue {
             self.queued_next.clear();
         }
         cmd_tx
             .send(Command::Play {
                 path: path.clone(),
-                ext_hint,
             })
             .ok();
 
@@ -594,7 +614,7 @@ impl App {
             }
         }
         self.remote_duration_ms = meta.duration_ms;
-        self.remote_played_frames = Some(0);
+        self.remote_elapsed_ms = Some(0);
         self.remote_paused = Some(false);
         self.auto_advance_armed = true;
         self.mark_queue_dirty();
@@ -605,20 +625,18 @@ impl App {
             return;
         }
 
-        let (Some(sr), Some(dur_ms), Some(frames), Some(_paused)) = (
-            self.remote_sample_rate,
+        let (Some(dur_ms), Some(elapsed_ms), Some(_paused)) = (
             self.remote_duration_ms,
-            self.remote_played_frames,
+            self.remote_elapsed_ms,
             self.remote_paused,
         ) else {
             return;
         };
 
-        if sr == 0 || dur_ms == 0 {
+        if dur_ms == 0 {
             return;
         }
-        let elapsed_ms = (frames as f64 * 1000.0) / (sr as f64);
-        if elapsed_ms + 50.0 < dur_ms as f64 {
+        if elapsed_ms + 50 < dur_ms {
             return;
         }
 
@@ -656,17 +674,46 @@ fn ui_loop(
         while let Ok(ev) = evt_rx.try_recv() {
             match ev {
                 Event::Status(s) => app.status = s,
-                Event::Progress { sent, total } => app.last_progress = Some((sent, total)),
-                Event::RemoteTrackInfo { sample_rate, channels, duration_ms } => {
-                    app.remote_sample_rate = Some(sample_rate);
-                    app.remote_channels = Some(channels);
-                    if app.remote_duration_ms.is_none() && duration_ms.is_some() {
+                Event::RemoteStatus {
+                    now_playing,
+                    elapsed_ms,
+                    duration_ms,
+                    paused,
+                    title,
+                    artist,
+                    album,
+                    format,
+                } => {
+                    if let Some(path) = now_playing {
+                        let path = PathBuf::from(path);
+                        app.now_playing_path = Some(path.clone());
+                        app.now_playing_index = app.entries.iter().position(|item| item.path() == path);
+                    } else {
+                        app.now_playing_path = None;
+                        app.now_playing_index = None;
+                        app.now_playing_meta = None;
+                    }
+                    if duration_ms.is_some() {
                         app.remote_duration_ms = duration_ms;
                     }
-                }
-                Event::RemotePlaybackPos { played_frames, paused } => {
-                    app.remote_played_frames = Some(played_frames);
+                    app.remote_elapsed_ms = elapsed_ms;
                     app.remote_paused = Some(paused);
+                    if title.is_some() || artist.is_some() || album.is_some() || format.is_some() {
+                        let mut meta = app.now_playing_meta.clone().unwrap_or_default();
+                        if artist.is_some() {
+                            meta.artist = artist;
+                        }
+                        if album.is_some() {
+                            meta.album = album;
+                        }
+                        if format.is_some() {
+                            meta.format = format;
+                        }
+                        if duration_ms.is_some() {
+                            meta.duration_ms = duration_ms;
+                        }
+                        app.now_playing_meta = Some(meta);
+                    }
                     app.maybe_auto_advance(&cmd_tx);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
@@ -747,8 +794,8 @@ fn ui_loop(
     }
 }
 
-fn list_entries_with_parent(dir: &PathBuf) -> Result<Vec<LibraryItem>> {
-    let mut entries = library::list_entries(dir)?;
+fn list_entries_with_parent(server: &str, dir: &PathBuf) -> Result<Vec<LibraryItem>> {
+    let mut entries = server_api::list_entries(server, dir)?;
     if let Some(parent) = dir.parent() {
         entries.insert(
             0,
@@ -780,6 +827,7 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::Track;
 
     fn track_item(path: &str, artist: &str) -> LibraryItem {
         LibraryItem::Track(Track {
@@ -789,7 +837,6 @@ mod tests {
                 .next()
                 .unwrap_or("file.flac")
                 .to_string(),
-            ext_hint: "flac".to_string(),
             duration_ms: Some(123_000),
             sample_rate: Some(48_000),
             album: Some("Album".to_string()),
@@ -804,7 +851,7 @@ mod tests {
         let (meta_tx, _meta_req_rx) = unbounded::<MetaReq>();
         let (_meta_done_tx, meta_rx) = unbounded::<MetaResp>();
         App::new(
-            "127.0.0.1:5555".parse().unwrap(),
+            "http://127.0.0.1:8080".to_string(),
             PathBuf::from("/music"),
             entries,
             scan_tx,

@@ -5,7 +5,8 @@ Stream audio files from your laptop/desktop to a small network “receiver” (p
 This repo is a Rust workspace with two main apps:
 
 - **`audio-bridge`** (receiver): runs on the target machine (e.g. RPi). Listens on TCP, decodes and plays audio through the selected output device.
-- **`audio-send`** (sender): runs on your machine. A small TUI that scans a directory for audio files and streams the selected track to the receiver—plus basic transport controls.
+- **`audio-server`** (server): runs on the media rack. Scans your library and exposes a small HTTP API for control.
+- **`audio-send`** (client): runs on your machine. A small TUI that connects to the server to browse and control playback.
 
 ## What this is for
 
@@ -24,6 +25,7 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 ├─ src/ # audio-bridge (receiver) main crate 
 ├─ crates/ 
 │ ├─ audio-send/ # sender TUI app 
+│ ├─ audio-server/ # HTTP control server 
 │ └─ audio-bridge-proto/ # shared protocol types/utilities 
 ├─ Cross.toml 
 ├─ Dockerfile.cross 
@@ -55,10 +57,16 @@ cargo run --release -p audio-bridge -- --device "USB" listen --bind 0.0.0.0:5555
 
 ### 2) Run the sender on your machine
 
-Point it at the receiver and a directory to scan:
+First start the server on the machine that hosts your media:
 
 ```bash
- cargo run --release -p audio-send -- --addr <RECEIVER_IP>:5555 --dir <MUSIC_DIR>
+cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --media-dir <MUSIC_DIR> --bridge <PI_IP>:5555
+```
+
+Then point the TUI at the server:
+
+```bash
+ cargo run --release -p audio-send -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
 ```
 
 ## audio-send keys (TUI)
