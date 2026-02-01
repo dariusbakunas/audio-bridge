@@ -5,7 +5,9 @@
 //! - Left/Backspace: go to parent dir
 //! - Enter: play selected (or enter dir)
 //! - Space: pause/resume
-//! - n: next (immediate skip)
+//! - n: next (queue)
+//! - k: toggle queue for selected track
+//! - K: queue all tracks in current folder
 //! - r: rescan directory
 //! - q: quit
 

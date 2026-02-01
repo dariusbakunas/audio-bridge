@@ -492,6 +492,29 @@ impl App {
         }
     }
 
+    fn queue_all_current_dir(&mut self) {
+        let paths: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter_map(|item| match item {
+                LibraryItem::Track(t) => Some(t.path.clone()),
+                _ => None,
+            })
+            .collect();
+        if paths.is_empty() {
+            self.status = "No tracks to queue".into();
+            return;
+        }
+        match server_api::queue_add(&self.server, &paths) {
+            Ok(_) => {
+                self.status = format!("Queued {} tracks", paths.len());
+            }
+            Err(e) => {
+                self.status = format!("Queue failed: {e:#}");
+            }
+        }
+    }
+
     fn play_track_at(&mut self, index: usize, _cmd_tx: &Sender<Command>) {
         let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
             return;
@@ -632,6 +655,9 @@ fn ui_loop(
                     }
                     KeyCode::Char('k') => {
                         app.toggle_queue_selected();
+                    }
+                    KeyCode::Char('K') => {
+                        app.queue_all_current_dir();
                     }
                     KeyCode::Char('p') => {
                         app.jump_to_playing()?;

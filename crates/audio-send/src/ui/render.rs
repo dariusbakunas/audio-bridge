@@ -269,7 +269,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue | p playing | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | r rescan | q quit",
         )),
         footer_chunks[4],
     );
