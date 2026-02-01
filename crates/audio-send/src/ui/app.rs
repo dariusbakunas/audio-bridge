@@ -81,6 +81,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                                 elapsed_ms: status.elapsed_ms,
                                 duration_ms: status.duration_ms,
                                 paused: status.paused,
+                                sample_rate: status.sample_rate,
                                 title: status.title,
                                 artist: status.artist,
                                 album: status.album,
@@ -416,6 +417,20 @@ impl App {
                         Ok(entries) => {
                             self.preview_dir = Some(resp.dir);
                             self.preview_entries = entries;
+                            for item in &self.preview_entries {
+                                if let LibraryItem::Track(track) = item {
+                                    self.meta_cache.insert(
+                                        track.path.clone(),
+                                        TrackMeta {
+                                            duration_ms: track.duration_ms,
+                                            sample_rate: track.sample_rate,
+                                            album: track.album.clone(),
+                                            artist: track.artist.clone(),
+                                            format: Some(track.format.clone()),
+                                        },
+                                    );
+                                }
+                            }
                         }
                         Err(_) => {
                             self.preview_dir = None;
@@ -679,6 +694,7 @@ fn ui_loop(
                     elapsed_ms,
                     duration_ms,
                     paused,
+                    sample_rate,
                     title,
                     artist,
                     album,
@@ -688,6 +704,7 @@ fn ui_loop(
                         let path = PathBuf::from(path);
                         app.now_playing_path = Some(path.clone());
                         app.now_playing_index = app.entries.iter().position(|item| item.path() == path);
+                        app.mark_queue_dirty();
                     } else {
                         app.now_playing_path = None;
                         app.now_playing_index = None;
@@ -712,6 +729,11 @@ fn ui_loop(
                         if duration_ms.is_some() {
                             meta.duration_ms = duration_ms;
                         }
+                        app.now_playing_meta = Some(meta);
+                    }
+                    if let Some(sr) = sample_rate {
+                        let mut meta = app.now_playing_meta.clone().unwrap_or_default();
+                        meta.sample_rate = Some(sr);
                         app.now_playing_meta = Some(meta);
                     }
                     app.maybe_auto_advance(&cmd_tx);

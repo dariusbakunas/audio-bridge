@@ -36,6 +36,7 @@ pub struct StatusResponse {
     pub paused: bool,
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,

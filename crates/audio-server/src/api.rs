@@ -98,27 +98,29 @@ pub async fn next_track(state: web::Data<AppState>) -> impl Responder {
 #[get("/status")]
 pub async fn status(state: web::Data<AppState>) -> impl Responder {
     let status = state.status.lock().unwrap();
-    let (title, artist, album, format) = match status.now_playing.as_ref() {
+    let (title, artist, album, format, sample_rate) = match status.now_playing.as_ref() {
         Some(path) => {
             let lib = state.library.read().unwrap();
             match lib.find_track_by_path(path) {
                 Some(crate::models::LibraryEntry::Track {
                     file_name,
+                    sample_rate,
                     artist,
                     album,
                     format,
                     ..
-                }) => (Some(file_name), artist, album, Some(format)),
-                _ => (None, None, None, None),
+                }) => (Some(file_name), artist, album, Some(format), sample_rate),
+                _ => (None, None, None, None, None),
             }
         }
-        None => (None, None, None, None),
+        None => (None, None, None, None, None),
     };
     let resp = StatusResponse {
         now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
         paused: status.paused,
         elapsed_ms: status.elapsed_ms,
         duration_ms: status.duration_ms,
+        sample_rate,
         title,
         artist,
         album,
