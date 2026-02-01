@@ -64,6 +64,7 @@ pub fn spawn_bridge_worker(
                 BridgeCommand::Play { path, ext_hint } => {
                     let mut next = Some((path, ext_hint));
                     while let Some((path, ext_hint)) = next.take() {
+                        tracing::info!(path = %path.display(), "bridge play");
                         if let Ok(mut s) = status.lock() {
                             s.now_playing = Some(path.clone());
                             s.paused = false;
@@ -115,8 +116,12 @@ fn connect_loop(
     let mut delay = Duration::from_millis(250);
     loop {
         match connect_and_handshake(addr, status.clone(), queue.clone(), cmd_tx.clone()) {
-            Ok(stream) => return stream,
+            Ok(stream) => {
+                tracing::info!(addr = %addr, "bridge connected");
+                return stream;
+            }
             Err(_) => {
+                tracing::warn!(addr = %addr, delay_ms = delay.as_millis(), "bridge connect failed");
                 std::thread::sleep(delay);
                 delay = (delay * 2).min(Duration::from_secs(5));
             }
@@ -150,7 +155,10 @@ fn spawn_bridge_reader(
     std::thread::spawn(move || loop {
         let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
             Ok(x) => x,
-            Err(_) => break,
+            Err(_) => {
+                tracing::warn!("bridge reader disconnected");
+                break;
+            }
         };
         let mut payload = vec![0u8; len as usize];
         if stream_rx.read_exact(&mut payload).is_err() {
