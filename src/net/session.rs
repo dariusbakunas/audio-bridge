@@ -1,30 +1,19 @@
-//! Network receiver utilities for “one file per connection” streaming.
-//!
-//! The receiver spools incoming bytes to a temp file while simultaneously providing a
-//! blocking, seekable reader to Symphonia. This allows “start playback as soon as enough
-//! bytes arrive” without requiring the socket itself to be seekable.
+//! Session handling for the streaming protocol.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::fs::OpenOptions;
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver};
-use symphonia::core::io::MediaSource;
 use symphonia::core::probe::Hint;
 
-const TEMP_PREFIX: &str = "audio-bridge-stream";
-
-#[derive(Debug)]
-pub(crate) struct Progress {
-    bytes_written: u64,
-    done: bool,
-}
+use super::spool::{is_done, make_temp_path, mark_done, Progress};
+use super::TEMP_PREFIX;
 
 /// A network session representing exactly one BEGIN_FILE..(FILE_CHUNK..)..(END_FILE or NEXT).
 ///
@@ -38,6 +27,7 @@ pub(crate) struct NetSession {
     pub(crate) peer_tx: TcpStream,
 }
 
+/// Shared control flags for a streaming session (pause/cancel) plus spool progress.
 #[derive(Clone, Debug)]
 pub(crate) struct SessionControl {
     pub(crate) progress: Arc<(Mutex<Progress>, Condvar)>,
@@ -248,20 +238,7 @@ fn reader_thread_main(
     }
 }
 
-fn mark_done(progress: &Arc<(Mutex<Progress>, Condvar)>) {
-    let (lock, cv) = &**progress;
-    let mut g = lock.lock().unwrap();
-    g.done = true;
-    drop(g);
-    cv.notify_all();
-}
-
-fn is_done(progress: &Arc<(Mutex<Progress>, Condvar)>) -> bool {
-    let (lock, _) = &**progress;
-    let g = lock.lock().unwrap();
-    g.done
-}
-
+/// Read and discard a payload of length `len` to keep the stream in sync.
 fn drain_payload(stream: &mut TcpStream, len: u32) {
     if len == 0 {
         return;
@@ -271,7 +248,6 @@ fn drain_payload(stream: &mut TcpStream, len: u32) {
     let _ = stream.read_exact(&mut junk);
 }
 
-
 /// Accept a single TCP connection from `listener`.
 pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
     let (stream, addr) = listener.accept().context("accept connection")?;
@@ -280,112 +256,4 @@ pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
         .set_nodelay(true)
         .ok(); // best-effort; not fatal
     Ok(stream)
-}
-
-pub(crate) fn cleanup_temp_files(dir: &Path) -> io::Result<usize> {
-    let mut removed = 0usize;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if !file_name.starts_with(TEMP_PREFIX) {
-            continue;
-        }
-        if std::fs::remove_file(entry.path()).is_ok() {
-            removed += 1;
-        }
-    }
-    Ok(removed)
-}
-
-fn make_temp_path(dir: &Path, prefix: &str) -> PathBuf {
-    let mut p = dir.to_path_buf();
-
-    // Uniqueness without extra crates.
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let nanos = now.as_nanos();
-
-    p.push(format!("{prefix}-{nanos}.bin"));
-    p
-}
-
-/// A seekable media source backed by a file that is being appended to concurrently.
-///
-/// Reads will block (via a condition variable) until at least 1 byte is available at the
-/// current read position, or the writer marks the stream done.
-pub(crate) struct BlockingFileSource {
-    file: File,
-    progress: Arc<(Mutex<Progress>, Condvar)>,
-    pos: u64,
-}
-
-impl BlockingFileSource {
-    pub(crate) fn new(file: File, progress: Arc<(Mutex<Progress>, Condvar)>) -> Self {
-        Self { file, progress, pos: 0 }
-    }
-
-    fn wait_until_available(&self, want_pos: u64) {
-        let (lock, cv) = &*self.progress;
-        let mut g = lock.lock().unwrap();
-        while !g.done && g.bytes_written < want_pos {
-            g = cv.wait(g).unwrap();
-        }
-    }
-}
-
-impl Read for BlockingFileSource {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        // Ensure at least 1 byte is available (or writer is done).
-        self.wait_until_available(self.pos.saturating_add(1));
-
-        let (lock, _) = &*self.progress;
-        let g = lock.lock().unwrap();
-
-        // True EOF only when writer is done AND we've consumed all written bytes.
-        if g.done && self.pos >= g.bytes_written {
-            return Ok(0);
-        }
-
-        let max_can_read = (g.bytes_written.saturating_sub(self.pos)) as usize;
-        let to_read = buf.len().min(max_can_read);
-        drop(g);
-
-        self.file.seek(SeekFrom::Start(self.pos))?;
-        let n = self.file.read(&mut buf[..to_read])?;
-        self.pos += n as u64;
-        Ok(n)
-    }
-}
-
-impl Seek for BlockingFileSource {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let target = match pos {
-            SeekFrom::Start(x) => x,
-            SeekFrom::Current(d) => self.pos.saturating_add_signed(d),
-            SeekFrom::End(_) => {
-                // For v1: wait until done, then treat end as final length.
-                self.wait_until_available(u64::MAX);
-                let (lock, _) = &*self.progress;
-                let g = lock.lock().unwrap();
-                g.bytes_written
-            }
-        };
-
-        // Block until the seek target exists (or stream is done).
-        self.wait_until_available(target);
-        self.pos = target;
-        Ok(self.pos)
-    }
-}
-
-impl MediaSource for BlockingFileSource {
-    fn is_seekable(&self) -> bool {
-        true
-    }
-
-    fn byte_len(&self) -> Option<u64> {
-        None
-    }
 }

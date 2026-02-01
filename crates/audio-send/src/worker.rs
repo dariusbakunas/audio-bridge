@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
+/// Commands sent from the UI thread to the worker.
 #[derive(Debug, Clone)]
 pub enum Command {
     Play { path: PathBuf, ext_hint: String },
@@ -22,6 +23,7 @@ pub enum Command {
     Quit,
 }
 
+/// Events sent from the worker back to the UI thread.
 #[derive(Debug, Clone)]
 pub enum Event {
     Status(String),
@@ -272,6 +274,9 @@ fn send_one_track_over_existing_connection(
     Ok(Flow::Continue)
 }
 
+/// Main loop for the background worker thread.
+///
+/// Owns the TCP connection and streams file bytes while handling UI commands.
 pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<Event>) {
     let mut paused = false;
     let mut last_played: Option<(PathBuf, String)> = None;

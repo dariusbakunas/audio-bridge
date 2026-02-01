@@ -98,6 +98,9 @@ pub(crate) fn start_streaming_decode(
     start_streaming_decode_from_media_source(Box::new(file), hint, buffer_seconds)
 }
 
+/// Decode packets from a probed `FormatReader` and push interleaved `f32` into `shared`.
+///
+/// This runs in the background thread spawned by `start_streaming_decode_from_media_source`.
 fn decode_format_loop(
     mut format: Box<dyn symphonia::core::formats::FormatReader>,
     codec_params: CodecParameters,
@@ -126,6 +129,9 @@ fn decode_format_loop(
     Ok(())
 }
 
+/// Best-effort duration in milliseconds from codec metadata.
+///
+/// Returns `None` if the container does not provide total frames or sample rate.
 fn duration_ms_from_codec_params(codec_params: &CodecParameters) -> Option<u64> {
     let frames = codec_params.n_frames?;
     let rate = codec_params.sample_rate? as u64;

@@ -152,6 +152,9 @@ struct PlaybackState {
 /// - stereo → mono: average L/R
 /// - stereo → stereo: pass-through
 /// - other layouts: best-effort “clamp to available channels”
+/// Read one output sample for `dst_ch`, applying a simple channel mapping.
+///
+/// `st.pos` advances once per destination frame (after the last channel).
 fn next_sample_mapped_from_vec(st: &mut PlaybackState, dst_channels: usize, dst_ch: usize) -> f32 {
     if st.pos >= st.src.len() {
         return 0.0;

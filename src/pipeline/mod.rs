@@ -1,5 +1,7 @@
 //! Playback pipeline wiring: resample + playback + optional reporting/cancel.
 
+mod progress;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -7,8 +9,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use cpal::traits::StreamTrait;
-use crate::{playback, queue, resample};
 
+use crate::{playback, queue, resample};
+use progress::{ProgressReporter, start_progress_reporter};
+
+/// Optional knobs for a single playback session (network sessions use these).
+///
+/// This lets the pipeline wire in:
+/// - pause/resume state
+/// - a cancel flag (for "next track" interrupts)
+/// - a peer socket for progress reporting
 pub(crate) struct PlaybackSessionOptions {
     pub(crate) paused: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
@@ -54,67 +64,9 @@ impl PlaybackState {
     }
 }
 
-struct ProgressReporter {
-    stop: Arc<std::sync::atomic::AtomicBool>,
-    handle: thread::JoinHandle<()>,
-}
-
-impl ProgressReporter {
-    fn stop(self) {
-        self.stop.store(true, Ordering::Relaxed);
-        let _ = self.handle.join();
-    }
-}
-
-fn start_progress_reporter(
-    mut peer_tx: std::net::TcpStream,
-    played_frames: Arc<AtomicU64>,
-    paused: Option<Arc<std::sync::atomic::AtomicBool>>,
-) -> ProgressReporter {
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let stop_thread = stop.clone();
-
-    peer_tx.set_nodelay(true).ok();
-    let handle = thread::spawn(move || loop {
-        if stop_thread.load(Ordering::Relaxed) {
-            let frames = played_frames.load(Ordering::Relaxed);
-            let payload = audio_bridge_proto::encode_playback_pos(frames, true);
-            let _ = audio_bridge_proto::write_frame(
-                &mut peer_tx,
-                audio_bridge_proto::FrameKind::PlaybackPos,
-                &payload,
-            );
-            break;
-        }
-
-        let is_paused = paused
-            .as_ref()
-            .map(|p| p.load(Ordering::Relaxed))
-            .unwrap_or(false);
-
-        if is_paused {
-            thread::sleep(Duration::from_millis(200));
-            continue;
-        }
-
-        let frames = played_frames.load(Ordering::Relaxed);
-        let payload = audio_bridge_proto::encode_playback_pos(frames, false);
-        if audio_bridge_proto::write_frame(
-            &mut peer_tx,
-            audio_bridge_proto::FrameKind::PlaybackPos,
-            &payload,
-        )
-        .is_err()
-        {
-            break;
-        }
-
-        thread::sleep(Duration::from_millis(200));
-    });
-
-    ProgressReporter { stop, handle }
-}
-
+/// Wire up the resampler + output stream and block until playback ends or is cancelled.
+///
+/// This function owns the stage wiring but delegates decoding to `decode::*`.
 pub(crate) fn play_decoded_source(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,

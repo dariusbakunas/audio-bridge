@@ -10,6 +10,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+/// Metadata for a single playable track.
 #[derive(Clone, Debug)]
 pub struct Track {
     pub path: PathBuf,
@@ -22,6 +23,7 @@ pub struct Track {
     pub format: String,
 }
 
+/// Optional metadata collected via Symphonia.
 #[derive(Clone, Debug, Default)]
 pub struct TrackMeta {
     pub duration_ms: Option<u64>,
@@ -31,6 +33,7 @@ pub struct TrackMeta {
     pub format: Option<String>,
 }
 
+/// A directory entry in the file browser list.
 #[derive(Clone, Debug)]
 pub enum LibraryItem {
     Dir { path: PathBuf, name: String },
@@ -64,6 +67,7 @@ impl LibraryItem {
     }
 }
 
+/// List folders + playable tracks in `dir`, sorted by name (dirs first).
 pub fn list_entries(dir: &Path) -> Result<Vec<LibraryItem>> {
     let mut dirs = Vec::new();
     let mut tracks = Vec::new();
@@ -123,6 +127,9 @@ pub fn list_entries(dir: &Path) -> Result<Vec<LibraryItem>> {
     Ok(out)
 }
 
+/// Best-effort probe for duration + tags.
+///
+/// Failures are swallowed; unknown fields remain `None`.
 pub fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
     let mut meta = TrackMeta::default();
     if ext_hint.is_empty() {
