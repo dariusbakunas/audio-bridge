@@ -114,6 +114,16 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     .block(Block::default().borders(Borders::ALL).title("Now Playing"));
     f.render_widget(now_playing, top_chunks[1]);
 
+    let queue_after_index: HashSet<PathBuf> = match app.server_queue_index {
+        Some(idx) => app
+            .queued_next
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| if i > idx { Some(p.clone()) } else { None })
+            .collect(),
+        None => app.queued_next.iter().cloned().collect(),
+    };
+
     let max_name_len = app
         .entries
         .iter()
@@ -150,7 +160,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     LibraryItem::Track(t) => Some(&t.path),
                     _ => None,
                 })
-                .map(|path| app.queued_next.iter().any(|p| p == path))
+                .map(|path| app.now_playing_path.as_ref() != Some(path) && queue_after_index.contains(path))
                 .unwrap_or(false)
             {
                 label = format!("{label}  [queued]");
@@ -174,16 +184,14 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let queue_width = mid_chunks[1].width as usize;
     let mut upcoming: Vec<(PathBuf, bool)> = Vec::new();
     let mut queued_set: HashSet<PathBuf> = HashSet::new();
-    for path in app.queued_next.iter() {
+    for path in queue_after_index.iter().cloned() {
+        if app.now_playing_path.as_ref() == Some(&path) {
+            continue;
+        }
         queued_set.insert(path.clone());
         upcoming.push((path.clone(), true));
     }
-    for path in app.auto_preview.iter() {
-        if queued_set.contains(path) {
-            continue;
-        }
-        upcoming.push((path.clone(), false));
-    }
+    // For now, "Up Next" is strictly the server queue.
 
     let queued_items: Vec<ListItem> = if upcoming.is_empty() {
         vec![ListItem::new("<empty>")]

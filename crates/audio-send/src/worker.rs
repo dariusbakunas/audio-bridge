@@ -1,7 +1,5 @@
 //! Background worker that forwards control commands to the HTTP server.
 
-use std::path::PathBuf;
-
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::server_api;
@@ -9,7 +7,6 @@ use crate::server_api;
 /// Commands sent from the UI thread to the worker.
 #[derive(Debug, Clone)]
 pub enum Command {
-    Play { path: PathBuf },
     PauseToggle,
     Next,
     Quit,
@@ -30,6 +27,10 @@ pub enum Event {
         album: Option<String>,
         format: Option<String>,
     },
+    QueueUpdate {
+        items: Vec<crate::server_api::RemoteQueueItem>,
+        index: Option<usize>,
+    },
     Error(String),
 }
 
@@ -37,13 +38,6 @@ pub fn worker_main(server: String, cmd_rx: Receiver<Command>, evt_tx: Sender<Eve
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             Command::Quit => break,
-            Command::Play { path } => {
-                if let Err(e) = server_api::play(&server, &path) {
-                    let _ = evt_tx.send(Event::Error(format!("Play failed: {e:#}")));
-                } else {
-                    let _ = evt_tx.send(Event::Status("Playing".into()));
-                }
-            }
             Command::PauseToggle => {
                 if let Err(e) = server_api::pause_toggle(&server) {
                     let _ = evt_tx.send(Event::Error(format!("Pause failed: {e:#}")));
@@ -52,10 +46,16 @@ pub fn worker_main(server: String, cmd_rx: Receiver<Command>, evt_tx: Sender<Eve
                 }
             }
             Command::Next => {
-                if let Err(e) = server_api::next(&server) {
-                    let _ = evt_tx.send(Event::Error(format!("Next failed: {e:#}")));
-                } else {
-                    let _ = evt_tx.send(Event::Status("Next".into()));
+                match server_api::queue_next(&server) {
+                    Ok(true) => {
+                        let _ = evt_tx.send(Event::Status("Next".into()));
+                    }
+                    Ok(false) => {
+                        let _ = evt_tx.send(Event::Status("End of queue".into()));
+                    }
+                    Err(e) => {
+                        let _ = evt_tx.send(Event::Error(format!("Next failed: {e:#}")));
+                    }
                 }
             }
         }

@@ -19,14 +19,27 @@ pub struct AppState {
     pub library: RwLock<LibraryIndex>,
     pub player: BridgePlayer,
     pub status: Arc<Mutex<PlayerStatus>>,
+    pub queue: Arc<Mutex<QueueState>>,
 }
 
 impl AppState {
-    pub fn new(library: LibraryIndex, cmd_tx: Sender<BridgeCommand>, status: Arc<Mutex<PlayerStatus>>) -> Self {
+    pub fn new(
+        library: LibraryIndex,
+        cmd_tx: Sender<BridgeCommand>,
+        status: Arc<Mutex<PlayerStatus>>,
+        queue: Arc<Mutex<QueueState>>,
+    ) -> Self {
         Self {
             library: RwLock::new(library),
             player: BridgePlayer { cmd_tx },
             status,
+            queue,
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct QueueState {
+    pub items: Vec<PathBuf>,
+    pub index: Option<usize>,
 }

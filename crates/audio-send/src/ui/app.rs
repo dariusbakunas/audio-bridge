@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -16,7 +16,7 @@ use ratatui::{
     Terminal,
 };
 
-use crate::library::{self, LibraryItem, TrackMeta};
+use crate::library::{LibraryItem, TrackMeta};
 use crate::server_api;
 use crate::worker::{self, Command, Event};
 
@@ -39,15 +39,6 @@ struct ScanResp {
     entries: Result<Vec<LibraryItem>, String>,
 }
 
-struct MetaReq {
-    path: PathBuf,
-    ext_hint: String,
-}
-
-struct MetaResp {
-    path: PathBuf,
-    meta: TrackMeta,
-}
 
 /// Launch the TUI, spawn the worker thread, and drive the event loop.
 pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
@@ -56,9 +47,6 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
     let (evt_tx, evt_rx) = unbounded::<Event>();
     let (scan_tx, scan_rx) = unbounded::<ScanReq>();
     let (scan_done_tx, scan_done_rx) = unbounded::<ScanResp>();
-    let (meta_tx, meta_rx) = unbounded::<MetaReq>();
-    let (meta_done_tx, meta_done_rx) = unbounded::<MetaResp>();
-
     let evt_tx_worker = evt_tx.clone();
     std::thread::spawn({
         let server = server.clone();
@@ -100,13 +88,26 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
         }
     });
 
-    std::thread::spawn(move || {
-        while let Ok(req) = meta_rx.recv() {
-            let meta = library::probe_track_meta(&req.path, &req.ext_hint);
-            let _ = meta_done_tx.send(MetaResp {
-                path: req.path,
-                meta,
-            });
+    std::thread::spawn({
+        let server = server.clone();
+        let evt_tx = evt_tx.clone();
+        move || {
+            let mut delay = Duration::from_millis(500);
+            loop {
+                std::thread::sleep(delay);
+                match server_api::queue_list(&server) {
+                    Ok(queue) => {
+                        delay = Duration::from_millis(500);
+                        let _ = evt_tx.send(Event::QueueUpdate {
+                            items: queue.items,
+                            index: queue.index,
+                        });
+                    }
+                    Err(_) => {
+                        delay = (delay * 2).min(Duration::from_secs(2));
+                    }
+                }
+            }
         }
     });
 
@@ -131,8 +132,6 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
         entries,
         scan_tx,
         scan_done_rx,
-        meta_tx,
-        meta_done_rx,
     );
 
     let mut term = init_terminal()?;
@@ -151,9 +150,8 @@ pub(crate) struct App {
     pub(crate) now_playing_index: Option<usize>,
     pub(crate) now_playing_path: Option<PathBuf>,
     pub(crate) now_playing_meta: Option<TrackMeta>,
-    pub(crate) playing_queue: Vec<PathBuf>,
-    pub(crate) playing_queue_index: Option<usize>,
     pub(crate) queued_next: VecDeque<PathBuf>,
+    pub(crate) server_queue_index: Option<usize>,
     pub(crate) auto_preview: Vec<PathBuf>,
     pub(crate) queue_revision: u64,
     pub(crate) meta_cache: HashMap<PathBuf, TrackMeta>,
@@ -165,10 +163,6 @@ pub(crate) struct App {
     preview_dir: Option<PathBuf>,
     preview_entries: Vec<LibraryItem>,
     pending_preview_scan: Option<PathBuf>,
-    meta_tx: Sender<MetaReq>,
-    meta_rx: Receiver<MetaResp>,
-    meta_inflight: HashSet<PathBuf>,
-    pub(crate) auto_advance_armed: bool,
 
     pub(crate) status: String,
     pub(crate) last_progress: Option<(u64, Option<u64>)>, // sent, total
@@ -185,8 +179,6 @@ impl App {
         entries: Vec<LibraryItem>,
         scan_tx: Sender<ScanReq>,
         scan_rx: Receiver<ScanResp>,
-        meta_tx: Sender<MetaReq>,
-        meta_rx: Receiver<MetaResp>,
     ) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() {
@@ -217,9 +209,8 @@ impl App {
             now_playing_index: None,
             now_playing_path: None,
             now_playing_meta: None,
-            playing_queue: Vec::new(),
-            playing_queue_index: None,
             queued_next: VecDeque::new(),
+            server_queue_index: None,
             auto_preview: Vec::new(),
             queue_revision: 1,
             meta_cache,
@@ -231,10 +222,6 @@ impl App {
             preview_dir: None,
             preview_entries: Vec::new(),
             pending_preview_scan: None,
-            meta_tx,
-            meta_rx,
-            meta_inflight: HashSet::new(),
-            auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
             remote_duration_ms: None,
@@ -259,10 +246,9 @@ impl App {
         }
 
         let base = self
-            .queued_next
-            .back()
-            .cloned()
-            .or_else(|| self.now_playing_path.clone());
+            .now_playing_path
+            .clone()
+            .or_else(|| self.queued_next.back().cloned());
 
         let Some(base) = base else {
             // Keep the existing preview if there's no active base yet.
@@ -305,40 +291,10 @@ impl App {
         self.auto_preview_dirty = false;
     }
 
-    pub(crate) fn ensure_meta_for_path(&mut self, path: &PathBuf) {
-        if self.meta_cache.contains_key(path) || self.meta_inflight.contains(path) {
-            return;
-        }
-        let ext_hint = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if self
-            .meta_tx
-            .send(MetaReq {
-                path: path.clone(),
-                ext_hint,
-            })
-            .is_ok()
-        {
-            self.meta_inflight.insert(path.clone());
-        }
-    }
-
-    fn drain_meta_results(&mut self) {
-        while let Ok(resp) = self.meta_rx.try_recv() {
-            self.meta_inflight.remove(&resp.path);
-            if self.now_playing_path.as_ref() == Some(&resp.path) {
-                self.now_playing_meta = Some(resp.meta.clone());
-            }
-            self.meta_cache.insert(resp.path, resp.meta);
-        }
-    }
+    // metadata is provided by the server; no local probing needed.
 
     fn request_scan(&mut self, dir: PathBuf) -> Result<()> {
         self.pending_scan = Some(dir.clone());
-        self.meta_inflight.clear();
         self.preview_dir = None;
         self.preview_entries.clear();
         self.pending_preview_scan = None;
@@ -523,30 +479,23 @@ impl App {
         let track_path = track.path.clone();
 
         if let Some(pos) = self.queued_next.iter().position(|p| p == &track_path) {
-            self.queued_next.remove(pos);
-            self.status = "Unqueued".into();
-            self.mark_queue_dirty();
-        } else {
+            if server_api::queue_remove(&self.server, &track_path).is_ok() {
+                self.queued_next.remove(pos);
+                self.status = "Unqueued".into();
+                self.mark_queue_dirty();
+            } else {
+                self.status = "Unqueue failed".into();
+            }
+        } else if server_api::queue_add(&self.server, &[track_path.clone()]).is_ok() {
             self.queued_next.push_back(track_path.clone());
-            self.ensure_meta_for_path(&track_path);
             self.status = "Queued".into();
             self.mark_queue_dirty();
+        } else {
+            self.status = "Queue failed".into();
         }
     }
 
-    fn next_track_index_from(&self, from: usize) -> Option<usize> {
-        if from >= self.entries.len() {
-            return None;
-        }
-        for i in (from + 1)..self.entries.len() {
-            if matches!(self.entries.get(i), Some(LibraryItem::Track(_))) {
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    fn play_track_at(&mut self, index: usize, cmd_tx: &Sender<Command>) {
+    fn play_track_at(&mut self, index: usize, _cmd_tx: &Sender<Command>) {
         let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
             return;
         };
@@ -560,119 +509,18 @@ impl App {
         };
         let track_duration = track.duration_ms;
 
-        let queue: Vec<PathBuf> = self
-            .entries
-            .iter()
-            .filter_map(|item| match item {
-                LibraryItem::Track(t) => Some(t.path.clone()),
-                _ => None,
-            })
-            .collect();
-        let queue_index = queue.iter().position(|p| p == &track_path);
-        self.queued_next.clear();
-        cmd_tx
-            .send(Command::Play {
-                path: track_path.clone(),
-            })
-            .ok();
-        self.ensure_meta_for_path(&track_path);
+        if server_api::queue_replace_play(&self.server, &track_path).is_err() {
+            self.status = "Play failed".into();
+        }
         self.now_playing_index = Some(index);
         self.now_playing_path = Some(track_path.clone());
         self.now_playing_meta = Some(track_meta);
-        self.playing_queue = queue;
-        self.playing_queue_index = queue_index;
-        self.auto_advance_armed = true;
         self.remote_duration_ms = track_duration;
         self.remote_elapsed_ms = Some(0);
         self.remote_paused = Some(false);
         self.mark_queue_dirty();
     }
 
-    fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>, clear_queue: bool) {
-        if clear_queue {
-            self.queued_next.clear();
-        }
-        cmd_tx
-            .send(Command::Play {
-                path: path.clone(),
-            })
-            .ok();
-
-        self.ensure_meta_for_path(&path);
-
-        let meta = self
-            .meta_cache
-            .get(&path)
-            .cloned()
-            .unwrap_or_default();
-
-        self.now_playing_path = Some(path.clone());
-        self.now_playing_index = self.entries.iter().position(|item| item.path() == path);
-        self.now_playing_meta = Some(meta.clone());
-        self.meta_cache.insert(path.clone(), meta.clone());
-        if let Some(idx) = self.now_playing_index {
-            self.select_index(idx);
-        }
-        if let Some(parent) = path.parent() {
-            if parent == self.dir.as_path() {
-                let queue: Vec<PathBuf> = self
-                    .entries
-                    .iter()
-                    .filter_map(|item| match item {
-                        LibraryItem::Track(t) => Some(t.path.clone()),
-                        _ => None,
-                    })
-                    .collect();
-                let queue_index = queue.iter().position(|p| p == &path);
-                self.playing_queue = queue;
-                self.playing_queue_index = queue_index;
-            }
-        }
-        self.remote_duration_ms = meta.duration_ms;
-        self.remote_elapsed_ms = Some(0);
-        self.remote_paused = Some(false);
-        self.auto_advance_armed = true;
-        self.mark_queue_dirty();
-    }
-
-    fn maybe_auto_advance(&mut self, cmd_tx: &Sender<Command>) {
-        if !self.auto_advance_armed {
-            return;
-        }
-
-        let (Some(dur_ms), Some(elapsed_ms), Some(_paused)) = (
-            self.remote_duration_ms,
-            self.remote_elapsed_ms,
-            self.remote_paused,
-        ) else {
-            return;
-        };
-
-        if dur_ms == 0 {
-            return;
-        }
-        if elapsed_ms + 50 < dur_ms {
-            return;
-        }
-
-        self.auto_advance_armed = false;
-        if let Some(next_path) = self.queued_next.pop_front() {
-            self.play_track_path(next_path, cmd_tx, false);
-            self.status = "Auto next (queued)".into();
-            return;
-        }
-
-        if let Some(idx) = self.playing_queue_index {
-            if let Some(next_path) = self.playing_queue.get(idx + 1).cloned() {
-                self.playing_queue_index = Some(idx + 1);
-                self.play_track_path(next_path, cmd_tx, false);
-                self.status = "Auto next".into();
-                return;
-            }
-        }
-
-        self.status = "End of list".into();
-    }
 }
 
 fn ui_loop(
@@ -689,6 +537,16 @@ fn ui_loop(
         while let Ok(ev) = evt_rx.try_recv() {
             match ev {
                 Event::Status(s) => app.status = s,
+                Event::QueueUpdate { items, index } => {
+                    app.queued_next = items.iter().map(|item| item.path.clone()).collect();
+                    for item in items {
+                        if let Some(meta) = item.meta {
+                            app.meta_cache.insert(item.path.clone(), meta);
+                        }
+                    }
+                    app.server_queue_index = index;
+                    app.mark_queue_dirty();
+                }
                 Event::RemoteStatus {
                     now_playing,
                     elapsed_ms,
@@ -736,13 +594,11 @@ fn ui_loop(
                         meta.sample_rate = Some(sr);
                         app.now_playing_meta = Some(meta);
                     }
-                    app.maybe_auto_advance(&cmd_tx);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
             }
         }
 
-        app.drain_meta_results();
         app.drain_scan_results();
 
         terminal.draw(|f| render::draw(f, app))?;
@@ -775,29 +631,8 @@ fn ui_loop(
                         cmd_tx.send(Command::PauseToggle).ok();
                     }
                     KeyCode::Char('n') => {
-                        // Immediate skip: tell worker "Next", then start the next selected track.
                         cmd_tx.send(Command::Next).ok();
-                        if let Some(next_path) = app.queued_next.pop_front() {
-                            app.play_track_path(next_path, &cmd_tx, false);
-                            app.status = "Skipping (queued)".into();
-                            continue;
-                        }
-                        if let Some(idx) = app.playing_queue_index {
-                            if let Some(next_path) = app.playing_queue.get(idx + 1).cloned() {
-                                app.playing_queue_index = Some(idx + 1);
-                                app.play_track_path(next_path, &cmd_tx, false);
-                                app.status = "Skipping (next)".into();
-                                continue;
-                            }
-                        }
-
-                        let start = app.selected_index().unwrap_or(0);
-                        if let Some(next_index) = app.next_track_index_from(start) {
-                            app.select_index(next_index);
-                            app.play_track_at(next_index, &cmd_tx);
-                        } else {
-                            app.status = "End of list".into();
-                        }
+                        app.status = "Skipping".into();
                     }
                     KeyCode::Char('k') => {
                         app.toggle_queue_selected();
@@ -870,16 +705,12 @@ mod tests {
     fn app_with_entries(entries: Vec<LibraryItem>) -> App {
         let (scan_tx, _scan_req_rx) = unbounded::<ScanReq>();
         let (_scan_done_tx, scan_rx) = unbounded::<ScanResp>();
-        let (meta_tx, _meta_req_rx) = unbounded::<MetaReq>();
-        let (_meta_done_tx, meta_rx) = unbounded::<MetaResp>();
         App::new(
             "http://127.0.0.1:8080".to_string(),
             PathBuf::from("/music"),
             entries,
             scan_tx,
             scan_rx,
-            meta_tx,
-            meta_rx,
         )
     }
 
@@ -917,46 +748,5 @@ mod tests {
         assert_eq!(app.auto_preview, vec![PathBuf::from("/music/next.flac")]);
     }
 
-    #[test]
-    fn queueing_track_requests_meta() {
-        let entries = vec![track_item("/music/a.flac", "A")];
-        let mut app = app_with_entries(entries);
-        app.list_state.select(Some(0));
-        app.toggle_queue_selected();
-        // ensure_meta_for_path will early-return if meta_cache already contains the path
-        assert!(app.meta_cache.contains_key(&PathBuf::from("/music/a.flac")));
-    }
-
-    #[test]
-    fn play_track_clears_queue() {
-        let entries = vec![
-            track_item("/music/a.flac", "A"),
-            track_item("/music/b.flac", "B"),
-        ];
-        let mut app = app_with_entries(entries);
-        app.queued_next.push_back(PathBuf::from("/music/a.flac"));
-        app.list_state.select(Some(1));
-        let (cmd_tx, _cmd_rx) = unbounded::<Command>();
-        app.play_track_at(1, &cmd_tx);
-        assert!(app.queued_next.is_empty());
-    }
-
-    #[test]
-    fn next_keeps_queue() {
-        let entries = vec![
-            track_item("/music/a.flac", "A"),
-            track_item("/music/b.flac", "B"),
-        ];
-        let mut app = app_with_entries(entries);
-        app.queued_next.push_back(PathBuf::from("/music/b.flac"));
-        app.queued_next.push_back(PathBuf::from("/music/c.flac"));
-        app.remote_sample_rate = Some(48_000);
-        app.remote_duration_ms = Some(1_000);
-        app.remote_played_frames = Some(48_000);
-        app.remote_paused = Some(false);
-        app.auto_advance_armed = true;
-        let (cmd_tx, _cmd_rx) = unbounded::<Command>();
-        app.maybe_auto_advance(&cmd_tx);
-        assert_eq!(app.queued_next.len(), 1);
-    }
+    // auto-advance moved to server; client no longer manipulates queue on playback end.
 }

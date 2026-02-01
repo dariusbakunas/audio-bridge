@@ -48,9 +48,12 @@ pub fn scan_library(root: &Path) -> Result<LibraryIndex> {
         return Err(anyhow::anyhow!("root is not a directory: {:?}", root));
     }
 
+    tracing::info!(root = %root.display(), "scanning library");
+
     let mut entries_by_dir = std::collections::HashMap::new();
     scan_dir(&root, &root, &mut entries_by_dir)?;
 
+    tracing::info!(root = %root.display(), dirs = entries_by_dir.len(), "library scan complete");
     Ok(LibraryIndex { root, entries_by_dir })
 }
 
