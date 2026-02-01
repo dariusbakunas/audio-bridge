@@ -1,4 +1,4 @@
-//! `audio-send` — a small TUI to stream audio files to `audio-bridge`.
+//! `hub-cli` — a small TUI to stream audio files to `bridge`.
 //!
 //! Features:
 //! - list `.flac`/`.wav` files in current directory (non-recursive)
@@ -18,7 +18,7 @@ use anyhow::Result;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "audio-send")]
+#[command(name = "hub-cli")]
 struct Args {
     /// Base URL of the audio server, e.g. http://192.168.1.10:8080
     #[arg(long)]

@@ -41,7 +41,7 @@ use crate::models;
         )
     ),
     tags(
-        (name = "audio-server", description = "Audio server control API")
+        (name = "audio-hub-server", description = "Audio server control API")
     )
 )]
 pub struct ApiDoc;

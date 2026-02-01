@@ -64,7 +64,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .map(|s| s.to_string())
         .unwrap_or_else(|| "-".into());
     let header = Paragraph::new(vec![
-        Line::from(format!("audio-send  →  {}", app.server)),
+        Line::from(format!("hub-cli  →  {}", app.server)),
         Line::from(format!("dir: {:?}", app.dir)),
         Line::from(format!("output: {output_line}")),
     ])

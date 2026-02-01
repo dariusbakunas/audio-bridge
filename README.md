@@ -1,12 +1,12 @@
-# audio-bridge
+# audio-hub
 
 Stream audio files from your laptop/desktop to a small network “receiver” (perfect for a Raspberry Pi connected to a USB DAC).
 
 This repo is a Rust workspace with two main apps:
 
-- **`audio-bridge`** (receiver): runs on the target machine (e.g. RPi). Listens on TCP, decodes and plays audio through the selected output device.
-- **`audio-server`** (server): runs on the media rack. Scans your library and exposes a small HTTP API for control.
-- **`audio-send`** (client): runs on your machine. A small TUI that connects to the server to browse and control playback.
+- **`bridge`** (receiver): runs on the target machine (e.g. RPi). Listens on TCP, decodes and plays audio through the selected output device.
+- **`audio-hub-server`** (server): runs on the media rack. Scans your library and exposes a small HTTP API for control.
+- **`hub-cli`** (client): runs on your machine. A small TUI that connects to the server to browse and control playback.
 
 ## What this is for
 
@@ -22,10 +22,10 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 
 ```text
 . 
-├─ src/ # audio-bridge (receiver) main crate 
 ├─ crates/ 
-│ ├─ audio-send/ # sender TUI app 
-│ ├─ audio-server/ # HTTP control server 
+│ ├─ bridge/ # receiver (bridge)
+│ ├─ hub-cli/ # sender TUI app 
+│ ├─ audio-hub-server/ # HTTP control server 
 │ └─ audio-bridge-proto/ # shared protocol types/utilities 
 ├─ Cross.toml 
 ├─ Dockerfile.cross 
@@ -35,8 +35,8 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 
 ## Supported formats
 
-- Sender (`audio-send`) currently focuses on: **`.flac`** and **`.wav`**
-- Receiver (`audio-bridge`) uses Symphonia for decoding (FLAC enabled).
+- Sender (`hub-cli`) currently focuses on: **`.flac`** and **`.wav`**
+- Receiver (`bridge`) uses Symphonia for decoding (FLAC enabled).
 
 ## Quick start (local network)
 
@@ -45,14 +45,14 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 Pick a bind address/port (example uses `:5555`):
 
 ```bash
-cargo run --release -p audio-bridge -- listen --bind 0.0.0.0:5555
+cargo run --release -p bridge -- listen --bind 0.0.0.0:5555
 ```
 
 Optional: list output devices and choose one by substring:
 
 ```bash
-cargo run --release -p audio-bridge -- --list-devices
-cargo run --release -p audio-bridge -- --device "USB" listen --bind 0.0.0.0:5555
+cargo run --release -p bridge -- --list-devices
+cargo run --release -p bridge -- --device "USB" listen --bind 0.0.0.0:5555
 ```
 
 ### 2) Run the sender on your machine
@@ -60,13 +60,13 @@ cargo run --release -p audio-bridge -- --device "USB" listen --bind 0.0.0.0:5555
 First start the server on the machine that hosts your media (config is required):
 
 ```bash
-cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio-server/config.example.toml
+cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml
 ```
 
 Then point the TUI at the server:
 
 ```bash
- cargo run --release -p audio-send -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
+ cargo run --release -p hub-cli -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
 ```
 
 ## Server config
@@ -88,10 +88,10 @@ bridge_addr = "192.168.1.50:5555"
 Pass it via `--config` (you can still override the media path via `--media-dir`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
 
 ```bash
-cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio-server/config.example.toml
+cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml
 ```
 
-## audio-send keys (TUI)
+## hub-cli keys (TUI)
 
 - **↑/↓**: select track
 - **Enter**: play selected track (starts streaming immediately)
@@ -102,7 +102,7 @@ cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio
 
 ## Tuning playback stability vs latency
 
-`audio-bridge` exposes a few knobs that trade latency for underrun resistance.
+`bridge` exposes a few knobs that trade latency for underrun resistance.
 
 - **Default (USB stable)**  
   `--buffer-seconds 2.0 --chunk-frames 1024 --refill-max-frames 4096`
@@ -116,7 +116,7 @@ cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio
 Example:
 
 ```bash
-cargo run --release -p audio-bridge --
+cargo run --release -p bridge --
 --buffer-seconds 2.0
 --chunk-frames 1024
 --refill-max-frames 4096
@@ -141,7 +141,7 @@ docker build --platform linux/amd64 -t audio-bridge-cross:x86_64-gnu -f Dockerfi
 cargo install cross 
 rustup toolchain install stable-x86_64-unknown-linux-gnu --force-non-host
 CROSS_CONTAINER_OPTS="--platform linux/amd64"
-cross build --release --target x86_64-unknown-linux-gnu -p audio-bridge -p audio-send
+cross build --release --target x86_64-unknown-linux-gnu -p bridge -p hub-cli
 ```
 
 > Note: the included `Cross.toml` / `Dockerfile.cross` are geared toward a GNU Linux target. Adjust targets as needed for your Pi model/toolchain.

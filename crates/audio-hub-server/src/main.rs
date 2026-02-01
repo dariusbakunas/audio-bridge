@@ -22,7 +22,7 @@ use crate::library::scan_library;
 use crate::state::{AppState, PlayerStatus, QueueState, OutputState};
 
 #[derive(Parser, Debug)]
-#[command(name = "audio-server")]
+#[command(name = "audio-hub-server")]
 struct Args {
     /// HTTP bind address, e.g. 0.0.0.0:8080
     #[arg(long)]
@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
     tracing::info!(
         bind = %bind,
         media_dir = %media_dir.display(),
-        "starting audio-server"
+        "starting audio-hub-server"
     );
     let library = scan_library(&media_dir)?;
     let (outputs, active_id, bridge_addr) = config::outputs_from_config(cfg)?;

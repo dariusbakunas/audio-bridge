@@ -1,4 +1,4 @@
-# Example audio-server config
+# Example audio-hub-server config
 #
 # bind: HTTP address the server listens on
 # outputs: list of available output targets

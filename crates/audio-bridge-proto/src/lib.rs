@@ -1,4 +1,4 @@
-//! Shared protocol primitives for `audio-bridge` and `audio-send`.
+//! Shared protocol primitives for `bridge` and `hub-cli`.
 //!
 //! Protocol v2: framed stream over a single TCP connection.
 //! Frames allow:

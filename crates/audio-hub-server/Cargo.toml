@@ -1,20 +1,20 @@
 [package]
-name = "audio-server"
+name = "audio-hub-server"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 actix-web = "4.11.0"
-anyhow = "1.0.100"
+anyhow = { workspace = true }
 audio-bridge-proto = { path = "../audio-bridge-proto" }
-clap = { version = "4.5.56", features = ["derive"] }
-crossbeam-channel = "0.5.15"
+clap = { workspace = true }
+crossbeam-channel = { workspace = true }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
-symphonia = { version = "0.5.5", features = ["flac"] }
+symphonia = { workspace = true }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-ctrlc = "3.4.5"
+ctrlc = { workspace = true }
 utoipa = { version = "4.2.3", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "7.1.0", features = ["actix-web"] }
 toml = "0.8.23"

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "audio-bridge")]
+#[command(name = "bridge")]
 pub struct Args {
     #[command(subcommand)]
     pub cmd: Command,

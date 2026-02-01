@@ -1,22 +1,20 @@
-[package]
-name = "audio-bridge"
-version = "0.1.0"
-edition = "2024"
-
 [workspace]
 members = [
+    "crates/bridge",
     "crates/audio-bridge-proto",
-    "crates/audio-send",
-    "crates/audio-server",
+    "crates/hub-cli",
+    "crates/audio-hub-server",
 ]
 
-[dependencies]
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
 anyhow = "1.0.100"
 audioadapter-buffers = "2.0.0"
 clap = { version = "4.5.56", features = ["derive"] }
 cpal = "0.17.1"
+ctrlc = "3.4.5"
+crossbeam-channel = "0.5.15"
 rubato = "1.0.1"
 symphonia = { version = "0.5.5", features = ["flac"] }
-audio-bridge-proto = { path = "crates/audio-bridge-proto" }
-crossbeam-channel = "0.5.15"
-ctrlc = "3.4.5"
