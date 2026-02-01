@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
 };
 
-use crate::library::{self, LibraryItem};
+use crate::library::{LibraryItem, TrackMeta};
 
 use super::app::App;
 
@@ -207,18 +207,12 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             .iter()
             .enumerate()
             .map(|(i, (path, is_queued))| {
-                let meta = app
-                    .meta_cache
-                    .get(path)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        let ext_hint = path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .unwrap_or("")
-                            .to_ascii_lowercase();
-                        library::probe_track_meta(path, &ext_hint)
-                    });
+                let meta = if let Some(meta) = app.meta_cache.get(path).cloned() {
+                    meta
+                } else {
+                    app.ensure_meta_for_path(path);
+                    TrackMeta::default()
+                };
                 let artist = meta.artist.unwrap_or_else(|| "-".into());
                 let album = meta.album.unwrap_or_else(|| "-".into());
                 let song = path

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -22,18 +22,70 @@ use crate::worker::{self, Command, Event};
 
 use super::render;
 
+struct ScanReq {
+    dir: PathBuf,
+}
+
+struct ScanResp {
+    dir: PathBuf,
+    entries: Result<Vec<LibraryItem>, String>,
+}
+
+struct MetaReq {
+    path: PathBuf,
+    ext_hint: String,
+}
+
+struct MetaResp {
+    path: PathBuf,
+    meta: TrackMeta,
+}
+
 /// Launch the TUI, spawn the worker thread, and drive the event loop.
 pub(crate) fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
     let entries = list_entries_with_parent(&dir)?;
     let (cmd_tx, cmd_rx) = unbounded::<Command>();
     let (evt_tx, evt_rx) = unbounded::<Event>();
+    let (scan_tx, scan_rx) = unbounded::<ScanReq>();
+    let (scan_done_tx, scan_done_rx) = unbounded::<ScanResp>();
+    let (meta_tx, meta_rx) = unbounded::<MetaReq>();
+    let (meta_done_tx, meta_done_rx) = unbounded::<MetaResp>();
 
     std::thread::spawn({
         let addr = addr;
         move || worker::worker_main(addr, cmd_rx, evt_tx)
     });
 
-    let mut app = App::new(addr, dir, entries);
+    std::thread::spawn(move || {
+        while let Ok(req) = meta_rx.recv() {
+            let meta = library::probe_track_meta(&req.path, &req.ext_hint);
+            let _ = meta_done_tx.send(MetaResp {
+                path: req.path,
+                meta,
+            });
+        }
+    });
+
+    std::thread::spawn(move || {
+        while let Ok(req) = scan_rx.recv() {
+            let entries = list_entries_with_parent(&req.dir)
+                .map_err(|e| format!("{e:#}"));
+            let _ = scan_done_tx.send(ScanResp {
+                dir: req.dir,
+                entries,
+            });
+        }
+    });
+
+    let mut app = App::new(
+        addr,
+        dir,
+        entries,
+        scan_tx,
+        scan_done_rx,
+        meta_tx,
+        meta_done_rx,
+    );
 
     let mut term = init_terminal()?;
     let result = ui_loop(&mut term, &mut app, cmd_tx, evt_rx);
@@ -58,6 +110,12 @@ pub(crate) struct App {
     pub(crate) queue_revision: u64,
     pub(crate) auto_preview_revision: u64,
     pub(crate) meta_cache: HashMap<PathBuf, TrackMeta>,
+    scan_tx: Sender<ScanReq>,
+    scan_rx: Receiver<ScanResp>,
+    pending_scan: Option<PathBuf>,
+    meta_tx: Sender<MetaReq>,
+    meta_rx: Receiver<MetaResp>,
+    meta_inflight: HashSet<PathBuf>,
     pub(crate) auto_advance_armed: bool,
 
     pub(crate) status: String,
@@ -71,7 +129,15 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub(crate) fn new(addr: SocketAddr, dir: PathBuf, entries: Vec<LibraryItem>) -> Self {
+    pub(crate) fn new(
+        addr: SocketAddr,
+        dir: PathBuf,
+        entries: Vec<LibraryItem>,
+        scan_tx: Sender<ScanReq>,
+        scan_rx: Receiver<ScanResp>,
+        meta_tx: Sender<MetaReq>,
+        meta_rx: Receiver<MetaResp>,
+    ) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() {
             list_state.select(Some(0));
@@ -92,6 +158,12 @@ impl App {
             queue_revision: 1,
             auto_preview_revision: 0,
             meta_cache: HashMap::new(),
+            scan_tx,
+            scan_rx,
+            pending_scan: None,
+            meta_tx,
+            meta_rx,
+            meta_inflight: HashSet::new(),
             auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
@@ -138,14 +210,14 @@ impl App {
             self.auto_preview_revision = self.queue_revision;
             return;
         };
-        let Ok(entries) = library::list_entries(parent) else {
+        if parent != self.dir.as_path() {
             self.auto_preview_revision = self.queue_revision;
             return;
-        };
-        let queue: Vec<PathBuf> = entries
-            .into_iter()
+        }
+        let queue: Vec<PathBuf> = self.entries
+            .iter()
             .filter_map(|item| match item {
-                LibraryItem::Track(t) => Some(t.path),
+                LibraryItem::Track(t) => Some(t.path.clone()),
                 _ => None,
             })
             .collect();
@@ -156,6 +228,99 @@ impl App {
         }
 
         self.auto_preview_revision = self.queue_revision;
+    }
+
+    pub(crate) fn ensure_meta_for_path(&mut self, path: &PathBuf) {
+        if self.meta_cache.contains_key(path) || self.meta_inflight.contains(path) {
+            return;
+        }
+        let ext_hint = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if self
+            .meta_tx
+            .send(MetaReq {
+                path: path.clone(),
+                ext_hint,
+            })
+            .is_ok()
+        {
+            self.meta_inflight.insert(path.clone());
+        }
+    }
+
+    fn drain_meta_results(&mut self) {
+        while let Ok(resp) = self.meta_rx.try_recv() {
+            self.meta_inflight.remove(&resp.path);
+            if self.now_playing_path.as_ref() == Some(&resp.path) {
+                self.now_playing_meta = Some(resp.meta.clone());
+            }
+            self.meta_cache.insert(resp.path, resp.meta);
+        }
+    }
+
+    fn request_scan(&mut self, dir: PathBuf) -> Result<()> {
+        self.pending_scan = Some(dir.clone());
+        self.entries.clear();
+        self.list_state.select(None);
+        self.meta_cache.clear();
+        self.meta_inflight.clear();
+        self.auto_preview.clear();
+        self.auto_preview_revision = 0;
+        self.queue_revision = self.queue_revision.wrapping_add(1);
+        self.scan_tx
+            .send(ScanReq { dir })
+            .map_err(|_| anyhow::anyhow!("scan thread is not available"))?;
+        Ok(())
+    }
+
+    fn drain_scan_results(&mut self) {
+        while let Ok(resp) = self.scan_rx.try_recv() {
+            let Some(pending) = self.pending_scan.as_ref() else {
+                continue;
+            };
+            if &resp.dir != pending {
+                continue;
+            }
+            self.pending_scan = None;
+            match resp.entries {
+                Ok(entries) => {
+                    self.entries = entries;
+                    for item in &self.entries {
+                        if let LibraryItem::Track(track) = item {
+                            self.meta_cache.insert(
+                                track.path.clone(),
+                                TrackMeta {
+                                    duration_ms: track.duration_ms,
+                                    sample_rate: track.sample_rate,
+                                    album: track.album.clone(),
+                                    artist: track.artist.clone(),
+                                    format: Some(track.format.clone()),
+                                },
+                            );
+                        }
+                    }
+                    self.now_playing_index = self
+                        .now_playing_path
+                        .as_ref()
+                        .and_then(|path| self.entries.iter().position(|item| item.path() == path));
+                    if self.entries.is_empty() {
+                        self.list_state.select(None);
+                    } else {
+                        self.list_state.select(Some(0));
+                    }
+                    if let Some(idx) = self.now_playing_index {
+                        self.select_index(idx);
+                    }
+                    self.status = format!("Entered {:?}", self.dir);
+                }
+                Err(e) => {
+                    self.status = format!("Scan error: {e}");
+                }
+            }
+        }
     }
 
     fn selected_dir(&self) -> Option<PathBuf> {
@@ -186,47 +351,23 @@ impl App {
     }
 
     fn rescan(&mut self) -> Result<()> {
-        self.entries = list_entries_with_parent(&self.dir)?;
-        self.meta_cache.clear();
-        for item in &self.entries {
-            if let LibraryItem::Track(track) = item {
-                self.meta_cache.insert(
-                    track.path.clone(),
-                    TrackMeta {
-                        duration_ms: track.duration_ms,
-                        sample_rate: track.sample_rate,
-                        album: track.album.clone(),
-                        artist: track.artist.clone(),
-                        format: Some(track.format.clone()),
-                    },
-                );
-            }
-        }
-        self.now_playing_index = self
-            .now_playing_path
-            .as_ref()
-            .and_then(|path| self.entries.iter().position(|item| item.path() == path));
-        if self.entries.is_empty() {
-            self.list_state.select(None);
-        } else {
-            self.list_state.select(Some(0));
-        }
+        self.request_scan(self.dir.clone())?;
         Ok(())
     }
 
     fn go_parent(&mut self) -> Result<()> {
         if let Some(parent) = self.dir.parent() {
             self.dir = parent.to_path_buf();
-            self.rescan()?;
-            self.status = format!("Entered {:?}", self.dir);
+            self.request_scan(self.dir.clone())?;
+            self.status = format!("Entering {:?}", self.dir);
         }
         Ok(())
     }
 
     fn enter_dir(&mut self, dir: PathBuf) -> Result<()> {
         self.dir = dir;
-        self.rescan()?;
-        self.status = format!("Entered {:?}", self.dir);
+        self.request_scan(self.dir.clone())?;
+        self.status = format!("Entering {:?}", self.dir);
         Ok(())
     }
 
@@ -240,14 +381,8 @@ impl App {
             return Ok(());
         };
         self.dir = parent.to_path_buf();
-        self.rescan()?;
-        if let Some(idx) = self.entries.iter().position(|item| item.path() == path) {
-            self.now_playing_index = Some(idx);
-            self.select_index(idx);
-            self.status = "Jumped to playing".into();
-        } else {
-            self.status = "Playing track not in folder".into();
-        }
+        self.request_scan(self.dir.clone())?;
+        self.status = "Jumping to playing".into();
         Ok(())
     }
 
@@ -330,13 +465,22 @@ impl App {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let meta = library::probe_track_meta(&path, &ext_hint);
         cmd_tx
             .send(Command::Play {
                 path: path.clone(),
                 ext_hint,
             })
             .ok();
+
+        if !self.meta_cache.contains_key(&path) {
+            self.ensure_meta_for_path(&path);
+        }
+
+        let meta = self
+            .meta_cache
+            .get(&path)
+            .cloned()
+            .unwrap_or_default();
 
         self.now_playing_path = Some(path.clone());
         self.now_playing_index = self.entries.iter().position(|item| item.path() == path);
@@ -346,11 +490,12 @@ impl App {
             self.select_index(idx);
         }
         if let Some(parent) = path.parent() {
-            if let Ok(entries) = library::list_entries(parent) {
-                let queue: Vec<PathBuf> = entries
-                    .into_iter()
+            if parent == self.dir.as_path() {
+                let queue: Vec<PathBuf> = self
+                    .entries
+                    .iter()
                     .filter_map(|item| match item {
-                        LibraryItem::Track(t) => Some(t.path),
+                        LibraryItem::Track(t) => Some(t.path.clone()),
                         _ => None,
                     })
                     .collect();
@@ -439,6 +584,9 @@ fn ui_loop(
             }
         }
 
+        app.drain_meta_results();
+        app.drain_scan_results();
+
         terminal.draw(|f| render::draw(f, app))?;
 
         let timeout = tick.saturating_sub(last_tick.elapsed());
@@ -456,7 +604,7 @@ fn ui_loop(
                     }
                     KeyCode::Char('r') => {
                         app.rescan()?;
-                        app.status = "Rescanned".into();
+                        app.status = "Rescanning...".into();
                     }
                     KeyCode::Enter => {
                         if let Some(dir) = app.selected_dir() {
