@@ -23,7 +23,7 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph},
     Terminal,
@@ -337,7 +337,11 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
             .constraints([Constraint::Min(10), Constraint::Length(30)])
             .split(footer_chunks[3]);
 
-        f.render_widget(Gauge::default().ratio(ratio), gauge_chunks[0]);
+        let gauge = Gauge::default()
+            .ratio(ratio)
+            .style(Style::default().fg(Color::Black).bg(Color::White))
+            .gauge_style(Style::default().fg(Color::White).bg(Color::Black));
+        f.render_widget(gauge, gauge_chunks[0]);
         f.render_widget(
             Paragraph::new(Line::from(label)).alignment(Alignment::Right),
             gauge_chunks[1],
