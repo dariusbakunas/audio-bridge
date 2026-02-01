@@ -116,4 +116,4 @@ cross build --release --target x86_64-unknown-linux-gnu -p audio-bridge -p audio
 
 ## License
 
-TODO
+Licensed under the Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
