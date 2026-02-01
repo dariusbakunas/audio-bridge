@@ -12,6 +12,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -62,6 +63,7 @@ struct App {
     now_playing_meta: Option<TrackMeta>,
     playing_queue: Vec<PathBuf>,
     playing_queue_index: Option<usize>,
+    queued_next: VecDeque<PathBuf>,
     auto_advance_armed: bool,
 
     status: String,
@@ -91,6 +93,7 @@ impl App {
             now_playing_meta: None,
             playing_queue: Vec::new(),
             playing_queue_index: None,
+            queued_next: VecDeque::new(),
             auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
@@ -195,6 +198,24 @@ impl App {
         self.list_state.select(Some(idx));
     }
 
+    fn toggle_queue_selected(&mut self) {
+        let Some(index) = self.selected_index() else {
+            return;
+        };
+        let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
+            self.status = "Cannot queue a folder".into();
+            return;
+        };
+
+        if let Some(pos) = self.queued_next.iter().position(|p| p == &track.path) {
+            self.queued_next.remove(pos);
+            self.status = "Unqueued".into();
+        } else {
+            self.queued_next.push_back(track.path.clone());
+            self.status = "Queued".into();
+        }
+    }
+
     fn next_track_index_from(&self, from: usize) -> Option<usize> {
         if from >= self.entries.len() {
             return None;
@@ -263,6 +284,20 @@ impl App {
         if let Some(idx) = self.now_playing_index {
             self.select_index(idx);
         }
+        if let Some(parent) = path.parent() {
+            if let Ok(entries) = library::list_entries(parent) {
+                let queue: Vec<PathBuf> = entries
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        LibraryItem::Track(t) => Some(t.path),
+                        _ => None,
+                    })
+                    .collect();
+                let queue_index = queue.iter().position(|p| p == &path);
+                self.playing_queue = queue;
+                self.playing_queue_index = queue_index;
+            }
+        }
         self.remote_duration_ms = meta.duration_ms;
         self.remote_played_frames = Some(0);
         self.remote_paused = Some(false);
@@ -292,6 +327,12 @@ impl App {
         }
 
         self.auto_advance_armed = false;
+        if let Some(next_path) = self.queued_next.pop_front() {
+            self.play_track_path(next_path, cmd_tx);
+            self.status = "Auto next (queued)".into();
+            return;
+        }
+
         if let Some(idx) = self.playing_queue_index {
             if let Some(next_path) = self.playing_queue.get(idx + 1).cloned() {
                 self.playing_queue_index = Some(idx + 1);
@@ -368,6 +409,11 @@ fn ui_loop(
                     KeyCode::Char('n') => {
                         // Immediate skip: tell worker "Next", then start the next selected track.
                         cmd_tx.send(Command::Next).ok();
+                        if let Some(next_path) = app.queued_next.pop_front() {
+                            app.play_track_path(next_path, &cmd_tx);
+                            app.status = "Skipping (queued)".into();
+                            continue;
+                        }
                         if let Some(idx) = app.playing_queue_index {
                             if let Some(next_path) = app.playing_queue.get(idx + 1).cloned() {
                                 app.playing_queue_index = Some(idx + 1);
@@ -384,6 +430,9 @@ fn ui_loop(
                         } else {
                             app.status = "End of list".into();
                         }
+                    }
+                    KeyCode::Char('k') => {
+                        app.toggle_queue_selected();
                     }
                     KeyCode::Char('p') => {
                         app.jump_to_playing()?;
@@ -539,11 +588,22 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
                 None if item.is_dir() => format!("{:<width$}  [dir]", name, width = max_name_len),
                 None => name,
             };
-            let label = if app.now_playing_index == Some(idx) {
-                format!("{label}  [playing]")
-            } else {
-                label
-            };
+            let mut label = label;
+            if app.now_playing_index == Some(idx) {
+                label = format!("{label}  [playing]");
+            }
+            if app
+                .entries
+                .get(idx)
+                .and_then(|entry| match entry {
+                    LibraryItem::Track(t) => Some(&t.path),
+                    _ => None,
+                })
+                .map(|path| app.queued_next.iter().any(|p| p == path))
+                .unwrap_or(false)
+            {
+                label = format!("{label}  [queued]");
+            }
             ListItem::new(label)
         })
         .collect();
@@ -587,7 +647,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     if let Some((ratio, label)) = remote_gauge {
         let gauge_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(10), Constraint::Length(30)])
+            .constraints([Constraint::Min(10), Constraint::Length(40)])
             .split(footer_chunks[3]);
 
         let gauge = Gauge::default()
@@ -607,7 +667,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | p playing | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue | p playing | r rescan | q quit",
         )),
         footer_chunks[4],
     );
