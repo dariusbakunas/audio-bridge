@@ -12,7 +12,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -64,6 +64,9 @@ struct App {
     playing_queue: Vec<PathBuf>,
     playing_queue_index: Option<usize>,
     queued_next: VecDeque<PathBuf>,
+    auto_preview: Vec<PathBuf>,
+    queue_revision: u64,
+    auto_preview_revision: u64,
     meta_cache: HashMap<PathBuf, TrackMeta>,
     auto_advance_armed: bool,
 
@@ -95,6 +98,9 @@ impl App {
             playing_queue: Vec::new(),
             playing_queue_index: None,
             queued_next: VecDeque::new(),
+            auto_preview: Vec::new(),
+            queue_revision: 1,
+            auto_preview_revision: 0,
             meta_cache: HashMap::new(),
             auto_advance_armed: false,
             status: "Ready".into(),
@@ -116,6 +122,50 @@ impl App {
             Some(LibraryItem::Track(track)) => Some(track),
             _ => None,
         })
+    }
+
+    fn mark_queue_dirty(&mut self) {
+        self.queue_revision = self.queue_revision.wrapping_add(1);
+    }
+
+    fn refresh_auto_preview_if_needed(&mut self) {
+        if self.auto_preview_revision == self.queue_revision {
+            return;
+        }
+
+        self.auto_preview.clear();
+        let base = self
+            .queued_next
+            .back()
+            .cloned()
+            .or_else(|| self.now_playing_path.clone());
+
+        let Some(base) = base else {
+            self.auto_preview_revision = self.queue_revision;
+            return;
+        };
+        let Some(parent) = base.parent() else {
+            self.auto_preview_revision = self.queue_revision;
+            return;
+        };
+        let Ok(entries) = library::list_entries(parent) else {
+            self.auto_preview_revision = self.queue_revision;
+            return;
+        };
+        let queue: Vec<PathBuf> = entries
+            .into_iter()
+            .filter_map(|item| match item {
+                LibraryItem::Track(t) => Some(t.path),
+                _ => None,
+            })
+            .collect();
+        if let Some(idx) = queue.iter().position(|p| p == &base) {
+            for path in queue.iter().skip(idx + 1) {
+                self.auto_preview.push(path.clone());
+            }
+        }
+
+        self.auto_preview_revision = self.queue_revision;
     }
 
     fn selected_dir(&self) -> Option<PathBuf> {
@@ -227,9 +277,11 @@ impl App {
         if let Some(pos) = self.queued_next.iter().position(|p| p == &track.path) {
             self.queued_next.remove(pos);
             self.status = "Unqueued".into();
+            self.mark_queue_dirty();
         } else {
             self.queued_next.push_back(track.path.clone());
             self.status = "Queued".into();
+            self.mark_queue_dirty();
         }
     }
 
@@ -279,6 +331,7 @@ impl App {
         self.remote_duration_ms = track.duration_ms;
         self.remote_played_frames = Some(0);
         self.remote_paused = Some(false);
+        self.mark_queue_dirty();
     }
 
     fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>) {
@@ -320,6 +373,7 @@ impl App {
         self.remote_played_frames = Some(0);
         self.remote_paused = Some(false);
         self.auto_advance_armed = true;
+        self.mark_queue_dirty();
     }
 
     fn maybe_auto_advance(&mut self, cmd_tx: &Sender<Command>) {
@@ -467,6 +521,8 @@ fn ui_loop(
 }
 
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
+    app.refresh_auto_preview_if_needed();
+
     let remote_status = match (
         app.remote_played_frames,
         app.remote_sample_rate,
@@ -639,13 +695,26 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     f.render_stateful_widget(list, mid_chunks[0], &mut app.list_state);
 
     let queue_width = mid_chunks[1].width as usize;
-    let queued_items: Vec<ListItem> = if app.queued_next.is_empty() {
+    let mut upcoming: Vec<(PathBuf, bool)> = Vec::new();
+    let mut queued_set: HashSet<PathBuf> = HashSet::new();
+    for path in app.queued_next.iter() {
+        queued_set.insert(path.clone());
+        upcoming.push((path.clone(), true));
+    }
+    for path in app.auto_preview.iter() {
+        if queued_set.contains(path) {
+            continue;
+        }
+        upcoming.push((path.clone(), false));
+    }
+
+    let queued_items: Vec<ListItem> = if upcoming.is_empty() {
         vec![ListItem::new("<empty>")]
     } else {
-        app.queued_next
+        upcoming
             .iter()
             .enumerate()
-            .map(|(i, path)| {
+            .map(|(i, (path, is_queued))| {
                 let meta = app
                     .meta_cache
                     .get(path)
@@ -664,14 +733,15 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("<file>");
-                let label = format!("{:>2}. {} - {} - {}", i + 1, artist, album, song);
+                let tag = if *is_queued { "queued" } else { "auto" };
+                let label = format!("{:>2}. {} - {} - {} [{tag}]", i + 1, artist, album, song);
                 ListItem::new(truncate_label(&label, queue_width.saturating_sub(1)))
             })
             .collect()
     };
 
     let queue_list = List::new(queued_items)
-        .block(Block::default().borders(Borders::ALL).title("Queue"))
+        .block(Block::default().borders(Borders::ALL).title("Up Next"))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     f.render_widget(queue_list, mid_chunks[1]);
