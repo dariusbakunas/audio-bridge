@@ -77,6 +77,13 @@ fn start_progress_reporter(
     peer_tx.set_nodelay(true).ok();
     let handle = thread::spawn(move || loop {
         if stop_thread.load(Ordering::Relaxed) {
+            let frames = played_frames.load(Ordering::Relaxed);
+            let payload = audio_bridge_proto::encode_playback_pos(frames, true);
+            let _ = audio_bridge_proto::write_frame(
+                &mut peer_tx,
+                audio_bridge_proto::FrameKind::PlaybackPos,
+                &payload,
+            );
             break;
         }
 

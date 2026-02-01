@@ -30,7 +30,7 @@ use ratatui::{
     Terminal,
 };
 
-use crate::library::{self, LibraryItem, Track};
+use crate::library::{self, LibraryItem, Track, TrackMeta};
 use crate::worker::{self, Command, Event};
 
 pub fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
@@ -57,6 +57,12 @@ struct App {
     dir: PathBuf,
     entries: Vec<LibraryItem>,
     list_state: ListState,
+    now_playing_index: Option<usize>,
+    now_playing_path: Option<PathBuf>,
+    now_playing_meta: Option<TrackMeta>,
+    playing_queue: Vec<PathBuf>,
+    playing_queue_index: Option<usize>,
+    auto_advance_armed: bool,
 
     status: String,
     last_progress: Option<(u64, Option<u64>)>, // sent, total
@@ -80,6 +86,12 @@ impl App {
             dir,
             entries,
             list_state,
+            now_playing_index: None,
+            now_playing_path: None,
+            now_playing_meta: None,
+            playing_queue: Vec::new(),
+            playing_queue_index: None,
+            auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
             remote_sample_rate: None,
@@ -130,6 +142,10 @@ impl App {
 
     fn rescan(&mut self) -> Result<()> {
         self.entries = list_entries_with_parent(&self.dir)?;
+        self.now_playing_index = self
+            .now_playing_path
+            .as_ref()
+            .and_then(|path| self.entries.iter().position(|item| item.path() == path));
         if self.entries.is_empty() {
             self.list_state.select(None);
         } else {
@@ -152,6 +168,140 @@ impl App {
         self.rescan()?;
         self.status = format!("Entered {:?}", self.dir);
         Ok(())
+    }
+
+    fn jump_to_playing(&mut self) -> Result<()> {
+        let Some(path) = self.now_playing_path.clone() else {
+            self.status = "Nothing playing".into();
+            return Ok(());
+        };
+        let Some(parent) = path.parent() else {
+            self.status = "Playing track has no parent".into();
+            return Ok(());
+        };
+        self.dir = parent.to_path_buf();
+        self.rescan()?;
+        if let Some(idx) = self.entries.iter().position(|item| item.path() == path) {
+            self.now_playing_index = Some(idx);
+            self.select_index(idx);
+            self.status = "Jumped to playing".into();
+        } else {
+            self.status = "Playing track not in folder".into();
+        }
+        Ok(())
+    }
+
+    fn select_index(&mut self, idx: usize) {
+        self.list_state.select(Some(idx));
+    }
+
+    fn next_track_index_from(&self, from: usize) -> Option<usize> {
+        if from >= self.entries.len() {
+            return None;
+        }
+        for i in (from + 1)..self.entries.len() {
+            if matches!(self.entries.get(i), Some(LibraryItem::Track(_))) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn play_track_at(&mut self, index: usize, cmd_tx: &Sender<Command>) {
+        let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
+            return;
+        };
+        let queue: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter_map(|item| match item {
+                LibraryItem::Track(t) => Some(t.path.clone()),
+                _ => None,
+            })
+            .collect();
+        let queue_index = queue.iter().position(|p| p == &track.path);
+        cmd_tx
+            .send(Command::Play {
+                path: track.path.clone(),
+                ext_hint: track.ext_hint.clone(),
+            })
+            .ok();
+        self.now_playing_index = Some(index);
+        self.now_playing_path = Some(track.path.clone());
+        self.now_playing_meta = Some(TrackMeta {
+            duration_ms: track.duration_ms,
+            sample_rate: track.sample_rate,
+            album: track.album.clone(),
+            artist: track.artist.clone(),
+            format: Some(track.format.clone()),
+        });
+        self.playing_queue = queue;
+        self.playing_queue_index = queue_index;
+        self.auto_advance_armed = true;
+        self.remote_duration_ms = track.duration_ms;
+        self.remote_played_frames = Some(0);
+        self.remote_paused = Some(false);
+    }
+
+    fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>) {
+        let ext_hint = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let meta = library::probe_track_meta(&path, &ext_hint);
+        cmd_tx
+            .send(Command::Play {
+                path: path.clone(),
+                ext_hint,
+            })
+            .ok();
+
+        self.now_playing_path = Some(path.clone());
+        self.now_playing_index = self.entries.iter().position(|item| item.path() == path);
+        self.now_playing_meta = Some(meta.clone());
+        if let Some(idx) = self.now_playing_index {
+            self.select_index(idx);
+        }
+        self.remote_duration_ms = meta.duration_ms;
+        self.remote_played_frames = Some(0);
+        self.remote_paused = Some(false);
+        self.auto_advance_armed = true;
+    }
+
+    fn maybe_auto_advance(&mut self, cmd_tx: &Sender<Command>) {
+        if !self.auto_advance_armed {
+            return;
+        }
+
+        let (Some(sr), Some(dur_ms), Some(frames), Some(_paused)) = (
+            self.remote_sample_rate,
+            self.remote_duration_ms,
+            self.remote_played_frames,
+            self.remote_paused,
+        ) else {
+            return;
+        };
+
+        if sr == 0 || dur_ms == 0 {
+            return;
+        }
+        let elapsed_ms = (frames as f64 * 1000.0) / (sr as f64);
+        if elapsed_ms + 50.0 < dur_ms as f64 {
+            return;
+        }
+
+        self.auto_advance_armed = false;
+        if let Some(idx) = self.playing_queue_index {
+            if let Some(next_path) = self.playing_queue.get(idx + 1).cloned() {
+                self.playing_queue_index = Some(idx + 1);
+                self.play_track_path(next_path, cmd_tx);
+                self.status = "Auto next".into();
+                return;
+            }
+        }
+
+        self.status = "End of list".into();
     }
 }
 
@@ -180,6 +330,7 @@ fn ui_loop(
                 Event::RemotePlaybackPos { played_frames, paused } => {
                     app.remote_played_frames = Some(played_frames);
                     app.remote_paused = Some(paused);
+                    app.maybe_auto_advance(&cmd_tx);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
             }
@@ -207,16 +358,8 @@ fn ui_loop(
                     KeyCode::Enter => {
                         if let Some(dir) = app.selected_dir() {
                             app.enter_dir(dir)?;
-                        } else if let Some(t) = app.selected_track() {
-                            cmd_tx
-                                .send(Command::Play {
-                                    path: t.path.clone(),
-                                    ext_hint: t.ext_hint.clone(),
-                                })
-                                .ok();
-                            app.remote_duration_ms = t.duration_ms;
-                            app.remote_played_frames = Some(0);
-                            app.remote_paused = Some(false);
+                        } else if let Some(index) = app.selected_index() {
+                            app.play_track_at(index, &cmd_tx);
                         }
                     }
                     KeyCode::Char(' ') => {
@@ -225,18 +368,25 @@ fn ui_loop(
                     KeyCode::Char('n') => {
                         // Immediate skip: tell worker "Next", then start the next selected track.
                         cmd_tx.send(Command::Next).ok();
-                        app.select_next();
-                        if let Some(t) = app.selected_track() {
-                            cmd_tx
-                                .send(Command::Play {
-                                    path: t.path.clone(),
-                                    ext_hint: t.ext_hint.clone(),
-                                })
-                                .ok();
-                            app.remote_duration_ms = t.duration_ms;
-                            app.remote_played_frames = Some(0);
-                            app.remote_paused = Some(false);
+                        if let Some(idx) = app.playing_queue_index {
+                            if let Some(next_path) = app.playing_queue.get(idx + 1).cloned() {
+                                app.playing_queue_index = Some(idx + 1);
+                                app.play_track_path(next_path, &cmd_tx);
+                                app.status = "Skipping (next)".into();
+                                continue;
+                            }
                         }
+
+                        let start = app.selected_index().unwrap_or(0);
+                        if let Some(next_index) = app.next_track_index_from(start) {
+                            app.select_index(next_index);
+                            app.play_track_at(next_index, &cmd_tx);
+                        } else {
+                            app.status = "End of list".into();
+                        }
+                    }
+                    KeyCode::Char('p') => {
+                        app.jump_to_playing()?;
                     }
                     _ => {}
                 }
@@ -297,15 +447,72 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(5), Constraint::Length(7)])
+        .constraints([Constraint::Length(12), Constraint::Min(5), Constraint::Length(7)])
         .split(f.area());
+
+    let top_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Length(8)])
+        .split(chunks[0]);
 
     let header = Paragraph::new(vec![
         Line::from(format!("audio-send  →  {}", app.addr)),
         Line::from(format!("dir: {:?}", app.dir)),
     ])
         .block(Block::default().borders(Borders::ALL).title("Target"));
-    f.render_widget(header, chunks[0]);
+    f.render_widget(header, top_chunks[0]);
+
+    let playing_name = app
+        .now_playing_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("-");
+    let playing_path = app
+        .now_playing_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "-".into());
+    let playing_album = app
+        .now_playing_meta
+        .as_ref()
+        .and_then(|m| m.album.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("-");
+    let playing_artist = app
+        .now_playing_meta
+        .as_ref()
+        .and_then(|m| m.artist.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("-");
+    let playing_format = app
+        .now_playing_meta
+        .as_ref()
+        .and_then(|m| m.format.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("-");
+    let source_sr = app
+        .now_playing_meta
+        .as_ref()
+        .and_then(|m| m.sample_rate);
+    let output_sr = app.remote_sample_rate;
+    let sr_line = match (source_sr, output_sr) {
+        (Some(src), Some(out)) => format!("sample rate: {src} Hz → {out} Hz"),
+        (Some(src), None) => format!("sample rate: {src} Hz → -"),
+        (None, Some(out)) => format!("sample rate: - → {out} Hz"),
+        (None, None) => "sample rate: -".into(),
+    };
+
+    let now_playing = Paragraph::new(vec![
+        Line::from(format!("file: {playing_name}")),
+        Line::from(format!("path: {playing_path}")),
+        Line::from(format!("album: {playing_album}")),
+        Line::from(format!("artist: {playing_artist}")),
+        Line::from(format!("format: {playing_format}")),
+        Line::from(sr_line),
+    ])
+    .block(Block::default().borders(Borders::ALL).title("Now Playing"));
+    f.render_widget(now_playing, top_chunks[1]);
 
     let max_name_len = app
         .entries
@@ -317,7 +524,8 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let items: Vec<ListItem> = app
         .entries
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(idx, item)| {
             let name = if item.is_dir() {
                 format!("{}/", item.name())
             } else {
@@ -330,6 +538,11 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
                 }
                 None if item.is_dir() => format!("{:<width$}  [dir]", name, width = max_name_len),
                 None => name,
+            };
+            let label = if app.now_playing_index == Some(idx) {
+                format!("{label}  [playing]")
+            } else {
+                label
             };
             ListItem::new(label)
         })
@@ -394,7 +607,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | p playing | r rescan | q quit",
         )),
         footer_chunks[4],
     );
