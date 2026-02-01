@@ -84,6 +84,8 @@ pub fn spawn_bridge_worker(
                             s.now_playing = Some(path.clone());
                             s.paused = false;
                             s.elapsed_ms = Some(0);
+                            s.sample_rate = None;
+                            s.channels = None;
                             s.auto_advance_in_flight = false;
                         }
                         match send_one_track_over_existing_connection(
@@ -213,12 +215,13 @@ fn spawn_bridge_reader(
         match kind {
             audio_bridge_proto::FrameKind::TrackInfo => {
                 if let Ok((sr, _ch, dur)) = audio_bridge_proto::decode_track_info(&payload) {
-                    if let Ok(mut s) = status.lock() {
-                        s.sample_rate = Some(sr);
-                        if dur.is_some() {
-                            s.duration_ms = dur;
+                        if let Ok(mut s) = status.lock() {
+                            s.sample_rate = Some(sr);
+                            s.channels = Some(_ch);
+                            if dur.is_some() {
+                                s.duration_ms = dur;
+                            }
                         }
-                    }
                 }
             }
             audio_bridge_proto::FrameKind::PlaybackPos => {

@@ -22,6 +22,8 @@ pub enum Event {
         duration_ms: Option<u64>,
         paused: bool,
         sample_rate: Option<u32>,
+        channels: Option<u16>,
+        output_sample_rate: Option<u32>,
         title: Option<String>,
         artist: Option<String>,
         album: Option<String>,

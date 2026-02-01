@@ -50,12 +50,12 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(12), Constraint::Min(5), Constraint::Length(7)])
+        .constraints([Constraint::Length(14), Constraint::Min(5), Constraint::Length(7)])
         .split(f.area());
 
     let top_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Length(8)])
+        .constraints([Constraint::Length(4), Constraint::Length(15)])
         .split(chunks[0]);
 
     let output_line = app
@@ -100,13 +100,20 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .and_then(|m| m.format.as_ref())
         .map(|s| s.as_str())
         .unwrap_or("-");
+    let playing_channels = app
+        .remote_channels
+        .map(|ch| ch.to_string())
+        .unwrap_or_else(|| "-".into());
     let source_sr = app
         .now_playing_meta
         .as_ref()
         .and_then(|m| m.sample_rate);
-    let sr_line = match source_sr {
-        Some(src) => format!("sample rate: {src} Hz"),
-        None => "sample rate: -".into(),
+    let output_sr = app.remote_output_sample_rate;
+    let sr_line = match (source_sr, output_sr) {
+        (Some(src), Some(out)) => format!("sample rate: {src} Hz -> {out} Hz"),
+        (Some(src), None) => format!("sample rate: {src} Hz -> -"),
+        (None, Some(out)) => format!("sample rate: - -> {out} Hz"),
+        (None, None) => "sample rate: -".into(),
     };
 
     let now_playing = Paragraph::new(vec![
@@ -115,6 +122,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         Line::from(format!("album: {playing_album}")),
         Line::from(format!("artist: {playing_artist}")),
         Line::from(format!("format: {playing_format}")),
+        Line::from(format!("channels: {playing_channels}")),
         Line::from(sr_line),
     ])
     .block(Block::default().borders(Borders::ALL).title("Now Playing"));

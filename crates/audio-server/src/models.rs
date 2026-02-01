@@ -50,6 +50,8 @@ pub struct StatusResponse {
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    pub output_sample_rate: Option<u32>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,

@@ -343,6 +343,8 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         elapsed_ms: status.elapsed_ms,
         duration_ms: status.duration_ms,
         sample_rate,
+        channels: status.channels,
+        output_sample_rate: status.sample_rate,
         title,
         artist,
         album,

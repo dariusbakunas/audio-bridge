@@ -70,6 +70,8 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                                 duration_ms: status.duration_ms,
                                 paused: status.paused,
                                 sample_rate: status.sample_rate,
+                                channels: status.channels,
+                                output_sample_rate: status.output_sample_rate,
                                 title: status.title,
                                 artist: status.artist,
                                 album: status.album,
@@ -169,6 +171,8 @@ pub(crate) struct App {
     pub(crate) remote_duration_ms: Option<u64>,
     pub(crate) remote_paused: Option<bool>,
     pub(crate) remote_elapsed_ms: Option<u64>,
+    pub(crate) remote_channels: Option<u16>,
+    pub(crate) remote_output_sample_rate: Option<u32>,
     pub(crate) remote_output_id: Option<String>,
 }
 
@@ -226,6 +230,8 @@ impl App {
             remote_duration_ms: None,
             remote_paused: None,
             remote_elapsed_ms: None,
+            remote_channels: None,
+            remote_output_sample_rate: None,
             remote_output_id: None,
         }
     }
@@ -575,6 +581,8 @@ fn ui_loop(
                     duration_ms,
                     paused,
                     sample_rate,
+                    channels,
+                    output_sample_rate,
                     title,
                     artist,
                     album,
@@ -590,6 +598,8 @@ fn ui_loop(
                         app.now_playing_path = None;
                         app.now_playing_index = None;
                         app.now_playing_meta = None;
+                        app.remote_channels = None;
+                        app.remote_output_sample_rate = None;
                     }
                     if duration_ms.is_some() {
                         app.remote_duration_ms = duration_ms;
@@ -617,6 +627,8 @@ fn ui_loop(
                         meta.sample_rate = Some(sr);
                         app.now_playing_meta = Some(meta);
                     }
+                    app.remote_channels = channels;
+                    app.remote_output_sample_rate = output_sample_rate;
                     app.remote_output_id = Some(output_id);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
