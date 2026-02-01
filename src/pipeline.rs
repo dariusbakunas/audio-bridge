@@ -87,13 +87,18 @@ fn start_progress_reporter(
             break;
         }
 
-        let frames = played_frames.load(Ordering::Relaxed);
         let is_paused = paused
             .as_ref()
             .map(|p| p.load(Ordering::Relaxed))
             .unwrap_or(false);
 
-        let payload = audio_bridge_proto::encode_playback_pos(frames, is_paused);
+        if is_paused {
+            thread::sleep(Duration::from_millis(200));
+            continue;
+        }
+
+        let frames = played_frames.load(Ordering::Relaxed);
+        let payload = audio_bridge_proto::encode_playback_pos(frames, false);
         if audio_bridge_proto::write_frame(
             &mut peer_tx,
             audio_bridge_proto::FrameKind::PlaybackPos,
