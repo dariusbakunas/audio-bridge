@@ -147,6 +147,47 @@ fn connect_and_spawn_rx(addr: SocketAddr, evt_tx: &Sender<Event>) -> Result<TcpS
     Ok(stream)
 }
 
+fn reconnect_loop(addr: SocketAddr, evt_tx: &Sender<Event>) -> TcpStream {
+    let mut delay = Duration::from_millis(250);
+    loop {
+        evt_tx
+            .send(Event::Status(format!(
+                "Reconnecting to {addr}... ({} ms)",
+                delay.as_millis()
+            )))
+            .ok();
+        match connect_and_spawn_rx(addr, evt_tx) {
+            Ok(stream) => {
+                evt_tx.send(Event::Status("Reconnected".into())).ok();
+                return stream;
+            }
+            Err(e) => {
+                evt_tx.send(Event::Status(format!("Reconnect failed: {e:#}"))).ok();
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_secs(5));
+            }
+        }
+    }
+}
+
+fn is_network_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(ioe) = cause.downcast_ref::<io::Error>() {
+            matches!(
+                ioe.kind(),
+                io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::NotConnected
+                    | io::ErrorKind::UnexpectedEof
+                    | io::ErrorKind::TimedOut
+            )
+        } else {
+            false
+        }
+    })
+}
+
 fn send_one_track_over_existing_connection(
     stream: &mut TcpStream,
     cmd_rx: &Receiver<Command>,
@@ -233,16 +274,17 @@ fn send_one_track_over_existing_connection(
 
 pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<Event>) {
     let mut paused = false;
+    let mut last_played: Option<(PathBuf, String)> = None;
 
     let mut stream = match connect_and_spawn_rx(addr, &evt_tx) {
         Ok(s) => s,
         Err(e) => {
-            let _ = evt_tx.send(Event::Error(format!("{e:#}")));
-            return;
+            let _ = evt_tx.send(Event::Status(format!("Initial connect failed: {e:#}")));
+            reconnect_loop(addr, &evt_tx)
         }
     };
 
-    // Main control loop: no reconnects; just reuse the same stream.
+    // Main control loop: reuse the stream; reconnect and restart on drop.
     loop {
         let cmd = match cmd_rx.recv() {
             Ok(c) => c,
@@ -270,6 +312,7 @@ pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<E
                 let _ = evt_tx.send(Event::Status("Skipping (next)".into()));
             }
             Command::Play { path, ext_hint } => {
+                last_played = Some((path.clone(), ext_hint.clone()));
                 // New track should start playing (do not carry pause across tracks).
                 paused = false;
 
@@ -292,8 +335,23 @@ pub fn worker_main(addr: SocketAddr, cmd_rx: Receiver<Command>, evt_tx: Sender<E
                             pending = Some((path, ext_hint));
                         }
                         Err(err) => {
-                            let _ = evt_tx.send(Event::Error(format!("{err:#}")));
-                            return;
+                            if is_network_error(&err) {
+                                let _ = evt_tx.send(Event::Status(format!(
+                                    "Connection lost: {err:#}"
+                                )));
+                                stream = reconnect_loop(addr, &evt_tx);
+                                if let Some((lp, le)) = last_played.clone() {
+                                    let _ = evt_tx.send(Event::Status(
+                                        "Restarting last track after reconnect".into(),
+                                    ));
+                                    pending = Some((lp, le));
+                                    continue;
+                                }
+                                break;
+                            } else {
+                                let _ = evt_tx.send(Event::Error(format!("{err:#}")));
+                                return;
+                            }
                         }
                     }
                 }
