@@ -75,7 +75,7 @@ pub(crate) fn start_streaming_decode_from_media_source(
 
     thread::spawn(move || {
         if let Err(e) = decode_format_loop(format, codec_params, &shared_for_thread) {
-            eprintln!("Decoder thread error: {e:#}");
+            tracing::error!("decoder thread error: {e:#}");
         }
         shared_for_thread.close();
     });

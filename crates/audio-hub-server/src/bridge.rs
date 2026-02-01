@@ -215,13 +215,13 @@ fn spawn_bridge_reader(
         match kind {
             audio_bridge_proto::FrameKind::TrackInfo => {
                 if let Ok((sr, _ch, dur)) = audio_bridge_proto::decode_track_info(&payload) {
-                        if let Ok(mut s) = status.lock() {
-                            s.sample_rate = Some(sr);
-                            s.channels = Some(_ch);
-                            if dur.is_some() {
-                                s.duration_ms = dur;
-                            }
+                    if let Ok(mut s) = status.lock() {
+                        s.sample_rate = Some(sr);
+                        s.channels = Some(_ch);
+                        if dur.is_some() {
+                            s.duration_ms = dur;
                         }
+                    }
                 }
             }
             audio_bridge_proto::FrameKind::PlaybackPos => {
@@ -270,6 +270,14 @@ fn spawn_bridge_reader(
             audio_bridge_proto::FrameKind::DeviceSet => {
                 if let Some(tx) = device_waiter.lock().ok().and_then(|mut g| g.take()) {
                     let _ = tx.send(DeviceEvent::SetOk);
+                }
+            }
+            audio_bridge_proto::FrameKind::OutputChanged => {
+                if let Ok(name) = audio_bridge_proto::decode_device_selector(&payload) {
+                    if let Ok(mut s) = status.lock() {
+                        s.output_device = Some(name.clone());
+                    }
+                    tracing::info!(device = %name, "bridge output changed");
                 }
             }
             audio_bridge_proto::FrameKind::Error => {

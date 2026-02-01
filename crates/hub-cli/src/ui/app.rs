@@ -72,6 +72,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                                 sample_rate: status.sample_rate,
                                 channels: status.channels,
                                 output_sample_rate: status.output_sample_rate,
+                                output_device: status.output_device,
                                 title: status.title,
                                 artist: status.artist,
                                 album: status.album,
@@ -173,6 +174,7 @@ pub(crate) struct App {
     pub(crate) remote_elapsed_ms: Option<u64>,
     pub(crate) remote_channels: Option<u16>,
     pub(crate) remote_output_sample_rate: Option<u32>,
+    pub(crate) remote_output_device: Option<String>,
     pub(crate) remote_output_id: Option<String>,
 }
 
@@ -232,6 +234,7 @@ impl App {
             remote_elapsed_ms: None,
             remote_channels: None,
             remote_output_sample_rate: None,
+            remote_output_device: None,
             remote_output_id: None,
         }
     }
@@ -583,6 +586,7 @@ fn ui_loop(
                     sample_rate,
                     channels,
                     output_sample_rate,
+                    output_device,
                     title,
                     artist,
                     album,
@@ -600,6 +604,7 @@ fn ui_loop(
                         app.now_playing_meta = None;
                         app.remote_channels = None;
                         app.remote_output_sample_rate = None;
+                        app.remote_output_device = None;
                     }
                     if duration_ms.is_some() {
                         app.remote_duration_ms = duration_ms;
@@ -629,6 +634,7 @@ fn ui_loop(
                     }
                     app.remote_channels = channels;
                     app.remote_output_sample_rate = output_sample_rate;
+                    app.remote_output_device = output_device;
                     app.remote_output_id = Some(output_id);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),

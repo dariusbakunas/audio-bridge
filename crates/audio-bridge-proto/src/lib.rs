@@ -16,7 +16,7 @@
 use std::io::{self, Read, Write};
 
 pub const MAGIC: [u8; 4] = *b"ABRD";
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +43,8 @@ pub enum FrameKind {
     SetDevice = 0x42,
     /// Receiver → sender: device set ack.
     DeviceSet = 0x43,
+    /// Receiver → sender: OS default output device changed.
+    OutputChanged = 0x44,
 
     Error = 0x7F,
 }
@@ -62,6 +64,7 @@ impl FrameKind {
             0x41 => FrameKind::DeviceList,
             0x42 => FrameKind::SetDevice,
             0x43 => FrameKind::DeviceSet,
+            0x44 => FrameKind::OutputChanged,
             0x7F => FrameKind::Error,
             _ => {
                 return Err(io::Error::new(

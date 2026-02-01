@@ -345,6 +345,7 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         sample_rate,
         channels: status.channels,
         output_sample_rate: status.sample_rate,
+        output_device: status.output_device.clone(),
         title,
         artist,
         album,

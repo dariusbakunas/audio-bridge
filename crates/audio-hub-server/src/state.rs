@@ -15,6 +15,7 @@ pub struct PlayerStatus {
     pub elapsed_ms: Option<u64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u16>,
+    pub output_device: Option<String>,
     pub auto_advance_in_flight: bool,
 }
 

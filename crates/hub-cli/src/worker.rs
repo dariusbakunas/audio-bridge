@@ -24,6 +24,7 @@ pub enum Event {
         sample_rate: Option<u32>,
         channels: Option<u16>,
         output_sample_rate: Option<u32>,
+        output_device: Option<String>,
         title: Option<String>,
         artist: Option<String>,
         album: Option<String>,

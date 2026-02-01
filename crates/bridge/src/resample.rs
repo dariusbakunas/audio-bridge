@@ -86,7 +86,7 @@ pub(crate) fn start_resampler(
         ) {
             Ok(r) => Box::new(r),
             Err(e) => {
-                eprintln!("Resampler init error: {e:#}");
+                tracing::error!("resampler init error: {e:#}");
                 dstq_thread.close();
                 return;
             }
@@ -111,7 +111,7 @@ pub(crate) fn start_resampler(
                 match InterleavedSlice::new(&interleaved, channels, chunk_in_frames) {
                     Ok(a) => a,
                     Err(e) => {
-                        eprintln!("InterleavedSlice(input) error: {e:#}");
+                        tracing::error!("interleaved slice (input) error: {e:#}");
                         break;
                     }
                 };
@@ -124,7 +124,7 @@ pub(crate) fn start_resampler(
             ) {
                 Ok(a) => a,
                 Err(e) => {
-                    eprintln!("InterleavedSlice(output) error: {e:#}");
+                    tracing::error!("interleaved slice (output) error: {e:#}");
                     break;
                 }
             };
@@ -140,7 +140,7 @@ pub(crate) fn start_resampler(
             ) {
                 Ok(x) => x,
                 Err(e) => {
-                    eprintln!("Resampler process error: {e:#}");
+                    tracing::error!("resampler process error: {e:#}");
                     break;
                 }
             };
@@ -158,7 +158,7 @@ pub(crate) fn start_resampler(
             let input_adapter = match InterleavedSlice::new(&tail, channels, tail_frames) {
                 Ok(a) => a,
                 Err(e) => {
-                    eprintln!("InterleavedSlice(tail input) error: {e:#}");
+                    tracing::error!("interleaved slice (tail input) error: {e:#}");
                     break;
                 }
             };
@@ -171,7 +171,7 @@ pub(crate) fn start_resampler(
             ) {
                 Ok(a) => a,
                 Err(e) => {
-                    eprintln!("InterleavedSlice(tail output) error: {e:#}");
+                    tracing::error!("interleaved slice (tail output) error: {e:#}");
                     break;
                 }
             };
@@ -187,7 +187,7 @@ pub(crate) fn start_resampler(
             ) {
                 Ok(x) => x,
                 Err(e) => {
-                    eprintln!("Resampler tail process error: {e:#}");
+                    tracing::error!("resampler tail process error: {e:#}");
                     break;
                 }
             };

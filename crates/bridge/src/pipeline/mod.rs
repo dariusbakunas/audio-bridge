@@ -89,7 +89,7 @@ pub(crate) fn play_decoded_source(
             buffer_seconds: args.buffer_seconds,
         },
     )?;
-    eprintln!("Resampling to {} Hz", dst_rate);
+    tracing::info!(rate_hz = dst_rate, "resampling");
 
     let stream = playback::build_output_stream(
         device,

@@ -82,7 +82,7 @@ where
     let paused_flag = cfg.paused.clone();
     let played_frames = cfg.played_frames.clone();
 
-    let err_fn = |err| eprintln!("Stream error: {err}");
+    let err_fn = |err| tracing::warn!("stream error: {err}");
 
     let state_cb = state.clone();
     let stream = device.build_output_stream(

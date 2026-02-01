@@ -7,11 +7,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver};
 use symphonia::core::probe::Hint;
 
+use crate::device;
 use super::spool::{is_done, make_temp_path, mark_done, Progress};
 use super::{DeviceControl, TEMP_PREFIX};
 
@@ -55,18 +57,45 @@ pub(crate) fn run_one_client(
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
 
-    // Clone for receiver->sender messages (TrackInfo, PlaybackPos).
+    // Clone for receiver->sender messages (TrackInfo, PlaybackPos, OutputChanged).
     let peer_tx = stream.try_clone().context("try_clone TcpStream for peer_tx")?;
+    spawn_output_change_notifier(peer_tx.try_clone().context("try_clone peer_tx for notifier")?);
 
     let (session_tx, session_rx) = unbounded::<NetSession>();
 
     thread::spawn(move || {
         if let Err(e) = reader_thread_main(stream, peer_tx, session_tx, temp_dir, device_ctl) {
-            eprintln!("Connection reader ended: {e:#}");
+            tracing::warn!("connection reader ended: {e:#}");
         }
     });
 
     Ok(session_rx)
+}
+
+fn spawn_output_change_notifier(mut peer_tx: TcpStream) {
+    thread::spawn(move || {
+        let mut last_name = device::default_device_name();
+        loop {
+            thread::sleep(Duration::from_secs(2));
+            let current = device::default_device_name();
+            if current != last_name {
+                if let Some(ref name) = current {
+                    if let Ok(payload) = audio_bridge_proto::encode_device_selector(name) {
+                        if audio_bridge_proto::write_frame(
+                            &mut peer_tx,
+                            audio_bridge_proto::FrameKind::OutputChanged,
+                            &payload,
+                        )
+                        .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+                last_name = current;
+            }
+        }
+    });
 }
 
 fn reader_thread_main(
@@ -316,7 +345,8 @@ fn reader_thread_main(
                         audio_bridge_proto::FrameKind::TrackInfo
                         | audio_bridge_proto::FrameKind::PlaybackPos
                         | audio_bridge_proto::FrameKind::DeviceList
-                        | audio_bridge_proto::FrameKind::DeviceSet => {
+                        | audio_bridge_proto::FrameKind::DeviceSet
+                        | audio_bridge_proto::FrameKind::OutputChanged => {
                             drain_payload(&mut stream, len);
                         }
                     }
@@ -333,7 +363,7 @@ fn reader_thread_main(
 
             other => {
                 drain_payload(&mut stream, len);
-                eprintln!("Ignoring unexpected frame while idle: {other:?}");
+                tracing::debug!("ignoring unexpected frame while idle: {other:?}");
                 continue;
             }
         }
@@ -353,7 +383,7 @@ fn drain_payload(stream: &mut TcpStream, len: u32) {
 /// Accept a single TCP connection from `listener`.
 pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
     let (stream, addr) = listener.accept().context("accept connection")?;
-    eprintln!("Client connected: {addr}");
+    tracing::info!(addr = %addr, "client connected");
     stream
         .set_nodelay(true)
         .ok(); // best-effort; not fatal

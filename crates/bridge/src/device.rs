@@ -51,13 +51,13 @@ pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Devi
         .ok_or_else(|| anyhow!("No default output device"))
 }
 
-/// Print available output devices to stderr.
+/// Print available output devices to stdout.
 ///
 /// This is intended for CLI UX (`--list-devices`) rather than structured output.
 pub fn list_devices(host: &cpal::Host) -> Result<()> {
     let devices = host.output_devices().context("No output devices")?;
     for (i, d) in devices.enumerate() {
-        eprintln!("#{i}: {}", d.description()?);
+        println!("#{i}: {}", d.description()?);
     }
     Ok(())
 }
@@ -70,4 +70,11 @@ pub fn list_device_names(host: &cpal::Host) -> Result<Vec<String>> {
         out.push(d.description()?.to_string());
     }
     Ok(out)
+}
+
+/// Return the current default output device name, if any.
+pub fn default_device_name() -> Option<String> {
+    let host = cpal::default_host();
+    host.default_output_device()
+        .and_then(|d| d.description().ok().map(|desc| desc.to_string()))
 }

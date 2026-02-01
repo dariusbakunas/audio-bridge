@@ -13,3 +13,5 @@ symphonia = { workspace = true }
 crossbeam-channel = { workspace = true }
 ctrlc = { workspace = true }
 audio-bridge-proto = { path = "../audio-bridge-proto" }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
