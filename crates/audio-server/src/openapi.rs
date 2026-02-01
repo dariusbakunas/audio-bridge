@@ -16,6 +16,10 @@ use crate::models;
         api::queue_clear,
         api::queue_next,
         api::status,
+        api::outputs_list,
+        api::outputs_select,
+        api::output_devices,
+        api::output_set_device,
     ),
     components(
         schemas(
@@ -28,6 +32,12 @@ use crate::models;
             models::QueueResponse,
             models::QueueAddRequest,
             models::QueueRemoveRequest,
+            models::OutputsResponse,
+            models::OutputInfo,
+            models::OutputCapabilities,
+            models::OutputSelectRequest,
+            models::BridgeDevicesResponse,
+            models::BridgeSetDeviceRequest,
         )
     ),
     tags(

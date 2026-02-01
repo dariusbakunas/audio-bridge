@@ -26,6 +26,7 @@ pub enum Event {
         artist: Option<String>,
         album: Option<String>,
         format: Option<String>,
+        output_id: String,
     },
     QueueUpdate {
         items: Vec<crate::server_api::RemoteQueueItem>,

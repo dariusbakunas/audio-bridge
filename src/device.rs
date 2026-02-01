@@ -61,3 +61,13 @@ pub fn list_devices(host: &cpal::Host) -> Result<()> {
     }
     Ok(())
 }
+
+/// Return available output device names.
+pub fn list_device_names(host: &cpal::Host) -> Result<Vec<String>> {
+    let devices = host.output_devices().context("No output devices")?;
+    let mut out = Vec::new();
+    for d in devices {
+        out.push(d.description()?.to_string());
+    }
+    Ok(out)
+}

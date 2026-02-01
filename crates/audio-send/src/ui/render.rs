@@ -58,9 +58,15 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .constraints([Constraint::Length(4), Constraint::Length(8)])
         .split(chunks[0]);
 
+    let output_line = app
+        .remote_output_id
+        .as_deref()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "-".into());
     let header = Paragraph::new(vec![
         Line::from(format!("audio-send  →  {}", app.server)),
         Line::from(format!("dir: {:?}", app.dir)),
+        Line::from(format!("output: {output_line}")),
     ])
         .block(Block::default().borders(Borders::ALL).title("Target"));
     f.render_widget(header, top_chunks[0]);

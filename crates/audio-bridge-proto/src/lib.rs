@@ -16,7 +16,7 @@
 use std::io::{self, Read, Write};
 
 pub const MAGIC: [u8; 4] = *b"ABRD";
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,15 @@ pub enum FrameKind {
     /// Receiver → sender: playback position updates.
     PlaybackPos = 0x31,
 
+    /// Sender → receiver: request device list.
+    ListDevices = 0x40,
+    /// Receiver → sender: device list response.
+    DeviceList = 0x41,
+    /// Sender → receiver: set output device by substring.
+    SetDevice = 0x42,
+    /// Receiver → sender: device set ack.
+    DeviceSet = 0x43,
+
     Error = 0x7F,
 }
 
@@ -49,6 +58,10 @@ impl FrameKind {
             0x23 => FrameKind::Next,
             0x30 => FrameKind::TrackInfo,
             0x31 => FrameKind::PlaybackPos,
+            0x40 => FrameKind::ListDevices,
+            0x41 => FrameKind::DeviceList,
+            0x42 => FrameKind::SetDevice,
+            0x43 => FrameKind::DeviceSet,
             0x7F => FrameKind::Error,
             _ => {
                 return Err(io::Error::new(
@@ -203,6 +216,81 @@ pub fn decode_playback_pos(payload: &[u8]) -> io::Result<(u64, bool)> {
         payload[0], payload[1], payload[2], payload[3], payload[4], payload[5], payload[6], payload[7],
     ]);
     Ok((frames, payload[8] != 0))
+}
+
+/// Encode a list of device names: u16 count, then u16 len + bytes for each name.
+pub fn encode_device_list(devices: &[String]) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let count: u16 = devices
+        .len()
+        .try_into()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "too many devices"))?;
+    out.extend_from_slice(&count.to_le_bytes());
+    for name in devices {
+        let bytes = name.as_bytes();
+        let len: u16 = bytes
+            .len()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "device name too long"))?;
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(bytes);
+    }
+    Ok(out)
+}
+
+/// Decode a device list payload.
+pub fn decode_device_list(payload: &[u8]) -> io::Result<Vec<String>> {
+    if payload.len() < 2 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "short device list"));
+    }
+    let count = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+    let mut off = 2usize;
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        if off + 2 > payload.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated device list"));
+        }
+        let len = u16::from_le_bytes([payload[off], payload[off + 1]]) as usize;
+        off += 2;
+        if off + len > payload.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated device name"));
+        }
+        let name = std::str::from_utf8(&payload[off..off + len])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "device name not utf-8"))?;
+        out.push(name.to_string());
+        off += len;
+    }
+    Ok(out)
+}
+
+/// Encode a device selector string: u16 len + bytes.
+pub fn encode_device_selector(name: &str) -> io::Result<Vec<u8>> {
+    let bytes = name.as_bytes();
+    let len: u16 = bytes
+        .len()
+        .try_into()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "device name too long"))?;
+    let mut out = Vec::with_capacity(2 + bytes.len());
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(bytes);
+    Ok(out)
+}
+
+/// Decode a device selector string.
+pub fn decode_device_selector(payload: &[u8]) -> io::Result<String> {
+    if payload.len() < 2 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "short device selector"));
+    }
+    let len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+    if payload.len() != 2 + len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "device selector length mismatch",
+        ));
+    }
+    let name = std::str::from_utf8(&payload[2..])
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "device selector not utf-8"))?;
+    Ok(name.to_string())
 }
 
 #[cfg(test)]

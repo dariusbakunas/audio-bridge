@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use actix_web::{get, post, web, HttpResponse, Responder};
+use anyhow::Result;
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -14,6 +15,10 @@ use crate::models::{
     QueueRemoveRequest,
     QueueResponse,
     StatusResponse,
+    BridgeDevicesResponse,
+    BridgeSetDeviceRequest,
+    OutputsResponse,
+    OutputSelectRequest,
 };
 use crate::state::AppState;
 
@@ -97,6 +102,19 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     };
 
     let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
+    let output_id = match &body.output_id {
+        Some(id) => id.clone(),
+        None => state.outputs.lock().unwrap().active_id.clone(),
+    };
+    {
+        let outputs = state.outputs.lock().unwrap();
+        let Some(out) = outputs.outputs.iter().find(|o| o.id == output_id) else {
+            return HttpResponse::BadRequest().body("unknown output id");
+        };
+        if out.kind != "bridge" || output_id != outputs.active_id {
+            return HttpResponse::BadRequest().body("unsupported output id");
+        }
+    }
     match mode {
         QueueMode::Keep => {
             let mut queue = state.queue.lock().unwrap();
@@ -318,6 +336,7 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         }
         None => (None, None, None, None, None),
     };
+    let output_id = state.outputs.lock().unwrap().active_id.clone();
     let resp = StatusResponse {
         now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
         paused: status.paused,
@@ -328,8 +347,134 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         artist,
         album,
         format,
+        output_id,
     };
     HttpResponse::Ok().json(resp)
+}
+
+#[utoipa::path(
+    get,
+    path = "/outputs/{id}/devices",
+    responses(
+        (status = 200, description = "Output devices", body = BridgeDevicesResponse),
+        (status = 400, description = "Unknown output"),
+        (status = 500, description = "Output unavailable")
+    )
+)]
+#[get("/outputs/{id}/devices")]
+pub async fn output_devices(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    {
+        let outputs = state.outputs.lock().unwrap();
+        let Some(out) = outputs.outputs.iter().find(|o| o.id == id.as_str()) else {
+            return HttpResponse::BadRequest().body("unknown output id");
+        };
+        if out.kind != "bridge" || out.id != outputs.active_id {
+            return HttpResponse::BadRequest().body("unsupported output id");
+        }
+    }
+    match bridge_list_devices(&state) {
+        Ok(devices) => HttpResponse::Ok().json(BridgeDevicesResponse { devices }),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e:#}")),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/outputs/{id}/device",
+    request_body = BridgeSetDeviceRequest,
+    responses(
+        (status = 200, description = "Device set"),
+        (status = 400, description = "Unknown output"),
+        (status = 500, description = "Output unavailable")
+    )
+)]
+#[post("/outputs/{id}/device")]
+pub async fn output_set_device(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<BridgeSetDeviceRequest>,
+) -> impl Responder {
+    {
+        let outputs = state.outputs.lock().unwrap();
+        let Some(out) = outputs.outputs.iter().find(|o| o.id == id.as_str()) else {
+            return HttpResponse::BadRequest().body("unknown output id");
+        };
+        if out.kind != "bridge" || out.id != outputs.active_id {
+            return HttpResponse::BadRequest().body("unsupported output id");
+        }
+    }
+    match bridge_set_device_req(&state, &body.name) {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e:#}")),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/outputs",
+    responses(
+        (status = 200, description = "Available outputs", body = OutputsResponse)
+    )
+)]
+#[get("/outputs")]
+pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
+    let state = state.outputs.lock().unwrap();
+    let active_id = state.active_id.clone();
+    let outputs = state.outputs.clone();
+    HttpResponse::Ok().json(OutputsResponse { active_id, outputs })
+}
+
+#[utoipa::path(
+    post,
+    path = "/outputs/select",
+    request_body = OutputSelectRequest,
+    responses(
+        (status = 200, description = "Active output set"),
+        (status = 400, description = "Unknown output")
+    )
+)]
+#[post("/outputs/select")]
+pub async fn outputs_select(
+    state: web::Data<AppState>,
+    body: web::Json<OutputSelectRequest>,
+) -> impl Responder {
+    let mut state = state.outputs.lock().unwrap();
+    let Some(out) = state.outputs.iter().find(|o| o.id == body.id) else {
+        return HttpResponse::BadRequest().body("unknown output id");
+    };
+    if out.kind != "bridge" {
+        return HttpResponse::BadRequest().body("unsupported output id");
+    }
+    state.active_id = body.id.clone();
+    HttpResponse::Ok().finish()
+}
+
+fn bridge_list_devices(state: &AppState) -> Result<Vec<String>> {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    state
+        .player
+        .cmd_tx
+        .send(crate::bridge::BridgeCommand::ListDevices { resp_tx: tx })
+        .map_err(|_| anyhow::anyhow!("bridge command channel closed"))?;
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .map_err(|_| anyhow::anyhow!("bridge list timeout"))?
+}
+
+fn bridge_set_device_req(state: &AppState, name: &str) -> Result<()> {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    state
+        .player
+        .cmd_tx
+        .send(crate::bridge::BridgeCommand::SetDevice {
+            name: name.to_string(),
+            resp_tx: tx,
+        })
+        .map_err(|_| anyhow::anyhow!("bridge command channel closed"))?;
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .map_err(|_| anyhow::anyhow!("bridge set timeout"))?
 }
 
 fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, String> {

@@ -1,0 +1,15 @@
+# Example audio-server config
+#
+# bind: HTTP address the server listens on
+# outputs: list of available output targets
+# active_output: id to use by default
+
+bind = "0.0.0.0:8080"
+media_dir = "/srv/music"
+active_output = "bridge:default"
+
+[[outputs]]
+id = "bridge:default"
+kind = "bridge"
+name = "Bridge (default)"
+bridge_addr = "192.168.1.50:5555"

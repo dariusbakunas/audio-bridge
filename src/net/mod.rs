@@ -9,8 +9,13 @@ use std::path::Path;
 mod session;
 mod spool;
 
-pub(crate) use session::{accept_one, run_one_client, NetSession, SessionControl};
+pub(crate) use session::{accept_one, run_one_client, NetSession};
 pub(crate) use spool::BlockingFileSource;
+
+#[derive(Clone, Debug)]
+pub(crate) struct DeviceControl {
+    pub(crate) selected: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
 
 const TEMP_PREFIX: &str = "audio-bridge-stream";
 

@@ -57,16 +57,38 @@ cargo run --release -p audio-bridge -- --device "USB" listen --bind 0.0.0.0:5555
 
 ### 2) Run the sender on your machine
 
-First start the server on the machine that hosts your media:
+First start the server on the machine that hosts your media (config is required):
 
 ```bash
-cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --media-dir <MUSIC_DIR> --bridge <PI_IP>:5555
+cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio-server/config.example.toml
 ```
 
 Then point the TUI at the server:
 
 ```bash
  cargo run --release -p audio-send -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
+```
+
+## Server config
+
+Use a TOML config to define the media path, outputs, and default output:
+
+```toml
+bind = "0.0.0.0:8080"
+media_dir = "/srv/music"
+active_output = "bridge:default"
+
+[[outputs]]
+id = "bridge:default"
+kind = "bridge"
+name = "Bridge (default)"
+bridge_addr = "192.168.1.50:5555"
+```
+
+Pass it via `--config` (you can still override the media path via `--media-dir`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
+
+```bash
+cargo run --release -p audio-server -- --bind 0.0.0.0:8080 --config crates/audio-server/config.example.toml
 ```
 
 ## audio-send keys (TUI)
@@ -100,6 +122,15 @@ cargo run --release -p audio-bridge --
 --refill-max-frames 4096
 listen --bind 0.0.0.0:5555
 ```
+
+## Output selection (server API)
+
+The server exposes output-agnostic endpoints for device selection:
+
+- `GET /outputs` (list outputs)
+- `POST /outputs/select` (set active output)
+- `GET /outputs/{id}/devices` (list devices for an output)
+- `POST /outputs/{id}/device` (set device by substring)
 
 ## Building for Raspberry Pi / Linux with cross
 

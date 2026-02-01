@@ -32,6 +32,7 @@ use pipeline::{PlaybackSessionOptions, play_decoded_source};
 fn main() -> Result<()> {
     let args = cli::Args::parse();
     let host = cpal::default_host();
+    let device_selected = std::sync::Arc::new(std::sync::Mutex::new(args.device.clone()));
 
     if args.list_devices {
         device::list_devices(&host)?;
@@ -52,13 +53,13 @@ fn main() -> Result<()> {
         std::process::exit(130);
     });
 
-    let (device, config) = device::select_output(&host, args.device.as_deref())?;
-    eprintln!("Output device: {}", device.description()?);
-    eprintln!("Device default config: {:?}", config);
-    let stream_config: cpal::StreamConfig = config.clone().into();
-
     match &args.cmd {
         cli::Command::Play { path } => {
+            let selected = device_selected.lock().unwrap().clone();
+            let (device, config) = device::select_output(&host, selected.as_deref())?;
+            eprintln!("Output device: {}", device.description()?);
+            eprintln!("Device default config: {:?}", config);
+            let stream_config: cpal::StreamConfig = config.clone().into();
             play_one_local(&device, &config, &stream_config, &args, path)?;
         }
         cli::Command::Listen { bind } => {
@@ -74,7 +75,10 @@ fn main() -> Result<()> {
                     }
                 };
 
-                if let Err(e) = serve_one_client(&device, &config, &stream_config, &args, stream, &temp_dir) {
+                let device_ctl = net::DeviceControl {
+                    selected: device_selected.clone(),
+                };
+                if let Err(e) = serve_one_client(&host, &device_ctl, &args, stream, &temp_dir) {
                     eprintln!("Client session error: {e:#}");
                 }
 
@@ -87,17 +91,16 @@ fn main() -> Result<()> {
 }
 
 fn serve_one_client(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
+    host: &cpal::Host,
+    device_ctl: &net::DeviceControl,
     args: &cli::Args,
     stream: std::net::TcpStream,
     temp_dir: &std::path::Path,
 ) -> Result<()> {
-    let session_rx = net::run_one_client(stream, temp_dir.to_path_buf())?;
+    let session_rx = net::run_one_client(stream, temp_dir.to_path_buf(), device_ctl.clone())?;
 
     while let Ok(sess) = session_rx.recv() {
-        if let Err(e) = play_one_network_session(device, config, stream_config, args, sess) {
+        if let Err(e) = play_one_network_session(host, device_ctl, args, sess) {
             eprintln!("Session playback error: {e:#}");
         }
     }
@@ -106,13 +109,18 @@ fn serve_one_client(
 }
 
 fn play_one_network_session(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
+    host: &cpal::Host,
+    device_ctl: &net::DeviceControl,
     args: &cli::Args,
     sess: net::NetSession,
 ) -> Result<()> {
     eprintln!("Incoming stream spooling to {:?}", sess.temp_path);
+
+    let selected = device_ctl.selected.lock().unwrap().clone();
+    let (device, config) = device::select_output(host, selected.as_deref())?;
+    eprintln!("Output device: {}", device.description()?);
+    eprintln!("Device default config: {:?}", config);
+    let stream_config: cpal::StreamConfig = config.clone().into();
 
     let file_for_read = std::fs::OpenOptions::new()
         .read(true)
@@ -142,9 +150,9 @@ fn play_one_network_session(
     );
 
     let result = play_decoded_source(
-        device,
-        config,
-        stream_config,
+        &device,
+        &config,
+        &stream_config,
         args,
         src_spec,
         srcq,

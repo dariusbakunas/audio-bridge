@@ -22,6 +22,7 @@ pub struct AppState {
     pub player: BridgePlayer,
     pub status: Arc<Mutex<PlayerStatus>>,
     pub queue: Arc<Mutex<QueueState>>,
+    pub outputs: Arc<Mutex<OutputState>>,
 }
 
 impl AppState {
@@ -30,12 +31,14 @@ impl AppState {
         cmd_tx: Sender<BridgeCommand>,
         status: Arc<Mutex<PlayerStatus>>,
         queue: Arc<Mutex<QueueState>>,
+        outputs: Arc<Mutex<OutputState>>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
             player: BridgePlayer { cmd_tx },
             status,
             queue,
+            outputs,
         }
     }
 }
@@ -43,4 +46,10 @@ impl AppState {
 #[derive(Debug, Default)]
 pub struct QueueState {
     pub items: Vec<PathBuf>,
+}
+
+#[derive(Debug, Default)]
+pub struct OutputState {
+    pub active_id: String,
+    pub outputs: Vec<crate::models::OutputInfo>,
 }

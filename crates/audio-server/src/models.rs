@@ -31,6 +31,8 @@ pub struct PlayRequest {
     pub path: String,
     #[serde(default)]
     pub queue_mode: Option<QueueMode>,
+    #[serde(default)]
+    pub output_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -52,6 +54,7 @@ pub struct StatusResponse {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub format: Option<String>,
+    pub output_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -82,4 +85,40 @@ pub struct QueueAddRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueueRemoveRequest {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct BridgeDevicesResponse {
+    pub devices: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct BridgeSetDeviceRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputsResponse {
+    pub active_id: String,
+    pub outputs: Vec<OutputInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputInfo {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub state: String,
+    pub capabilities: OutputCapabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputCapabilities {
+    pub device_select: bool,
+    pub volume: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputSelectRequest {
+    pub id: String,
 }

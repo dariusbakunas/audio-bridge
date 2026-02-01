@@ -74,6 +74,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                                 artist: status.artist,
                                 album: status.album,
                                 format: status.format,
+                                output_id: status.output_id,
                             })
                             .is_err()
                         {
@@ -168,6 +169,7 @@ pub(crate) struct App {
     pub(crate) remote_duration_ms: Option<u64>,
     pub(crate) remote_paused: Option<bool>,
     pub(crate) remote_elapsed_ms: Option<u64>,
+    pub(crate) remote_output_id: Option<String>,
 }
 
 impl App {
@@ -224,6 +226,7 @@ impl App {
             remote_duration_ms: None,
             remote_paused: None,
             remote_elapsed_ms: None,
+            remote_output_id: None,
         }
     }
 
@@ -576,6 +579,7 @@ fn ui_loop(
                     artist,
                     album,
                     format,
+                    output_id,
                 } => {
                     if let Some(path) = now_playing {
                         let path = PathBuf::from(path);
@@ -613,6 +617,7 @@ fn ui_loop(
                         meta.sample_rate = Some(sr);
                         app.now_playing_meta = Some(meta);
                     }
+                    app.remote_output_id = Some(output_id);
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
             }

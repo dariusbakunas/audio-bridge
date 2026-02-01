@@ -1,11 +1,11 @@
 mod api;
 mod bridge;
+mod config;
 mod library;
 mod models;
 mod openapi;
 mod state;
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -19,22 +19,22 @@ use tracing_subscriber::EnvFilter;
 
 use crate::bridge::spawn_bridge_worker;
 use crate::library::scan_library;
-use crate::state::{AppState, PlayerStatus, QueueState};
+use crate::state::{AppState, PlayerStatus, QueueState, OutputState};
 
 #[derive(Parser, Debug)]
 #[command(name = "audio-server")]
 struct Args {
     /// HTTP bind address, e.g. 0.0.0.0:8080
-    #[arg(long, default_value = "0.0.0.0:8080")]
-    bind: SocketAddr,
+    #[arg(long)]
+    bind: Option<std::net::SocketAddr>,
 
     /// Media library root directory
     #[arg(long)]
-    media_dir: PathBuf,
+    media_dir: Option<PathBuf>,
 
-    /// Bridge receiver address (Pi), e.g. 192.168.1.50:5555
+    /// Optional server config file (TOML)
     #[arg(long)]
-    bridge: SocketAddr,
+    config: Option<PathBuf>,
 }
 
 #[actix_web::main]
@@ -47,14 +47,42 @@ async fn main() -> Result<()> {
         }))
         .init();
 
+    let cfg = match args.config.as_ref() {
+        Some(path) => config::ServerConfig::load(path)?,
+        None => {
+            let auto_path = std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|dir| dir.join("config.toml")));
+            if let Some(path) = auto_path.as_ref() {
+                if path.exists() {
+                    config::ServerConfig::load(path)?
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "config file is required; use --config"
+                    ));
+                }
+            } else {
+                return Err(anyhow::anyhow!(
+                    "config file is required; use --config"
+                ));
+            }
+        }
+    };
+    let bind = match args.bind {
+        Some(addr) => addr,
+        None => config::bind_from_config(&cfg)?.unwrap_or_else(|| "0.0.0.0:8080".parse().expect("default bind")),
+    };
+    let media_dir = match args.media_dir {
+        Some(dir) => dir,
+        None => config::media_dir_from_config(&cfg)?,
+    };
     tracing::info!(
-        bind = %args.bind,
-        media_dir = %args.media_dir.display(),
-        bridge = %args.bridge,
+        bind = %bind,
+        media_dir = %media_dir.display(),
         "starting audio-server"
     );
-
-    let library = scan_library(&args.media_dir)?;
+    let library = scan_library(&media_dir)?;
+    let (outputs, active_id, bridge_addr) = config::outputs_from_config(cfg)?;
 
     let (cmd_tx, cmd_rx) = unbounded();
     let shutdown_tx = cmd_tx.clone();
@@ -68,9 +96,13 @@ async fn main() -> Result<()> {
     });
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
-    spawn_bridge_worker(args.bridge, cmd_rx, cmd_tx.clone(), status.clone(), queue.clone());
+    let outputs = Arc::new(Mutex::new(OutputState {
+        active_id,
+        outputs,
+    }));
+    spawn_bridge_worker(bridge_addr, cmd_rx, cmd_tx.clone(), status.clone(), queue.clone());
 
-    let state = web::Data::new(AppState::new(library, cmd_tx, status, queue));
+    let state = web::Data::new(AppState::new(library, cmd_tx, status, queue, outputs));
 
     HttpServer::new(move || {
         App::new()
@@ -90,8 +122,12 @@ async fn main() -> Result<()> {
             .service(api::queue_clear)
             .service(api::queue_next)
             .service(api::status)
+            .service(api::outputs_list)
+            .service(api::outputs_select)
+            .service(api::output_devices)
+            .service(api::output_set_device)
     })
-    .bind(args.bind)?
+    .bind(bind)?
     .run()
     .await?;
 

@@ -37,6 +37,7 @@ struct StatusResponse {
     artist: Option<String>,
     album: Option<String>,
     format: Option<String>,
+    output_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -147,6 +148,7 @@ pub(crate) struct RemoteStatus {
     pub(crate) artist: Option<String>,
     pub(crate) album: Option<String>,
     pub(crate) format: Option<String>,
+    pub(crate) output_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +178,7 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
         artist: resp.artist,
         album: resp.album,
         format: resp.format,
+        output_id: resp.output_id,
     })
 }
 
