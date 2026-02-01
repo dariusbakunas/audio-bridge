@@ -10,9 +10,11 @@ use crate::library::LibraryIndex;
 pub struct PlayerStatus {
     pub now_playing: Option<PathBuf>,
     pub paused: bool,
+    pub user_paused: bool,
     pub duration_ms: Option<u64>,
     pub elapsed_ms: Option<u64>,
     pub sample_rate: Option<u32>,
+    pub auto_advance_in_flight: bool,
 }
 
 pub struct AppState {

@@ -8,10 +8,10 @@ use crate::library::scan_library;
 use crate::models::{
     LibraryResponse,
     PlayRequest,
+    QueueMode,
     QueueAddRequest,
     QueueItem,
     QueueRemoveRequest,
-    QueueReplacePlayRequest,
     QueueResponse,
     StatusResponse,
 };
@@ -96,6 +96,26 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
 
+    let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
+    match mode {
+        QueueMode::Keep => {
+            let mut queue = state.queue.lock().unwrap();
+            if let Some(pos) = queue.items.iter().position(|p| p == &path) {
+                queue.items.remove(pos);
+            }
+        }
+        QueueMode::Replace => {
+            let mut queue = state.queue.lock().unwrap();
+            queue.items.clear();
+        }
+        QueueMode::Append => {
+            let mut queue = state.queue.lock().unwrap();
+            if !queue.items.iter().any(|p| p == &path) {
+                queue.items.push(path.clone());
+            }
+        }
+    }
+
     let ext_hint = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -113,6 +133,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         if let Ok(mut s) = state.status.lock() {
             s.now_playing = Some(path);
             s.paused = false;
+            s.user_paused = false;
         }
         HttpResponse::Ok().finish()
     } else {
@@ -134,6 +155,7 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     if state.player.cmd_tx.send(crate::bridge::BridgeCommand::PauseToggle).is_ok() {
         if let Ok(mut s) = state.status.lock() {
             s.paused = !s.paused;
+            s.user_paused = s.paused;
         }
         HttpResponse::Ok().finish()
     } else {
@@ -267,32 +289,6 @@ pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
         return start_path(&state, path);
     }
     HttpResponse::NoContent().finish()
-}
-
-#[utoipa::path(
-    post,
-    path = "/queue/replace_play",
-    request_body = QueueReplacePlayRequest,
-    responses(
-        (status = 200, description = "Queue replaced and playback started"),
-        (status = 400, description = "Bad request")
-    )
-)]
-#[post("/queue/replace_play")]
-pub async fn queue_replace_play(
-    state: web::Data<AppState>,
-    body: web::Json<QueueReplacePlayRequest>,
-) -> impl Responder {
-    let path = PathBuf::from(&body.path);
-    let path = match canonicalize_under_root(&state, &path) {
-        Ok(dir) => dir,
-        Err(e) => return HttpResponse::BadRequest().body(e),
-    };
-    {
-        let mut queue = state.queue.lock().unwrap();
-        queue.items.clear();
-    }
-    start_path(&state, path)
 }
 
 #[utoipa::path(

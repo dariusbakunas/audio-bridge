@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
     });
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
-    spawn_bridge_worker(args.bridge, cmd_rx, status.clone(), queue.clone());
+    spawn_bridge_worker(args.bridge, cmd_rx, cmd_tx.clone(), status.clone(), queue.clone());
 
     let state = web::Data::new(AppState::new(library, cmd_tx, status, queue));
 
@@ -89,7 +89,6 @@ async fn main() -> Result<()> {
             .service(api::queue_remove)
             .service(api::queue_clear)
             .service(api::queue_next)
-            .service(api::queue_replace_play)
             .service(api::status)
     })
     .bind(args.bind)?

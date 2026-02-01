@@ -25,11 +25,12 @@ pub struct BridgePlayer {
 pub fn spawn_bridge_worker(
     addr: SocketAddr,
     cmd_rx: Receiver<BridgeCommand>,
+    cmd_tx: Sender<BridgeCommand>,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
 ) {
     std::thread::spawn(move || {
-        let mut stream = connect_loop(addr, status.clone(), queue.clone());
+        let mut stream = connect_loop(addr, status.clone(), queue.clone(), cmd_tx.clone());
         let mut paused = false;
 
         loop {
@@ -67,6 +68,7 @@ pub fn spawn_bridge_worker(
                             s.now_playing = Some(path.clone());
                             s.paused = false;
                             s.elapsed_ms = Some(0);
+                            s.auto_advance_in_flight = false;
                         }
                         match send_one_track_over_existing_connection(
                             &mut stream,
@@ -83,7 +85,7 @@ pub fn spawn_bridge_worker(
                             Err(e) => {
                                 if is_network_error(&e) {
                                     tracing::warn!("bridge connection lost; reconnecting");
-                                    stream = connect_loop(addr, status.clone(), queue.clone());
+                                    stream = connect_loop(addr, status.clone(), queue.clone(), cmd_tx.clone());
                                     continue;
                                 }
                                 tracing::error!("playback failed: {e:#}");
@@ -108,10 +110,11 @@ fn connect_loop(
     addr: SocketAddr,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
+    cmd_tx: Sender<BridgeCommand>,
 ) -> TcpStream {
     let mut delay = Duration::from_millis(250);
     loop {
-        match connect_and_handshake(addr, status.clone(), queue.clone()) {
+        match connect_and_handshake(addr, status.clone(), queue.clone(), cmd_tx.clone()) {
             Ok(stream) => return stream,
             Err(_) => {
                 std::thread::sleep(delay);
@@ -125,6 +128,7 @@ fn connect_and_handshake(
     addr: SocketAddr,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
+    cmd_tx: Sender<BridgeCommand>,
 ) -> Result<TcpStream> {
     let mut stream = TcpStream::connect(addr).with_context(|| format!("connect {addr}"))?;
     stream.set_nodelay(true).ok();
@@ -133,14 +137,15 @@ fn connect_and_handshake(
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     let mut stream_rx = stream.try_clone().context("try_clone stream for rx")?;
     audio_bridge_proto::read_prelude(&mut stream_rx).context("read prelude")?;
-    spawn_bridge_reader(stream_rx, status, queue);
+    spawn_bridge_reader(stream_rx, status, queue, cmd_tx);
     Ok(stream)
 }
 
 fn spawn_bridge_reader(
     mut stream_rx: TcpStream,
     status: Arc<Mutex<PlayerStatus>>,
-    _queue: Arc<Mutex<crate::state::QueueState>>,
+    queue: Arc<Mutex<crate::state::QueueState>>,
+    cmd_tx: Sender<BridgeCommand>,
 ) {
     std::thread::spawn(move || loop {
         let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
@@ -168,7 +173,31 @@ fn spawn_bridge_reader(
                         s.paused = paused;
                         if let Some(sr) = s.sample_rate {
                             if sr > 0 {
-                                s.elapsed_ms = Some(frames.saturating_mul(1000) / sr as u64);
+                                let elapsed = frames.saturating_mul(1000) / sr as u64;
+                                s.elapsed_ms = Some(elapsed);
+                            }
+                        }
+                        if let (Some(elapsed), Some(duration)) = (s.elapsed_ms, s.duration_ms) {
+                            if elapsed > duration {
+                                s.elapsed_ms = Some(duration);
+                            }
+                        }
+                        if !s.auto_advance_in_flight {
+                            if let (Some(elapsed), Some(duration)) = (s.elapsed_ms, s.duration_ms) {
+                                if elapsed + 50 >= duration && !s.user_paused {
+                                    drop(s);
+                                    if let Some(path) = pop_next_from_queue(&queue) {
+                                        let ext_hint = path
+                                            .extension()
+                                            .and_then(|ext| ext.to_str())
+                                            .unwrap_or("")
+                                            .to_ascii_lowercase();
+                                        let _ = cmd_tx.send(BridgeCommand::Play { path, ext_hint });
+                                        if let Ok(mut s2) = status.lock() {
+                                            s2.auto_advance_in_flight = true;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -177,6 +206,15 @@ fn spawn_bridge_reader(
             _ => {}
         }
     });
+}
+
+fn pop_next_from_queue(queue: &Arc<Mutex<crate::state::QueueState>>) -> Option<PathBuf> {
+    let mut q = queue.lock().ok()?;
+    if q.items.is_empty() {
+        None
+    } else {
+        Some(q.items.remove(0))
+    }
 }
 
 fn write_all_interruptible(

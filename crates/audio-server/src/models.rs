@@ -29,6 +29,16 @@ pub struct LibraryResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct PlayRequest {
     pub path: String,
+    #[serde(default)]
+    pub queue_mode: Option<QueueMode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueMode {
+    Keep,
+    Replace,
+    Append,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -71,10 +81,5 @@ pub struct QueueAddRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueueRemoveRequest {
-    pub path: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct QueueReplacePlayRequest {
     pub path: String,
 }

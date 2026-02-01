@@ -70,8 +70,18 @@ struct QueueRemoveRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct QueueReplacePlayRequest {
+#[serde(rename_all = "snake_case")]
+enum QueueMode {
+    Keep,
+    Replace,
+    Append,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PlayRequest {
     path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queue_mode: Option<QueueMode>,
 }
 
 pub(crate) fn list_entries(server: &str, dir: &Path) -> Result<Vec<LibraryItem>> {
@@ -248,16 +258,16 @@ pub(crate) fn queue_next(server: &str) -> Result<bool> {
     Ok(resp.status() / 100 == 2)
 }
 
-pub(crate) fn queue_replace_play(server: &str, path: &Path) -> Result<()> {
-    let url = format!("{}/queue/replace_play", server.trim_end_matches('/'));
-    let body = QueueReplacePlayRequest {
-        path: path.to_string_lossy().to_string(),
-    };
+pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
+    let url = format!("{}/play", server.trim_end_matches('/'));
     let resp = ureq::post(&url)
-        .send_json(body)
-        .context("request /queue/replace_play")?;
+        .send_json(PlayRequest {
+            path: path.to_string_lossy().to_string(),
+            queue_mode: Some(QueueMode::Replace),
+        })
+        .context("request /play (replace)")?;
     if resp.status() / 100 != 2 {
-        return Err(anyhow::anyhow!("queue replace_play failed with {}", resp.status()));
+        return Err(anyhow::anyhow!("play replace failed with {}", resp.status()));
     }
     Ok(())
 }

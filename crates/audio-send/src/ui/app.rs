@@ -506,7 +506,7 @@ impl App {
         };
         let track_duration = track.duration_ms;
 
-        if server_api::queue_replace_play(&self.server, &track_path).is_err() {
+        if server_api::play_replace(&self.server, &track_path).is_err() {
             self.status = "Play failed".into();
         }
         self.now_playing_index = Some(index);

@@ -15,7 +15,6 @@ use crate::models;
         api::queue_remove,
         api::queue_clear,
         api::queue_next,
-        api::queue_replace_play,
         api::status,
     ),
     components(
@@ -23,12 +22,12 @@ use crate::models;
             models::LibraryEntry,
             models::LibraryResponse,
             models::PlayRequest,
+            models::QueueMode,
             models::StatusResponse,
             models::QueueItem,
             models::QueueResponse,
             models::QueueAddRequest,
             models::QueueRemoveRequest,
-            models::QueueReplacePlayRequest,
         )
     ),
     tags(
