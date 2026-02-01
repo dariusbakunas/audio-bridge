@@ -12,7 +12,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -64,6 +64,7 @@ struct App {
     playing_queue: Vec<PathBuf>,
     playing_queue_index: Option<usize>,
     queued_next: VecDeque<PathBuf>,
+    meta_cache: HashMap<PathBuf, TrackMeta>,
     auto_advance_armed: bool,
 
     status: String,
@@ -94,6 +95,7 @@ impl App {
             playing_queue: Vec::new(),
             playing_queue_index: None,
             queued_next: VecDeque::new(),
+            meta_cache: HashMap::new(),
             auto_advance_armed: false,
             status: "Ready".into(),
             last_progress: None,
@@ -145,6 +147,21 @@ impl App {
 
     fn rescan(&mut self) -> Result<()> {
         self.entries = list_entries_with_parent(&self.dir)?;
+        self.meta_cache.clear();
+        for item in &self.entries {
+            if let LibraryItem::Track(track) = item {
+                self.meta_cache.insert(
+                    track.path.clone(),
+                    TrackMeta {
+                        duration_ms: track.duration_ms,
+                        sample_rate: track.sample_rate,
+                        album: track.album.clone(),
+                        artist: track.artist.clone(),
+                        format: Some(track.format.clone()),
+                    },
+                );
+            }
+        }
         self.now_playing_index = self
             .now_playing_path
             .as_ref()
@@ -281,6 +298,7 @@ impl App {
         self.now_playing_path = Some(path.clone());
         self.now_playing_index = self.entries.iter().position(|item| item.path() == path);
         self.now_playing_meta = Some(meta.clone());
+        self.meta_cache.insert(path.clone(), meta.clone());
         if let Some(idx) = self.now_playing_index {
             self.select_index(idx);
         }
@@ -608,12 +626,55 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         })
         .collect();
 
+    let mid_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(chunks[1]);
+
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Entries"))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
 
-    f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    f.render_stateful_widget(list, mid_chunks[0], &mut app.list_state);
+
+    let queue_width = mid_chunks[1].width as usize;
+    let queued_items: Vec<ListItem> = if app.queued_next.is_empty() {
+        vec![ListItem::new("<empty>")]
+    } else {
+        app.queued_next
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let meta = app
+                    .meta_cache
+                    .get(path)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        let ext_hint = path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        library::probe_track_meta(path, &ext_hint)
+                    });
+                let artist = meta.artist.unwrap_or_else(|| "-".into());
+                let album = meta.album.unwrap_or_else(|| "-".into());
+                let song = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("<file>");
+                let label = format!("{:>2}. {} - {} - {}", i + 1, artist, album, song);
+                ListItem::new(truncate_label(&label, queue_width.saturating_sub(1)))
+            })
+            .collect()
+    };
+
+    let queue_list = List::new(queued_items)
+        .block(Block::default().borders(Borders::ALL).title("Queue"))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+
+    f.render_widget(queue_list, mid_chunks[1]);
 
     let progress_line = match app.last_progress {
         Some((sent, Some(total))) if total > 0 => {
@@ -694,6 +755,17 @@ fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend).context("create terminal")?;
     Ok(terminal)
+}
+
+fn truncate_label(label: &str, max: usize) -> String {
+    if max == 0 || label.len() <= max {
+        return label.to_string();
+    }
+    if max <= 3 {
+        return label[..max].to_string();
+    }
+    let cut = max - 3;
+    format!("{}...", &label[..cut])
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
