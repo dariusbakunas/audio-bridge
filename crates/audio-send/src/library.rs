@@ -18,12 +18,48 @@ pub struct Track {
     pub duration_ms: Option<u64>,
 }
 
-pub fn list_tracks(dir: &Path) -> Result<Vec<Track>> {
-    let mut out = Vec::new();
+#[derive(Clone, Debug)]
+pub enum LibraryItem {
+    Dir { path: PathBuf, name: String },
+    Track(Track),
+}
+
+impl LibraryItem {
+    pub fn name(&self) -> &str {
+        match self {
+            LibraryItem::Dir { name, .. } => name,
+            LibraryItem::Track(track) => &track.file_name,
+        }
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        match self {
+            LibraryItem::Dir { .. } => None,
+            LibraryItem::Track(track) => track.duration_ms,
+        }
+    }
+
+    pub fn is_dir(&self) -> bool {
+        matches!(self, LibraryItem::Dir { .. })
+    }
+}
+
+pub fn list_entries(dir: &Path) -> Result<Vec<LibraryItem>> {
+    let mut dirs = Vec::new();
+    let mut tracks = Vec::new();
 
     for entry in fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
         let entry = entry.context("read_dir entry")?;
         let path = entry.path();
+        if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or("<unknown>")
+                .to_string();
+            dirs.push(LibraryItem::Dir { path, name });
+            continue;
+        }
         if !path.is_file() {
             continue;
         }
@@ -46,15 +82,20 @@ pub fn list_tracks(dir: &Path) -> Result<Vec<Track>> {
 
         let duration_ms = probe_duration_ms(&path, &ext);
 
-        out.push(Track {
+        tracks.push(LibraryItem::Track(Track {
             path,
             file_name,
             ext_hint: ext,
             duration_ms,
-        });
+        }));
     }
 
-    out.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
+    dirs.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+    tracks.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+
+    let mut out = Vec::with_capacity(dirs.len() + tracks.len());
+    out.extend(dirs);
+    out.extend(tracks);
     Ok(out)
 }
 

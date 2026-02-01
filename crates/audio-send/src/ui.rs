@@ -2,7 +2,8 @@
 //!
 //! Keys:
 //! - Up/Down: move selection
-//! - Enter: play selected
+//! - Left/Backspace: go to parent dir
+//! - Enter: play selected (or enter dir)
 //! - Space: pause/resume
 //! - n: next (immediate skip)
 //! - r: rescan directory
@@ -29,11 +30,11 @@ use ratatui::{
     Terminal,
 };
 
-use crate::library::{self, Track};
+use crate::library::{self, LibraryItem, Track};
 use crate::worker::{self, Command, Event};
 
 pub fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
-    let tracks = library::list_tracks(&dir)?;
+    let entries = list_entries_with_parent(&dir)?;
     let (cmd_tx, cmd_rx) = unbounded::<Command>();
     let (evt_tx, evt_rx) = unbounded::<Event>();
 
@@ -42,7 +43,7 @@ pub fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
         move || worker::worker_main(addr, cmd_rx, evt_tx)
     });
 
-    let mut app = App::new(addr, dir, tracks);
+    let mut app = App::new(addr, dir, entries);
 
     let mut term = init_terminal()?;
     let result = ui_loop(&mut term, &mut app, cmd_tx, evt_rx);
@@ -54,7 +55,7 @@ pub fn run_tui(addr: SocketAddr, dir: PathBuf) -> Result<()> {
 struct App {
     addr: SocketAddr,
     dir: PathBuf,
-    tracks: Vec<Track>,
+    entries: Vec<LibraryItem>,
     list_state: ListState,
 
     status: String,
@@ -68,16 +69,16 @@ struct App {
 }
 
 impl App {
-    fn new(addr: SocketAddr, dir: PathBuf, tracks: Vec<Track>) -> Self {
+    fn new(addr: SocketAddr, dir: PathBuf, entries: Vec<LibraryItem>) -> Self {
         let mut list_state = ListState::default();
-        if !tracks.is_empty() {
+        if !entries.is_empty() {
             list_state.select(Some(0));
         }
 
         Self {
             addr,
             dir,
-            tracks,
+            entries,
             list_state,
             status: "Ready".into(),
             last_progress: None,
@@ -94,20 +95,32 @@ impl App {
     }
 
     fn selected_track(&self) -> Option<&Track> {
-        self.selected_index().and_then(|i| self.tracks.get(i))
+        self.selected_index().and_then(|i| match self.entries.get(i) {
+            Some(LibraryItem::Track(track)) => Some(track),
+            _ => None,
+        })
+    }
+
+    fn selected_dir(&self) -> Option<PathBuf> {
+        self.selected_index()
+            .and_then(|i| self.entries.get(i))
+            .and_then(|entry| match entry {
+                LibraryItem::Dir { path, .. } => Some(path.clone()),
+                _ => None,
+            })
     }
 
     fn select_next(&mut self) {
-        if self.tracks.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
         let i = self.selected_index().unwrap_or(0);
-        let ni = (i + 1).min(self.tracks.len() - 1);
+        let ni = (i + 1).min(self.entries.len() - 1);
         self.list_state.select(Some(ni));
     }
 
     fn select_prev(&mut self) {
-        if self.tracks.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
         let i = self.selected_index().unwrap_or(0);
@@ -116,12 +129,28 @@ impl App {
     }
 
     fn rescan(&mut self) -> Result<()> {
-        self.tracks = library::list_tracks(&self.dir)?;
-        if self.tracks.is_empty() {
+        self.entries = list_entries_with_parent(&self.dir)?;
+        if self.entries.is_empty() {
             self.list_state.select(None);
         } else {
             self.list_state.select(Some(0));
         }
+        Ok(())
+    }
+
+    fn go_parent(&mut self) -> Result<()> {
+        if let Some(parent) = self.dir.parent() {
+            self.dir = parent.to_path_buf();
+            self.rescan()?;
+            self.status = format!("Entered {:?}", self.dir);
+        }
+        Ok(())
+    }
+
+    fn enter_dir(&mut self, dir: PathBuf) -> Result<()> {
+        self.dir = dir;
+        self.rescan()?;
+        self.status = format!("Entered {:?}", self.dir);
         Ok(())
     }
 }
@@ -168,12 +197,17 @@ fn ui_loop(
                     }
                     KeyCode::Up => app.select_prev(),
                     KeyCode::Down => app.select_next(),
+                    KeyCode::Left | KeyCode::Backspace => {
+                        app.go_parent()?;
+                    }
                     KeyCode::Char('r') => {
                         app.rescan()?;
                         app.status = "Rescanned".into();
                     }
                     KeyCode::Enter => {
-                        if let Some(t) = app.selected_track() {
+                        if let Some(dir) = app.selected_dir() {
+                            app.enter_dir(dir)?;
+                        } else if let Some(t) = app.selected_track() {
                             cmd_tx
                                 .send(Command::Play {
                                     path: t.path.clone(),
@@ -274,29 +308,35 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     f.render_widget(header, chunks[0]);
 
     let max_name_len = app
-        .tracks
+        .entries
         .iter()
-        .map(|t| t.file_name.len())
+        .map(|item| item.name().len() + if item.is_dir() { 1 } else { 0 })
         .max()
         .unwrap_or(0);
 
     let items: Vec<ListItem> = app
-        .tracks
+        .entries
         .iter()
-        .map(|t| {
-            let label = match t.duration_ms {
+        .map(|item| {
+            let name = if item.is_dir() {
+                format!("{}/", item.name())
+            } else {
+                item.name().to_string()
+            };
+            let label = match item.duration_ms() {
                 Some(ms) => {
                     let dur = format_duration_ms(ms);
-                    format!("{:<width$}  [{dur}]", t.file_name, width = max_name_len)
+                    format!("{:<width$}  [{dur}]", name, width = max_name_len)
                 }
-                None => t.file_name.clone(),
+                None if item.is_dir() => format!("{:<width$}  [dir]", name, width = max_name_len),
+                None => name,
             };
             ListItem::new(label)
         })
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Files (.flac/.wav)"))
+        .block(Block::default().borders(Borders::ALL).title("Entries"))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
 
@@ -354,10 +394,24 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play | Space pause | n next | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | r rescan | q quit",
         )),
         footer_chunks[4],
     );
+}
+
+fn list_entries_with_parent(dir: &PathBuf) -> Result<Vec<LibraryItem>> {
+    let mut entries = library::list_entries(dir)?;
+    if let Some(parent) = dir.parent() {
+        entries.insert(
+            0,
+            LibraryItem::Dir {
+                path: parent.to_path_buf(),
+                name: "..".to_string(),
+            },
+        );
+    }
+    Ok(entries)
 }
 
 fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
