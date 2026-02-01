@@ -130,8 +130,8 @@ fn reader_thread_main(
 
                 // Now read frames for this session.
                 //
-                // IMPORTANT: after END_FILE we MUST keep reading control frames (NEXT/PAUSE/RESUME)
-                // while playback drains, otherwise "next track" won't cancel anything.
+                // After END_FILE we keep reading control frames (NEXT/PAUSE/RESUME)
+                // while playback drains; otherwise "next track" won't cancel anything.
                 let mut writer = OpenOptions::new()
                     .append(true)
                     .open(&temp_path)

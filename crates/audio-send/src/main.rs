@@ -1,6 +1,6 @@
 //! `audio-send` — a small TUI to stream audio files to `audio-bridge`.
 //!
-//! MVP features:
+//! Features:
 //! - list `.flac`/`.wav` files in current directory (non-recursive)
 //! - Enter: play selected (immediately starts sending)
 //! - Space: pause/resume (sends PAUSE/RESUME frames)

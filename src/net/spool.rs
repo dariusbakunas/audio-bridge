@@ -113,7 +113,7 @@ impl Seek for BlockingFileSource {
             SeekFrom::Start(x) => x,
             SeekFrom::Current(d) => self.pos.saturating_add_signed(d),
             SeekFrom::End(_) => {
-                // For v1: wait until done, then treat end as final length.
+                // Wait until done, then treat end as final length.
                 self.wait_until_available(u64::MAX);
                 let (lock, _) = &*self.progress;
                 let g = lock.lock().unwrap();
