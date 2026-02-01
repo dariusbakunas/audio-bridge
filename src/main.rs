@@ -108,16 +108,16 @@ fn play_one_network_session(
     let source: Box<dyn symphonia::core::io::MediaSource> =
         Box::new(net::BlockingFileSource::new(file_for_read, sess.control.progress.clone()));
 
-    let (src_spec, srcq) = decode::start_streaming_decode_from_media_source(
+    let (src_spec, srcq, duration_ms) = decode::start_streaming_decode_from_media_source(
         source,
         sess.hint.clone(),
         args.buffer_seconds,
     )?;
 
     let track_info_payload = audio_bridge_proto::encode_track_info(
-        src_spec.rate,
+        stream_config.sample_rate,
         src_spec.channels.count() as u16,
-        None,
+        duration_ms,
     );
     let mut peer_tx = sess.peer_tx;
     let _ = audio_bridge_proto::write_frame(
@@ -154,7 +154,7 @@ fn play_one_local(
     args: &cli::Args,
     path: &std::path::PathBuf,
 ) -> Result<()> {
-    let (src_spec, srcq) = decode::start_streaming_decode(path, args.buffer_seconds)?;
+    let (src_spec, srcq, _duration_ms) = decode::start_streaming_decode(path, args.buffer_seconds)?;
     eprintln!(
         "Source: {}ch @ {} Hz (local file)",
         src_spec.channels.count(),

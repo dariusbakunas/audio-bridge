@@ -22,10 +22,10 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 
@@ -144,7 +144,9 @@ fn ui_loop(
                 Event::RemoteTrackInfo { sample_rate, channels, duration_ms } => {
                     app.remote_sample_rate = Some(sample_rate);
                     app.remote_channels = Some(channels);
-                    app.remote_duration_ms = duration_ms;
+                    if app.remote_duration_ms.is_none() && duration_ms.is_some() {
+                        app.remote_duration_ms = duration_ms;
+                    }
                 }
                 Event::RemotePlaybackPos { played_frames, paused } => {
                     app.remote_played_frames = Some(played_frames);
@@ -178,6 +180,9 @@ fn ui_loop(
                                     ext_hint: t.ext_hint.clone(),
                                 })
                                 .ok();
+                            app.remote_duration_ms = t.duration_ms;
+                            app.remote_played_frames = Some(0);
+                            app.remote_paused = Some(false);
                         }
                     }
                     KeyCode::Char(' ') => {
@@ -194,6 +199,9 @@ fn ui_loop(
                                     ext_hint: t.ext_hint.clone(),
                                 })
                                 .ok();
+                            app.remote_duration_ms = t.duration_ms;
+                            app.remote_played_frames = Some(0);
+                            app.remote_paused = Some(false);
                         }
                     }
                     _ => {}
@@ -208,19 +216,49 @@ fn ui_loop(
 }
 
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
-    let remote_line = match (app.remote_played_frames, app.remote_sample_rate, app.remote_duration_ms, app.remote_paused) {
+    let remote_status = match (
+        app.remote_played_frames,
+        app.remote_sample_rate,
+        app.remote_duration_ms,
+        app.remote_paused,
+    ) {
         (Some(fr), Some(sr), dur, Some(p)) if sr > 0 => {
             let elapsed_ms = (fr as f64 * 1000.0) / (sr as f64);
             let state = if p { "paused" } else { "playing" };
             match dur {
                 Some(total_ms) if total_ms > 0 => {
+                    let elapsed = format_duration_ms(elapsed_ms as u64);
+                    let total = format_duration_ms(total_ms);
+                    let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms as u64));
                     let pct = (elapsed_ms / total_ms as f64 * 100.0).clamp(0.0, 100.0);
-                    format!("remote: {:.1}s / {:.1}s ({:.1}%) [{state}]", elapsed_ms / 1000.0, total_ms as f64 / 1000.0, pct)
+                    format!(
+                        "remote: {elapsed} / {total} (left {remaining}, {pct:.1}%) [{state}]"
+                    )
                 }
                 _ => format!("remote: {:.1}s [{state}]", elapsed_ms / 1000.0),
             }
         }
         _ => "remote: -".to_string(),
+    };
+
+    let remote_gauge = match (
+        app.remote_played_frames,
+        app.remote_sample_rate,
+        app.remote_duration_ms,
+        app.remote_paused,
+    ) {
+        (Some(fr), Some(sr), Some(total_ms), Some(p)) if sr > 0 && total_ms > 0 => {
+            let elapsed_ms = (fr as f64 * 1000.0) / (sr as f64);
+            let ratio = (elapsed_ms / total_ms as f64).clamp(0.0, 1.0);
+            let state = if p { "paused" } else { "playing" };
+            let elapsed = format_duration_ms(elapsed_ms as u64);
+            let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms as u64));
+            Some((
+                ratio,
+                format!("{elapsed} elapsed • {remaining} left [{state}]"),
+            ))
+        }
+        _ => None,
     };
 
     let chunks = Layout::default()
@@ -235,10 +273,26 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .block(Block::default().borders(Borders::ALL).title("Target"));
     f.render_widget(header, chunks[0]);
 
+    let max_name_len = app
+        .tracks
+        .iter()
+        .map(|t| t.file_name.len())
+        .max()
+        .unwrap_or(0);
+
     let items: Vec<ListItem> = app
         .tracks
         .iter()
-        .map(|t| ListItem::new(t.file_name.clone()))
+        .map(|t| {
+            let label = match t.duration_ms {
+                Some(ms) => {
+                    let dur = format_duration_ms(ms);
+                    format!("{:<width$}  [{dur}]", t.file_name, width = max_name_len)
+                }
+                None => t.file_name.clone(),
+            };
+            ListItem::new(label)
+        })
         .collect();
 
     let list = List::new(items)
@@ -256,15 +310,50 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         _ => "sent: -".to_string(),
     };
 
-    let footer = Paragraph::new(vec![
-        Line::from(format!("status: {}", app.status)),
-        Line::from(progress_line),
-        Line::from(remote_line),
-        Line::from("keys: ↑/↓ select | Enter play | Space pause | n next | r rescan | q quit"),
-    ])
-        .block(Block::default().borders(Borders::ALL).title("Status"));
+    let footer_block = Block::default().borders(Borders::ALL).title("Status");
+    let footer_inner = footer_block.inner(chunks[2]);
+    f.render_widget(footer_block, chunks[2]);
 
-    f.render_widget(footer, chunks[2]);
+    let footer_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(footer_inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(format!("status: {}", app.status))),
+        footer_chunks[0],
+    );
+    f.render_widget(Paragraph::new(Line::from(progress_line)), footer_chunks[1]);
+    f.render_widget(Paragraph::new(Line::from(remote_status)), footer_chunks[2]);
+    if let Some((ratio, label)) = remote_gauge {
+        let gauge_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(10), Constraint::Length(30)])
+            .split(footer_chunks[3]);
+
+        f.render_widget(Gauge::default().ratio(ratio), gauge_chunks[0]);
+        f.render_widget(
+            Paragraph::new(Line::from(label)).alignment(Alignment::Right),
+            gauge_chunks[1],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(Line::from("remote progress: -")),
+            footer_chunks[3],
+        );
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(
+            "keys: ↑/↓ select | Enter play | Space pause | n next | r rescan | q quit",
+        )),
+        footer_chunks[4],
+    );
 }
 
 fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
@@ -281,4 +370,11 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Re
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
     Ok(())
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let mins = total_secs / 60;
+    let secs = total_secs % 60;
+    format!("{mins}:{secs:02}")
 }

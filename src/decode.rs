@@ -36,7 +36,7 @@ pub(crate) fn start_streaming_decode_from_media_source(
     source: Box<dyn MediaSource>,
     hint: Hint,
     buffer_seconds: f32,
-) -> Result<(SignalSpec, Arc<SharedAudio>)> {
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
     // Probe once to get spec.
     let mss = MediaSourceStream::new(source, Default::default());
 
@@ -66,6 +66,7 @@ pub(crate) fn start_streaming_decode_from_media_source(
     let spec = SignalSpec::new(rate, track.codec_params.channels.unwrap());
 
     let codec_params: CodecParameters = track.codec_params.clone();
+    let duration_ms = duration_ms_from_codec_params(&codec_params);
 
     let max_buffered_samples = calc_max_buffered_samples(rate, channels, buffer_seconds);
     let shared = Arc::new(SharedAudio::new(channels, max_buffered_samples));
@@ -79,14 +80,14 @@ pub(crate) fn start_streaming_decode_from_media_source(
         shared_for_thread.close();
     });
 
-    Ok((spec, shared))
+    Ok((spec, shared, duration_ms))
 }
 
 /// Start a background decoder thread that streams interleaved `f32` samples from `path`.
 pub(crate) fn start_streaming_decode(
     path: &PathBuf,
     buffer_seconds: f32,
-) -> Result<(SignalSpec, Arc<SharedAudio>)> {
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
     let file = File::open(path).with_context(|| format!("open {:?}", path))?;
 
     let mut hint = Hint::new();
@@ -123,4 +124,13 @@ fn decode_format_loop(
     }
 
     Ok(())
+}
+
+fn duration_ms_from_codec_params(codec_params: &CodecParameters) -> Option<u64> {
+    let frames = codec_params.n_frames?;
+    let rate = codec_params.sample_rate? as u64;
+    if rate == 0 {
+        return None;
+    }
+    Some(frames.saturating_mul(1000) / rate)
 }

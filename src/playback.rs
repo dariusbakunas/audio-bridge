@@ -107,6 +107,7 @@ where
             }
 
             let frames = data.len() / channels_out;
+            let start_pos = st.pos;
 
             for frame in 0..frames {
                 for ch in 0..channels_out {
@@ -117,7 +118,13 @@ where
             }
 
             if let Some(counter) = &played_frames {
-                counter.fetch_add(frames as u64, Ordering::Relaxed);
+                let consumed_samples = st.pos.saturating_sub(start_pos);
+                let consumed_frames = if st.src_channels == 0 {
+                    0
+                } else {
+                    consumed_samples / st.src_channels
+                };
+                counter.fetch_add(consumed_frames as u64, Ordering::Relaxed);
             }
         },
         err_fn,
