@@ -114,15 +114,8 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     .block(Block::default().borders(Borders::ALL).title("Now Playing"));
     f.render_widget(now_playing, top_chunks[1]);
 
-    let queue_after_index: HashSet<PathBuf> = match app.server_queue_index {
-        Some(idx) => app
-            .queued_next
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| if i > idx { Some(p.clone()) } else { None })
-            .collect(),
-        None => app.queued_next.iter().cloned().collect(),
-    };
+    let queue_after_index: Vec<PathBuf> = app.queued_next.iter().cloned().collect();
+    let queue_after_set: HashSet<PathBuf> = queue_after_index.iter().cloned().collect();
 
     let max_name_len = app
         .entries
@@ -160,7 +153,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     LibraryItem::Track(t) => Some(&t.path),
                     _ => None,
                 })
-                .map(|path| app.now_playing_path.as_ref() != Some(path) && queue_after_index.contains(path))
+                .map(|path| app.now_playing_path.as_ref() != Some(path) && queue_after_set.contains(path))
                 .unwrap_or(false)
             {
                 label = format!("{label}  [queued]");

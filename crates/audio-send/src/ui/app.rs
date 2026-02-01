@@ -100,7 +100,6 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                         delay = Duration::from_millis(500);
                         let _ = evt_tx.send(Event::QueueUpdate {
                             items: queue.items,
-                            index: queue.index,
                         });
                     }
                     Err(_) => {
@@ -151,7 +150,6 @@ pub(crate) struct App {
     pub(crate) now_playing_path: Option<PathBuf>,
     pub(crate) now_playing_meta: Option<TrackMeta>,
     pub(crate) queued_next: VecDeque<PathBuf>,
-    pub(crate) server_queue_index: Option<usize>,
     pub(crate) auto_preview: Vec<PathBuf>,
     pub(crate) queue_revision: u64,
     pub(crate) meta_cache: HashMap<PathBuf, TrackMeta>,
@@ -210,7 +208,6 @@ impl App {
             now_playing_path: None,
             now_playing_meta: None,
             queued_next: VecDeque::new(),
-            server_queue_index: None,
             auto_preview: Vec::new(),
             queue_revision: 1,
             meta_cache,
@@ -537,14 +534,13 @@ fn ui_loop(
         while let Ok(ev) = evt_rx.try_recv() {
             match ev {
                 Event::Status(s) => app.status = s,
-                Event::QueueUpdate { items, index } => {
+                Event::QueueUpdate { items } => {
                     app.queued_next = items.iter().map(|item| item.path.clone()).collect();
                     for item in items {
                         if let Some(meta) = item.meta {
                             app.meta_cache.insert(item.path.clone(), meta);
                         }
                     }
-                    app.server_queue_index = index;
                     app.mark_queue_dirty();
                 }
                 Event::RemoteStatus {

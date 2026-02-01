@@ -14,7 +14,6 @@ use crate::state::PlayerStatus;
 pub enum BridgeCommand {
     Play { path: PathBuf, ext_hint: String },
     PauseToggle,
-    Next,
     Quit,
 }
 
@@ -59,16 +58,6 @@ pub fn spawn_bridge_worker(
                         if let Ok(mut s) = status.lock() {
                             s.paused = paused;
                         }
-                    }
-                }
-                BridgeCommand::Next => {
-                    let _ = audio_bridge_proto::write_frame(
-                        &mut stream,
-                        audio_bridge_proto::FrameKind::Next,
-                        &[],
-                    );
-                    if let Ok(mut s) = status.lock() {
-                        s.paused = false;
                     }
                 }
                 BridgeCommand::Play { path, ext_hint } => {
@@ -201,7 +190,6 @@ fn write_all_interruptible(
     while off < buf.len() {
             match cmd_rx.try_recv() {
                 Ok(BridgeCommand::Quit) => return Ok(Flow::Quit),
-                Ok(BridgeCommand::Next) => return Ok(Flow::Continue),
                 Ok(BridgeCommand::Play { path, ext_hint }) => return Ok(Flow::SwitchTo { path, ext_hint }),
                 Ok(BridgeCommand::PauseToggle) => {
                 *paused = !*paused;

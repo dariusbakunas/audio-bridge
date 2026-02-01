@@ -41,5 +41,4 @@ impl AppState {
 #[derive(Debug, Default)]
 pub struct QueueState {
     pub items: Vec<PathBuf>,
-    pub index: Option<usize>,
 }

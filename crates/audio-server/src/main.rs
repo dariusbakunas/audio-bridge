@@ -2,6 +2,7 @@ mod api;
 mod bridge;
 mod library;
 mod models;
+mod openapi;
 mod state;
 
 use std::net::SocketAddr;
@@ -9,6 +10,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use actix_web::{App, HttpServer, web, middleware::Logger};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 use anyhow::Result;
 use clap::Parser;
 use crossbeam_channel::unbounded;
@@ -73,11 +76,14 @@ async fn main() -> Result<()> {
         App::new()
             .app_data(state.clone())
             .wrap(Logger::default().exclude("/status").exclude("/queue"))
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/api-doc/openapi.json", openapi::ApiDoc::openapi()),
+            )
             .service(api::list_library)
             .service(api::rescan_library)
             .service(api::play_track)
             .service(api::pause_toggle)
-            .service(api::next_track)
             .service(api::queue_list)
             .service(api::queue_add)
             .service(api::queue_remove)

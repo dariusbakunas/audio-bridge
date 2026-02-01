@@ -57,7 +57,6 @@ enum QueueItem {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct QueueResponse {
     items: Vec<QueueItem>,
-    index: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -148,7 +147,6 @@ pub(crate) struct RemoteQueueItem {
 
 pub(crate) struct RemoteQueue {
     pub(crate) items: Vec<RemoteQueueItem>,
-    pub(crate) index: Option<usize>,
 }
 
 pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
@@ -208,7 +206,6 @@ pub(crate) fn queue_list(server: &str) -> Result<RemoteQueue> {
         .collect();
     Ok(RemoteQueue {
         items,
-        index: resp.index,
     })
 }
 

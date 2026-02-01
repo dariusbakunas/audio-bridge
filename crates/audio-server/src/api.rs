@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 use serde::Deserialize;
+use utoipa::ToSchema;
 
 use crate::library::scan_library;
 use crate::models::{
@@ -16,11 +17,21 @@ use crate::models::{
 };
 use crate::state::AppState;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct LibraryQuery {
     pub dir: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/library",
+    params(
+        ("dir" = Option<String>, Query, description = "Directory to list")
+    ),
+    responses(
+        (status = 200, description = "Library entries", body = LibraryResponse)
+    )
+)]
 #[get("/library")]
 pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQuery>) -> impl Responder {
     let dir = query
@@ -46,6 +57,14 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
     HttpResponse::Ok().json(resp)
 }
 
+#[utoipa::path(
+    post,
+    path = "/library/rescan",
+    responses(
+        (status = 200, description = "Rescan started"),
+        (status = 500, description = "Rescan failed")
+    )
+)]
 #[post("/library/rescan")]
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
@@ -59,6 +78,16 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/play",
+    request_body = PlayRequest,
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Player offline")
+    )
+)]
 #[post("/play")]
 pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>) -> impl Responder {
     let path = PathBuf::from(&body.path);
@@ -77,9 +106,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     {
         let mut queue = state.queue.lock().unwrap();
         if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-            queue.index = Some(pos);
-        } else {
-            queue.index = None;
+            queue.items.remove(pos);
         }
     }
     if state.player.cmd_tx.send(crate::bridge::BridgeCommand::Play { path: path.clone(), ext_hint }).is_ok() {
@@ -93,6 +120,14 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/pause",
+    responses(
+        (status = 200, description = "Pause toggled"),
+        (status = 500, description = "Player offline")
+    )
+)]
 #[post("/pause")]
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
@@ -106,18 +141,13 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     }
 }
 
-#[post("/next")]
-pub async fn next_track(state: web::Data<AppState>) -> impl Responder {
-    tracing::info!("next request");
-    if let Some(path) = advance_queue_for_api(&state) {
-        return start_path(&state, path);
-    }
-    if state.player.cmd_tx.send(crate::bridge::BridgeCommand::Next).is_ok() {
-        return HttpResponse::Ok().finish();
-    }
-    HttpResponse::InternalServerError().body("player offline")
-}
-
+#[utoipa::path(
+    get,
+    path = "/queue",
+    responses(
+        (status = 200, description = "Queue contents", body = QueueResponse)
+    )
+)]
 #[get("/queue")]
 pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
     let queue = state.queue.lock().unwrap();
@@ -149,12 +179,17 @@ pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
             },
         })
         .collect();
-    HttpResponse::Ok().json(QueueResponse {
-        items,
-        index: queue.index,
-    })
+    HttpResponse::Ok().json(QueueResponse { items })
 }
 
+#[utoipa::path(
+    post,
+    path = "/queue",
+    request_body = QueueAddRequest,
+    responses(
+        (status = 200, description = "Queue updated")
+    )
+)]
 #[post("/queue")]
 pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddRequest>) -> impl Responder {
     let mut added = 0usize;
@@ -173,6 +208,15 @@ pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddReque
     HttpResponse::Ok().body(format!("added {added}"))
 }
 
+#[utoipa::path(
+    post,
+    path = "/queue/remove",
+    request_body = QueueRemoveRequest,
+    responses(
+        (status = 200, description = "Queue updated"),
+        (status = 400, description = "Bad request")
+    )
+)]
 #[post("/queue/remove")]
 pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemoveRequest>) -> impl Responder {
     let path = PathBuf::from(&body.path);
@@ -183,33 +227,57 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
     let mut queue = state.queue.lock().unwrap();
     if let Some(pos) = queue.items.iter().position(|p| p == &path) {
         queue.items.remove(pos);
-        if let Some(idx) = queue.index {
-            if pos == idx {
-                queue.index = None;
-            } else if pos < idx {
-                queue.index = Some(idx.saturating_sub(1));
-            }
-        }
     }
     HttpResponse::Ok().finish()
 }
 
+#[utoipa::path(
+    post,
+    path = "/queue/clear",
+    responses(
+        (status = 200, description = "Queue cleared")
+    )
+)]
 #[post("/queue/clear")]
 pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
     let mut queue = state.queue.lock().unwrap();
     queue.items.clear();
-    queue.index = None;
     HttpResponse::Ok().finish()
 }
 
+#[utoipa::path(
+    post,
+    path = "/queue/next",
+    responses(
+        (status = 200, description = "Advanced to next"),
+        (status = 204, description = "End of queue")
+    )
+)]
 #[post("/queue/next")]
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
-    if let Some(path) = advance_queue_for_api(&state) {
+    let path = {
+        let mut queue = state.queue.lock().unwrap();
+        if queue.items.is_empty() {
+            None
+        } else {
+            Some(queue.items.remove(0))
+        }
+    };
+    if let Some(path) = path {
         return start_path(&state, path);
     }
     HttpResponse::NoContent().finish()
 }
 
+#[utoipa::path(
+    post,
+    path = "/queue/replace_play",
+    request_body = QueueReplacePlayRequest,
+    responses(
+        (status = 200, description = "Queue replaced and playback started"),
+        (status = 400, description = "Bad request")
+    )
+)]
 #[post("/queue/replace_play")]
 pub async fn queue_replace_play(
     state: web::Data<AppState>,
@@ -223,12 +291,17 @@ pub async fn queue_replace_play(
     {
         let mut queue = state.queue.lock().unwrap();
         queue.items.clear();
-        queue.items.push(path.clone());
-        queue.index = Some(0);
     }
     start_path(&state, path)
 }
 
+#[utoipa::path(
+    get,
+    path = "/status",
+    responses(
+        (status = 200, description = "Playback status", body = StatusResponse)
+    )
+)]
 #[get("/status")]
 pub async fn status(state: web::Data<AppState>) -> impl Responder {
     let status = state.status.lock().unwrap();
@@ -277,24 +350,6 @@ fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, Str
         return Err(format!("path outside library root: {:?}", path));
     }
     Ok(canon)
-}
-
-fn advance_queue_for_api(state: &AppState) -> Option<PathBuf> {
-    let mut queue = state.queue.lock().ok()?;
-    if queue.items.is_empty() {
-        return None;
-    }
-    let next_index = match queue.index {
-        None => 0,
-        Some(idx) => {
-            if idx + 1 >= queue.items.len() {
-                return None;
-            }
-            idx + 1
-        }
-    };
-    queue.index = Some(next_index);
-    queue.items.get(next_index).cloned()
 }
 
 fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {

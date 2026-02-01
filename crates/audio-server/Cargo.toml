@@ -15,3 +15,5 @@ symphonia = { version = "0.5.5", features = ["flac"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 ctrlc = "3.4.5"
+utoipa = { version = "4.2.3", features = ["actix_extras"] }
+utoipa-swagger-ui = { version = "7.1.0", features = ["actix-web"] }

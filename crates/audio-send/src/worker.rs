@@ -29,7 +29,6 @@ pub enum Event {
     },
     QueueUpdate {
         items: Vec<crate::server_api::RemoteQueueItem>,
-        index: Option<usize>,
     },
     Error(String),
 }
