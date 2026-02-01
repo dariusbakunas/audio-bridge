@@ -7,7 +7,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -17,6 +17,8 @@ use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver};
 use symphonia::core::io::MediaSource;
 use symphonia::core::probe::Hint;
+
+const TEMP_PREFIX: &str = "audio-bridge-stream";
 
 #[derive(Debug)]
 pub(crate) struct Progress {
@@ -54,7 +56,7 @@ impl SessionControl {
 ///
 /// The returned channel yields one [`NetSession`] per `BEGIN_FILE`.
 /// When the client disconnects, the channel closes.
-pub(crate) fn run_one_client(mut stream: TcpStream) -> Result<Receiver<NetSession>> {
+pub(crate) fn run_one_client(mut stream: TcpStream, temp_dir: PathBuf) -> Result<Receiver<NetSession>> {
     // Handshake once per connection.
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
@@ -65,7 +67,7 @@ pub(crate) fn run_one_client(mut stream: TcpStream) -> Result<Receiver<NetSessio
     let (session_tx, session_rx) = unbounded::<NetSession>();
 
     thread::spawn(move || {
-        if let Err(e) = reader_thread_main(stream, peer_tx, session_tx) {
+        if let Err(e) = reader_thread_main(stream, peer_tx, session_tx, temp_dir) {
             eprintln!("Connection reader ended: {e:#}");
         }
     });
@@ -77,6 +79,7 @@ fn reader_thread_main(
     mut stream: TcpStream,
     peer_tx: TcpStream,
     session_tx: crossbeam_channel::Sender<NetSession>,
+    temp_dir: PathBuf,
 ) -> Result<()> {
     loop {
         // Wait for the next BEGIN_FILE.
@@ -97,7 +100,7 @@ fn reader_thread_main(
                     hint.with_extension(&ext);
                 }
 
-                let temp_path = make_temp_path("audio-bridge-stream");
+                let temp_path = make_temp_path(&temp_dir, TEMP_PREFIX);
                 {
                     let _ = OpenOptions::new()
                         .create(true)
@@ -279,8 +282,24 @@ pub(crate) fn accept_one(listener: &TcpListener) -> Result<TcpStream> {
     Ok(stream)
 }
 
-fn make_temp_path(prefix: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
+pub(crate) fn cleanup_temp_files(dir: &Path) -> io::Result<usize> {
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if !file_name.starts_with(TEMP_PREFIX) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn make_temp_path(dir: &Path, prefix: &str) -> PathBuf {
+    let mut p = dir.to_path_buf();
 
     // Uniqueness without extra crates.
     let now = SystemTime::now()

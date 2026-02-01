@@ -38,6 +38,20 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let temp_dir = args.temp_dir.clone().unwrap_or_else(std::env::temp_dir);
+
+    match net::cleanup_temp_files(&temp_dir) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("Cleaned up {n} stale temp file(s)."),
+        Err(e) => eprintln!("Temp cleanup warning: {e}"),
+    }
+
+    let temp_dir_for_signal = temp_dir.clone();
+    let _ = ctrlc::set_handler(move || {
+        let _ = net::cleanup_temp_files(&temp_dir_for_signal);
+        std::process::exit(130);
+    });
+
     let (device, config) = device::select_output(&host, args.device.as_deref())?;
     eprintln!("Output device: {}", device.description()?);
     eprintln!("Device default config: {:?}", config);
@@ -60,7 +74,7 @@ fn main() -> Result<()> {
                     }
                 };
 
-                if let Err(e) = serve_one_client(&device, &config, &stream_config, &args, stream) {
+                if let Err(e) = serve_one_client(&device, &config, &stream_config, &args, stream, &temp_dir) {
                     eprintln!("Client session error: {e:#}");
                 }
 
@@ -78,8 +92,9 @@ fn serve_one_client(
     stream_config: &cpal::StreamConfig,
     args: &cli::Args,
     stream: std::net::TcpStream,
+    temp_dir: &std::path::Path,
 ) -> Result<()> {
-    let session_rx = net::run_one_client(stream)?;
+    let session_rx = net::run_one_client(stream, temp_dir.to_path_buf())?;
 
     while let Ok(sess) = session_rx.recv() {
         if let Err(e) = play_one_network_session(device, config, stream_config, args, sess) {

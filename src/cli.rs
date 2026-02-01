@@ -33,6 +33,10 @@ pub struct Args {
     /// Queue buffer target in seconds (per stage)
     #[arg(long, default_value_t = 2.0)]
     pub buffer_seconds: f32,
+
+    /// Temp directory for streamed files (defaults to OS temp dir)
+    #[arg(long)]
+    pub temp_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
