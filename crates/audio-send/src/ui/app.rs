@@ -547,13 +547,15 @@ impl App {
         self.mark_queue_dirty();
     }
 
-    fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>) {
+    fn play_track_path(&mut self, path: PathBuf, cmd_tx: &Sender<Command>, clear_queue: bool) {
         let ext_hint = path
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        self.queued_next.clear();
+        if clear_queue {
+            self.queued_next.clear();
+        }
         cmd_tx
             .send(Command::Play {
                 path: path.clone(),
@@ -622,7 +624,7 @@ impl App {
 
         self.auto_advance_armed = false;
         if let Some(next_path) = self.queued_next.pop_front() {
-            self.play_track_path(next_path, cmd_tx);
+            self.play_track_path(next_path, cmd_tx, false);
             self.status = "Auto next (queued)".into();
             return;
         }
@@ -630,7 +632,7 @@ impl App {
         if let Some(idx) = self.playing_queue_index {
             if let Some(next_path) = self.playing_queue.get(idx + 1).cloned() {
                 self.playing_queue_index = Some(idx + 1);
-                self.play_track_path(next_path, cmd_tx);
+                self.play_track_path(next_path, cmd_tx, false);
                 self.status = "Auto next".into();
                 return;
             }
@@ -707,14 +709,14 @@ fn ui_loop(
                         // Immediate skip: tell worker "Next", then start the next selected track.
                         cmd_tx.send(Command::Next).ok();
                         if let Some(next_path) = app.queued_next.pop_front() {
-                            app.play_track_path(next_path, &cmd_tx);
+                            app.play_track_path(next_path, &cmd_tx, false);
                             app.status = "Skipping (queued)".into();
                             continue;
                         }
                         if let Some(idx) = app.playing_queue_index {
                             if let Some(next_path) = app.playing_queue.get(idx + 1).cloned() {
                                 app.playing_queue_index = Some(idx + 1);
-                                app.play_track_path(next_path, &cmd_tx);
+                                app.play_track_path(next_path, &cmd_tx, false);
                                 app.status = "Skipping (next)".into();
                                 continue;
                             }
@@ -868,5 +870,24 @@ mod tests {
         let (cmd_tx, _cmd_rx) = unbounded::<Command>();
         app.play_track_at(1, &cmd_tx);
         assert!(app.queued_next.is_empty());
+    }
+
+    #[test]
+    fn next_keeps_queue() {
+        let entries = vec![
+            track_item("/music/a.flac", "A"),
+            track_item("/music/b.flac", "B"),
+        ];
+        let mut app = app_with_entries(entries);
+        app.queued_next.push_back(PathBuf::from("/music/b.flac"));
+        app.queued_next.push_back(PathBuf::from("/music/c.flac"));
+        app.remote_sample_rate = Some(48_000);
+        app.remote_duration_ms = Some(1_000);
+        app.remote_played_frames = Some(48_000);
+        app.remote_paused = Some(false);
+        app.auto_advance_armed = true;
+        let (cmd_tx, _cmd_rx) = unbounded::<Command>();
+        app.maybe_auto_advance(&cmd_tx);
+        assert_eq!(app.queued_next.len(), 1);
     }
 }
