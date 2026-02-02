@@ -69,7 +69,7 @@ pub(crate) fn run_one_client(
 
 fn reader_thread_main(
     mut stream: TcpStream,
-    mut peer_tx: TcpStream,
+    peer_tx: TcpStream,
     session_tx: crossbeam_channel::Sender<NetSession>,
     temp_dir: PathBuf,
 ) -> Result<()> {

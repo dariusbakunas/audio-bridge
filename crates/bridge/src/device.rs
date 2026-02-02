@@ -7,20 +7,6 @@
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 
-/// Select an output device and its default output config.
-///
-/// - If `needle` is `Some`, chooses the first output device whose name contains the substring
-///   (case-insensitive).
-/// - Otherwise, returns the host default output device.
-pub fn select_output(
-    host: &cpal::Host,
-    needle: Option<&str>,
-) -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
-    let device = pick_device(host, needle)?;
-    let config = pick_output_config(&device, None)?;
-    Ok((device, config))
-}
-
 /// Pick a CPAL output device.
 ///
 /// - If `needle` is `Some`, chooses the first output device whose name contains the substring
@@ -149,16 +135,6 @@ pub fn list_devices(host: &cpal::Host) -> Result<()> {
     Ok(())
 }
 
-/// Return available output device names.
-pub fn list_device_names(host: &cpal::Host) -> Result<Vec<String>> {
-    let devices = host.output_devices().context("No output devices")?;
-    let mut out = Vec::new();
-    for d in devices {
-        out.push(d.description()?.to_string());
-    }
-    Ok(out)
-}
-
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
     pub name: String,
@@ -194,11 +170,4 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
         }
     }
     Ok(out)
-}
-
-/// Return the current default output device name, if any.
-pub fn default_device_name() -> Option<String> {
-    let host = cpal::default_host();
-    host.default_output_device()
-        .and_then(|d| d.description().ok().map(|desc| desc.to_string()))
 }

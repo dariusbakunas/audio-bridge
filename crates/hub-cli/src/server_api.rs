@@ -184,8 +184,6 @@ pub(crate) struct RemoteStatus {
 pub(crate) struct RemoteOutput {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) state: String,
-    pub(crate) kind: String,
     pub(crate) bridge_id: Option<String>,
     pub(crate) bridge_name: Option<String>,
     pub(crate) supported_rates: Option<(u32, u32)>,
@@ -244,8 +242,6 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
         .map(|o| RemoteOutput {
             id: o.id,
             name: o.name,
-            state: o.state,
-            kind: o.kind,
             bridge_id: o.bridge_id,
             bridge_name: o.bridge_name,
             supported_rates: o.supported_rates.map(|r| (r.min_hz, r.max_hz)),
