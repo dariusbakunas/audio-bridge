@@ -83,7 +83,7 @@ fn scan_dir(root: &Path, dir: &Path, entries_by_dir: &mut std::collections::Hash
             .and_then(OsStr::to_str)
             .unwrap_or("")
             .to_ascii_lowercase();
-        if ext != "flac" && ext != "wav" {
+        if !is_supported_extension(&ext) {
             continue;
         }
 
@@ -130,6 +130,13 @@ fn scan_dir(root: &Path, dir: &Path, entries_by_dir: &mut std::collections::Hash
     }
 
     Ok(())
+}
+
+fn is_supported_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "flac" | "wav" | "aiff" | "aif" | "mp3" | "m4a" | "aac" | "alac" | "ogg" | "oga" | "opus"
+    )
 }
 
 #[derive(Clone, Debug, Default)]

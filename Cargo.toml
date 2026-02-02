@@ -17,4 +17,4 @@ cpal = "0.17.1"
 ctrlc = "3.4.5"
 crossbeam-channel = "0.5.15"
 rubato = "1.0.1"
-symphonia = { version = "0.5.5", features = ["flac"] }
+symphonia = { version = "0.5.5", features = ["flac", "mp3", "aac", "alac", "wav", "aiff", "vorbis"] }
