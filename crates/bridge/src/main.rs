@@ -133,7 +133,6 @@ fn play_one_network_session(
         .open(&sess.temp_path)
         .with_context(|| format!("open temp file for read {:?}", sess.temp_path))?;
 
-    // Reuse your existing blocking MediaSource idea.
     let source: Box<dyn symphonia::core::io::MediaSource> =
         Box::new(net::BlockingFileSource::new(file_for_read, sess.control.progress.clone()));
 
