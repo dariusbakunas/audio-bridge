@@ -79,6 +79,8 @@ fn main() -> Result<()> {
                 device_selected.clone(),
             );
 
+            let current_conn: std::sync::Arc<std::sync::Mutex<Option<std::net::TcpStream>>> =
+                std::sync::Arc::new(std::sync::Mutex::new(None));
             loop {
                 let stream = match net::accept_one(&listener) {
                     Ok(s) => s,
@@ -87,6 +89,15 @@ fn main() -> Result<()> {
                         continue;
                     }
                 };
+                if let Ok(mut guard) = current_conn.lock() {
+                    if let Some(prev) = guard.take() {
+                        let _ = prev.shutdown(std::net::Shutdown::Both);
+                        tracing::info!("previous client evicted");
+                    }
+                    if let Ok(clone) = stream.try_clone() {
+                        *guard = Some(clone);
+                    }
+                }
 
                 let device_ctl = net::DeviceControl {
                     selected: device_selected.clone(),

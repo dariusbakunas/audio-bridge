@@ -44,6 +44,21 @@ struct StatusResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct OutputsResponse {
+    active_id: String,
+    outputs: Vec<OutputInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OutputInfo {
+    id: String,
+    kind: String,
+    name: String,
+    state: String,
+    bridge_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum QueueItem {
     Track {
@@ -158,6 +173,21 @@ pub(crate) struct RemoteStatus {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct RemoteOutput {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) state: String,
+    pub(crate) kind: String,
+    pub(crate) bridge_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RemoteOutputs {
+    pub(crate) active_id: String,
+    pub(crate) outputs: Vec<RemoteOutput>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct RemoteQueueItem {
     pub(crate) path: PathBuf,
     pub(crate) meta: Option<crate::library::TrackMeta>,
@@ -189,6 +219,42 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
         format: resp.format,
         output_id: resp.output_id,
     })
+}
+
+pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
+    let url = format!("{}/outputs", server.trim_end_matches('/'));
+    let resp: OutputsResponse = ureq::get(&url)
+        .call()
+        .context("request /outputs")?
+        .into_json()
+        .context("decode /outputs response")?;
+    let outputs = resp
+        .outputs
+        .into_iter()
+        .map(|o| RemoteOutput {
+            id: o.id,
+            name: o.name,
+            state: o.state,
+            kind: o.kind,
+            bridge_id: o.bridge_id,
+        })
+        .collect();
+    Ok(RemoteOutputs {
+        active_id: resp.active_id,
+        outputs,
+    })
+}
+
+pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
+    let url = format!("{}/outputs/select", server.trim_end_matches('/'));
+    let body = serde_json::json!({ "id": id });
+    let resp = ureq::post(&url)
+        .send_json(body)
+        .context("request /outputs/select")?;
+    if resp.status() / 100 != 2 {
+        return Err(anyhow::anyhow!("outputs select failed with {}", resp.status()));
+    }
+    Ok(())
 }
 
 pub(crate) fn queue_list(server: &str) -> Result<RemoteQueue> {

@@ -76,20 +76,25 @@ pub fn http_status(addr: SocketAddr) -> Result<HttpStatusResponse> {
 }
 
 pub fn spawn_bridge_worker(
+    bridge_id: String,
     addr: SocketAddr,
     cmd_rx: Receiver<BridgeCommand>,
     cmd_tx: Sender<BridgeCommand>,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     bridge_online: Arc<AtomicBool>,
+    bridges_state: Arc<Mutex<crate::state::BridgeState>>,
 ) {
     std::thread::spawn(move || {
+        tracing::info!(bridge_id = %bridge_id, addr = %addr, "bridge worker start");
         let mut stream = connect_loop(
+            bridge_id.clone(),
             addr,
             status.clone(),
             queue.clone(),
             cmd_tx.clone(),
             bridge_online.clone(),
+            bridges_state.clone(),
         );
         let mut paused = false;
 
@@ -101,14 +106,18 @@ pub fn spawn_bridge_worker(
 
             match cmd {
                 BridgeCommand::Quit => {
+                    tracing::info!("bridge cmd: quit");
                     let _ = audio_bridge_proto::write_frame(
                         &mut stream,
                         audio_bridge_proto::FrameKind::Next,
                         &[],
                     );
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    tracing::info!("bridge cmd: quit sent (shutdown)");
                     break;
                 }
                 BridgeCommand::PauseToggle => {
+                    tracing::info!("bridge cmd: pause toggle");
                     paused = !paused;
                     let kind = if paused {
                         audio_bridge_proto::FrameKind::Pause
@@ -122,6 +131,7 @@ pub fn spawn_bridge_worker(
                     }
                 }
                 BridgeCommand::Stop => {
+                    tracing::info!("bridge cmd: stop");
                     let _ = audio_bridge_proto::write_frame(
                         &mut stream,
                         audio_bridge_proto::FrameKind::Next,
@@ -139,6 +149,7 @@ pub fn spawn_bridge_worker(
                     }
                 }
                 BridgeCommand::Play { path, ext_hint } => {
+                    tracing::info!(path = %path.display(), ext_hint = %ext_hint, "bridge cmd: play");
                     let mut next = Some((path, ext_hint));
                     while let Some((path, ext_hint)) = next.take() {
                         tracing::info!(path = %path.display(), "bridge play");
@@ -166,11 +177,13 @@ pub fn spawn_bridge_worker(
                                 if is_network_error(&e) {
                                     tracing::warn!("bridge connection lost; reconnecting");
                                     stream = connect_loop(
+                                        bridge_id.clone(),
                                         addr,
                                         status.clone(),
                                         queue.clone(),
                                         cmd_tx.clone(),
                                         bridge_online.clone(),
+                                        bridges_state.clone(),
                                     );
                                     continue;
                                 }
@@ -193,29 +206,43 @@ enum Flow {
 }
 
 fn connect_loop(
+    bridge_id: String,
     addr: SocketAddr,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
     bridge_online: Arc<AtomicBool>,
+    bridges_state: Arc<Mutex<crate::state::BridgeState>>,
 ) -> TcpStream {
     let mut delay = Duration::from_millis(250);
     loop {
         match connect_and_handshake(
+            bridge_id.clone(),
             addr,
             status.clone(),
             queue.clone(),
             cmd_tx.clone(),
             bridge_online.clone(),
+            bridges_state.clone(),
         ) {
             Ok(stream) => {
-                bridge_online.store(true, Ordering::Relaxed);
-                tracing::info!(addr = %addr, "bridge connected");
+                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                    bridge_online.store(true, Ordering::Relaxed);
+                }
+                tracing::info!(bridge_id = %bridge_id, addr = %addr, "bridge connected");
                 return stream;
             }
-            Err(_) => {
-                bridge_online.store(false, Ordering::Relaxed);
-                tracing::warn!(addr = %addr, delay_ms = delay.as_millis(), "bridge connect failed");
+            Err(e) => {
+                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                    bridge_online.store(false, Ordering::Relaxed);
+                }
+                tracing::warn!(
+                    bridge_id = %bridge_id,
+                    addr = %addr,
+                    delay_ms = delay.as_millis(),
+                    error = %e,
+                    "bridge connect failed"
+                );
                 std::thread::sleep(delay);
                 delay = (delay * 2).min(Duration::from_secs(5));
             }
@@ -224,20 +251,32 @@ fn connect_loop(
 }
 
 fn connect_and_handshake(
+    bridge_id: String,
     addr: SocketAddr,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
     bridge_online: Arc<AtomicBool>,
+    bridges_state: Arc<Mutex<crate::state::BridgeState>>,
 ) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect(addr).with_context(|| format!("connect {addr}"))?;
+    tracing::info!(bridge_id = %bridge_id, addr = %addr, "bridge connect attempt");
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2))
+        .with_context(|| format!("connect {addr}"))?;
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_millis(200))).ok();
 
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     let mut stream_rx = stream.try_clone().context("try_clone stream for rx")?;
     audio_bridge_proto::read_prelude(&mut stream_rx).context("read prelude")?;
-    spawn_bridge_reader(stream_rx, status, queue, cmd_tx, bridge_online);
+    spawn_bridge_reader(
+        stream_rx,
+        status,
+        queue,
+        cmd_tx,
+        bridge_online,
+        bridges_state,
+        bridge_id,
+    );
     Ok(stream)
 }
 
@@ -247,12 +286,16 @@ fn spawn_bridge_reader(
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
     bridge_online: Arc<AtomicBool>,
+    bridges_state: Arc<Mutex<crate::state::BridgeState>>,
+    bridge_id: String,
 ) {
     std::thread::spawn(move || loop {
         let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
             Ok(x) => x,
             Err(_) => {
-                bridge_online.store(false, Ordering::Relaxed);
+                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                    bridge_online.store(false, Ordering::Relaxed);
+                }
                 if let Ok(mut s) = status.lock() {
                     s.now_playing = None;
                     s.paused = false;
@@ -422,10 +465,12 @@ fn send_one_track_over_existing_connection(
     path: PathBuf,
     ext_hint: String,
 ) -> Result<Flow> {
+    tracing::debug!("bridge stream: next");
     let _ = audio_bridge_proto::write_frame(&mut *stream, audio_bridge_proto::FrameKind::Next, &[]);
 
     let begin = audio_bridge_proto::encode_begin_file_payload(&ext_hint)
         .context("encode BEGIN_FILE")?;
+    tracing::debug!("bridge stream: begin_file");
     match write_frame_interruptible(
         stream,
         audio_bridge_proto::FrameKind::BeginFile,
@@ -438,6 +483,7 @@ fn send_one_track_over_existing_connection(
     }
 
     if *paused {
+        tracing::debug!("bridge stream: pause");
         audio_bridge_proto::write_frame(&mut *stream, audio_bridge_proto::FrameKind::Pause, &[])
             .context("write PAUSE")?;
     }
@@ -461,6 +507,7 @@ fn send_one_track_over_existing_connection(
         }
     }
 
+    tracing::debug!("bridge stream: end_file");
     match write_frame_interruptible(
         stream,
         audio_bridge_proto::FrameKind::EndFile,

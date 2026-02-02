@@ -176,6 +176,11 @@ pub(crate) struct App {
     pub(crate) remote_output_sample_rate: Option<u32>,
     pub(crate) remote_output_device: Option<String>,
     pub(crate) remote_output_id: Option<String>,
+    pub(crate) outputs_open: bool,
+    pub(crate) outputs: Vec<crate::server_api::RemoteOutput>,
+    pub(crate) outputs_active_id: Option<String>,
+    pub(crate) outputs_state: ListState,
+    pub(crate) outputs_error: Option<String>,
 }
 
 impl App {
@@ -236,6 +241,11 @@ impl App {
             remote_output_sample_rate: None,
             remote_output_device: None,
             remote_output_id: None,
+            outputs_open: false,
+            outputs: Vec::new(),
+            outputs_active_id: None,
+            outputs_state: ListState::default(),
+            outputs_error: None,
         }
     }
 
@@ -417,6 +427,15 @@ impl App {
     }
 
     fn select_next(&mut self) {
+        if self.outputs_open {
+            if self.outputs.is_empty() {
+                return;
+            }
+            let i = self.outputs_state.selected().unwrap_or(0);
+            let ni = (i + 1).min(self.outputs.len() - 1);
+            self.outputs_state.select(Some(ni));
+            return;
+        }
         if self.entries.is_empty() {
             return;
         }
@@ -426,6 +445,15 @@ impl App {
     }
 
     fn select_prev(&mut self) {
+        if self.outputs_open {
+            if self.outputs.is_empty() {
+                return;
+            }
+            let i = self.outputs_state.selected().unwrap_or(0);
+            let ni = i.saturating_sub(1);
+            self.outputs_state.select(Some(ni));
+            return;
+        }
         if self.entries.is_empty() {
             return;
         }
@@ -475,6 +503,50 @@ impl App {
 
     fn select_index(&mut self, idx: usize) {
         self.list_state.select(Some(idx));
+    }
+
+    fn open_outputs(&mut self) {
+        match server_api::outputs(&self.server) {
+            Ok(resp) => {
+                self.outputs = resp.outputs;
+                self.outputs_active_id = Some(resp.active_id);
+                self.outputs_state.select(Some(0));
+                if let Some(active) = self.outputs_active_id.as_ref() {
+                    if let Some(idx) = self.outputs.iter().position(|o| &o.id == active) {
+                        self.outputs_state.select(Some(idx));
+                    }
+                }
+                self.outputs_error = None;
+                self.outputs_open = true;
+                self.status = "Select output".into();
+            }
+            Err(e) => {
+                self.outputs_error = Some(format!("{e:#}"));
+                self.status = "Failed to load outputs".into();
+            }
+        }
+    }
+
+    fn close_outputs(&mut self) {
+        self.outputs_open = false;
+    }
+
+    fn select_output(&mut self) {
+        let Some(idx) = self.outputs_state.selected() else {
+            return;
+        };
+        let Some(output) = self.outputs.get(idx) else {
+            return;
+        };
+        if let Err(e) = server_api::outputs_select(&self.server, &output.id) {
+            self.status = format!("Output select failed: {e:#}");
+            return;
+        }
+        self.outputs_active_id = Some(output.id.clone());
+        self.remote_output_id = Some(output.id.clone());
+        self.remote_output_device = Some(output.name.clone());
+        self.outputs_open = false;
+        self.status = format!("Output set: {}", output.name);
     }
 
     fn toggle_queue_selected(&mut self) {
@@ -648,6 +720,16 @@ fn ui_loop(
         let timeout = tick.saturating_sub(last_tick.elapsed());
         if event::poll(timeout).context("poll terminal events")? {
             if let CEvent::Key(k) = event::read().context("read terminal event")? {
+                if app.outputs_open {
+                    match k.code {
+                        KeyCode::Esc => app.close_outputs(),
+                        KeyCode::Up => app.select_prev(),
+                        KeyCode::Down => app.select_next(),
+                        KeyCode::Enter => app.select_output(),
+                        _ => {}
+                    }
+                    continue;
+                }
                 match k.code {
                     KeyCode::Char('q') => {
                         cmd_tx.send(Command::Quit).ok();
@@ -684,6 +766,9 @@ fn ui_loop(
                     }
                     KeyCode::Char('p') => {
                         app.jump_to_playing()?;
+                    }
+                    KeyCode::Char('o') => {
+                        app.open_outputs();
                     }
                     _ => {}
                 }

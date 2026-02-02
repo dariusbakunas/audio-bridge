@@ -109,11 +109,21 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         None => state.bridges.lock().unwrap().active_output_id.clone(),
     };
     if is_pending_output(&output_id) {
+        tracing::warn!(output_id = %output_id, "play rejected: output pending");
         return HttpResponse::ServiceUnavailable().body("active output pending");
+    }
+    if let Err(resp) = ensure_bridge_connected(&state).await {
+        tracing::warn!(output_id = %output_id, "play rejected: bridge offline");
+        return resp;
     }
     {
         let bridges = state.bridges.lock().unwrap();
         if output_id != bridges.active_output_id {
+            tracing::warn!(
+                output_id = %output_id,
+                active_output_id = %bridges.active_output_id,
+                "play rejected: unsupported output id"
+            );
             return HttpResponse::BadRequest().body("unsupported output id");
         }
     }
@@ -157,6 +167,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         .send(crate::bridge::BridgeCommand::Play { path: path.clone(), ext_hint })
         .is_ok()
     {
+        tracing::info!(output_id = %output_id, "play dispatched");
         if let Ok(mut s) = state.status.lock() {
             s.now_playing = Some(path);
             s.paused = false;
@@ -164,6 +175,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         }
         HttpResponse::Ok().finish()
     } else {
+        tracing::warn!(output_id = %output_id, "play failed: command channel closed");
         HttpResponse::InternalServerError().body("player offline")
     }
 }
@@ -381,16 +393,21 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
     };
     drop(status);
     if let Some(http_addr) = http_addr {
-        if let Ok(remote) = crate::bridge::http_status(http_addr) {
-            resp.paused = remote.paused;
-            resp.elapsed_ms = remote.elapsed_ms;
-            resp.duration_ms = remote.duration_ms;
-            resp.channels = remote.channels;
-            resp.output_sample_rate = remote.sample_rate;
-            resp.output_device = remote.device;
-            resp.underrun_frames = remote.underrun_frames;
-            resp.underrun_events = remote.underrun_events;
-            resp.buffer_size_frames = remote.buffer_size_frames;
+        match crate::bridge::http_status(http_addr) {
+            Ok(remote) => {
+                resp.paused = remote.paused;
+                resp.elapsed_ms = remote.elapsed_ms;
+                resp.duration_ms = remote.duration_ms;
+                resp.channels = remote.channels;
+                resp.output_sample_rate = remote.sample_rate;
+                resp.output_device = remote.device;
+                resp.underrun_frames = remote.underrun_frames;
+                resp.underrun_events = remote.underrun_events;
+                resp.buffer_size_frames = remote.buffer_size_frames;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "bridge status poll failed");
+            }
         }
     }
     HttpResponse::Ok().json(resp)
@@ -508,10 +525,22 @@ pub async fn outputs_select(
     match crate::bridge::http_list_devices(http_addr) {
         Ok(devices) => {
             if !devices.iter().any(|d| d == &device_name) {
+                tracing::warn!(
+                    bridge_id = %bridge_id,
+                    device = %device_name,
+                    "output select rejected: unknown device"
+                );
                 return HttpResponse::BadRequest().body("unknown device name");
             }
         }
-        Err(e) => return HttpResponse::InternalServerError().body(format!("{e:#}")),
+        Err(e) => {
+            tracing::warn!(
+                bridge_id = %bridge_id,
+                error = %e,
+                "output select failed: device list"
+            );
+            return HttpResponse::InternalServerError().body(format!("{e:#}"));
+        }
     }
 
     // Stop current playback before switching outputs.
@@ -521,15 +550,31 @@ pub async fn outputs_select(
     }
 
     if let Err(e) = switch_active_bridge(&state, &bridge_id, addr) {
+        tracing::warn!(
+            bridge_id = %bridge_id,
+            error = %e,
+            "output select failed: switch bridge"
+        );
         return HttpResponse::InternalServerError().body(format!("{e:#}"));
     }
     if let Err(e) = crate::bridge::http_set_device(http_addr, &device_name) {
+        tracing::warn!(
+            bridge_id = %bridge_id,
+            device = %device_name,
+            error = %e,
+            "output select failed: set device"
+        );
         return HttpResponse::InternalServerError().body(format!("{e:#}"));
     }
 
     let mut bridges = state.bridges.lock().unwrap();
     bridges.active_bridge_id = bridge_id;
     bridges.active_output_id = body.id.clone();
+    tracing::info!(
+        output_id = %bridges.active_output_id,
+        bridge_id = %bridges.active_bridge_id,
+        "output selected"
+    );
     HttpResponse::Ok().finish()
 }
 
@@ -619,8 +664,37 @@ fn switch_active_bridge(
     if bridges.active_bridge_id == bridge_id {
         return Ok(());
     }
+    tracing::info!(
+        from_bridge_id = %bridges.active_bridge_id,
+        to_bridge_id = %bridge_id,
+        addr = %addr,
+        "switch active bridge"
+    );
     bridges.active_bridge_id = bridge_id.to_string();
     drop(bridges);
+
+    state
+        .bridge_online
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    {
+        let mut player = state.player.lock().unwrap();
+        let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+    }
+    Ok(())
+}
+
+async fn ensure_bridge_connected(state: &AppState) -> Result<(), HttpResponse> {
+    if state.bridge_online.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(());
+    }
+
+    let (bridge_id, addr) = {
+        let bridges = state.bridges.lock().unwrap();
+        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == bridges.active_bridge_id) else {
+            return Err(HttpResponse::InternalServerError().body("active bridge not found"));
+        };
+        (bridge.id.clone(), bridge.addr)
+    };
 
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
     {
@@ -629,13 +703,28 @@ fn switch_active_bridge(
         player.cmd_tx = cmd_tx.clone();
     }
     crate::bridge::spawn_bridge_worker(
+        bridge_id,
         addr,
         cmd_rx,
         cmd_tx,
         state.status.clone(),
         state.queue.clone(),
         state.bridge_online.clone(),
+        state.bridges.clone(),
     );
+
+    let mut waited = 0u64;
+    while waited < 2000
+        && !state
+            .bridge_online
+            .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        actix_web::rt::time::sleep(std::time::Duration::from_millis(100)).await;
+        waited += 100;
+    }
+    if !state.bridge_online.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(HttpResponse::ServiceUnavailable().body("bridge offline"));
+    }
     Ok(())
 }
 

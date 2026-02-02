@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph},
 };
 
 use crate::library::LibraryItem;
@@ -289,10 +289,38 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | o outputs | r rescan | q quit",
         )),
         footer_chunks[4],
     );
+
+    if app.outputs_open {
+        let area = centered_rect(60, 60, f.area());
+        f.render_widget(Clear, area);
+        let mut items = Vec::new();
+        if let Some(err) = app.outputs_error.as_ref() {
+            items.push(ListItem::new(format!("error: {err}")));
+        }
+        if app.outputs.is_empty() {
+            items.push(ListItem::new("<no outputs>"));
+        } else {
+            for out in &app.outputs {
+                let active = app
+                    .outputs_active_id
+                    .as_ref()
+                    .map(|id| id == &out.id)
+                    .unwrap_or(false);
+                let tag = if active { " *" } else { "" };
+                let label = format!("{}{}", out.name, tag);
+                items.push(ListItem::new(label));
+            }
+        }
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Select Output (Enter to apply, Esc to close)"))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol("▶ ");
+        f.render_stateful_widget(list, area, &mut app.outputs_state);
+    }
 }
 
 fn truncate_label(label: &str, max: usize) -> String {
@@ -311,4 +339,24 @@ fn format_duration_ms(ms: u64) -> String {
     let mins = total_secs / 60;
     let secs = total_secs % 60;
     format!("{mins}:{secs:02}")
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1]);
+    horizontal[1]
 }

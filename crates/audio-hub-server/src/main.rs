@@ -18,7 +18,7 @@ use clap::Parser;
 use crossbeam_channel::unbounded;
 use tracing_subscriber::EnvFilter;
 
-use crate::bridge::{http_list_devices, http_set_device, spawn_bridge_worker};
+use crate::bridge::{http_list_devices, http_set_device};
 use crate::library::scan_library;
 use crate::state::{AppState, BridgeState, PlayerStatus, QueueState};
 
@@ -149,16 +149,16 @@ async fn main() -> Result<()> {
             }
         }
     };
-    let (active_addr, active_http_addr) = {
+    let (_active_addr, active_http_addr) = {
         let bridge = bridges
-        .iter()
-        .find(|b| b.id == active_bridge_id)
-        .ok_or_else(|| anyhow::anyhow!("active bridge id not found"))?
-        .clone();
+            .iter()
+            .find(|b| b.id == active_bridge_id)
+            .ok_or_else(|| anyhow::anyhow!("active bridge id not found"))?
+            .clone();
         (bridge.addr, bridge.http_addr)
     };
 
-    let (cmd_tx, cmd_rx) = unbounded();
+    let (cmd_tx, _cmd_rx) = unbounded();
     let shutdown_tx = cmd_tx.clone();
     let _ = ctrlc::set_handler(move || {
         let _ = shutdown_tx.send(crate::bridge::BridgeCommand::Quit);
@@ -176,14 +176,6 @@ async fn main() -> Result<()> {
         active_bridge_id: active_bridge_id.clone(),
         active_output_id: active_output_id.clone(),
     }));
-    spawn_bridge_worker(
-        active_addr,
-        cmd_rx,
-        cmd_tx.clone(),
-        status.clone(),
-        queue.clone(),
-        bridge_online.clone(),
-    );
     if let Some(device_name) = device_to_set {
         let _ = http_set_device(active_http_addr, &device_name);
     }
@@ -243,35 +235,6 @@ fn is_pending_output(id: &str) -> bool {
     id.ends_with(":pending")
 }
 
-fn switch_active_bridge(
-    state: &web::Data<AppState>,
-    bridge_id: &str,
-    addr: std::net::SocketAddr,
-) {
-    let mut bridges = state.bridges.lock().unwrap();
-    if bridges.active_bridge_id == bridge_id {
-        return;
-    }
-    bridges.active_bridge_id = bridge_id.to_string();
-    drop(bridges);
-
-    state.bridge_online.store(false, std::sync::atomic::Ordering::Relaxed);
-    let (cmd_tx, cmd_rx) = unbounded();
-    {
-        let mut player = state.player.lock().unwrap();
-        let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
-        player.cmd_tx = cmd_tx.clone();
-    }
-    spawn_bridge_worker(
-        addr,
-        cmd_rx,
-        cmd_tx,
-        state.status.clone(),
-        state.queue.clone(),
-        state.bridge_online.clone(),
-    );
-}
-
 fn spawn_pending_output_watcher(state: web::Data<AppState>) {
     std::thread::spawn(move || {
         let mut backoff_ms = 500u64;
@@ -300,11 +263,11 @@ fn spawn_pending_output_watcher(state: web::Data<AppState>) {
                         let output_id = format!("bridge:{}:{}", bridge.id, device);
                         match http_set_device(bridge.http_addr, &device) {
                             Ok(()) => {
-                                switch_active_bridge(&state, &bridge.id, bridge.addr);
                                 {
                                     let mut bridges_state = state.bridges.lock().unwrap();
                                     if bridges_state.active_output_id == active_output_id {
                                         bridges_state.active_output_id = output_id.clone();
+                                        bridges_state.active_bridge_id = bridge.id.clone();
                                     }
                                 }
                                 tracing::info!(
@@ -314,6 +277,9 @@ fn spawn_pending_output_watcher(state: web::Data<AppState>) {
                                     output_id = %output_id,
                                     "active output resolved from pending"
                                 );
+                                state
+                                    .bridge_online
+                                    .store(false, std::sync::atomic::Ordering::Relaxed);
                                 resolved = true;
                                 backoff_ms = 500;
                                 break;
