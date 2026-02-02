@@ -23,6 +23,7 @@ use crate::models::{
     OutputCapabilities,
     SupportedRates,
 };
+use crate::bridge_manager::{merge_bridges, parse_output_id};
 use crate::state::AppState;
 
 #[derive(Deserialize, ToSchema)]
@@ -686,38 +687,6 @@ fn build_outputs_from_bridges_with_failures(
     (outputs, failed)
 }
 
-fn merge_bridges(
-    configured: &[crate::config::BridgeConfigResolved],
-    discovered: &std::collections::HashMap<String, crate::state::DiscoveredBridge>,
-) -> Vec<crate::config::BridgeConfigResolved> {
-    let mut merged = Vec::with_capacity(configured.len() + discovered.len());
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut seen_addrs: std::collections::HashSet<std::net::SocketAddr> =
-        std::collections::HashSet::new();
-    for b in configured {
-        seen.insert(b.id.clone());
-        seen_addrs.insert(b.addr);
-        merged.push(b.clone());
-    }
-    for (id, b) in discovered {
-        if seen.contains(id) {
-            continue;
-        }
-        if seen_addrs.contains(&b.bridge.addr) {
-            tracing::info!(
-                bridge_id = %b.bridge.id,
-                bridge_name = %b.bridge.name,
-                addr = %b.bridge.addr,
-                "merge: skipping discovered bridge with configured addr"
-            );
-            continue;
-        }
-        seen_addrs.insert(b.bridge.addr);
-        merged.push(b.bridge.clone());
-    }
-    merged
-}
-
 fn build_outputs_for_bridge(
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>> {
@@ -747,17 +716,6 @@ fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates>
         return None;
     }
     Some(SupportedRates { min_hz, max_hz })
-}
-
-fn parse_output_id(id: &str) -> Result<(String, String), String> {
-    let mut parts = id.splitn(3, ':');
-    let kind = parts.next().unwrap_or("");
-    let bridge_id = parts.next().unwrap_or("");
-    let device = parts.next().unwrap_or("");
-    if kind != "bridge" || bridge_id.is_empty() || device.is_empty() {
-        return Err("invalid output id".to_string());
-    }
-    Ok((bridge_id.to_string(), device.to_string()))
 }
 
 fn is_pending_output(id: &str) -> bool {
