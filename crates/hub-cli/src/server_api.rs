@@ -56,6 +56,7 @@ struct OutputInfo {
     name: String,
     state: String,
     bridge_id: Option<String>,
+    bridge_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,6 +180,7 @@ pub(crate) struct RemoteOutput {
     pub(crate) state: String,
     pub(crate) kind: String,
     pub(crate) bridge_id: Option<String>,
+    pub(crate) bridge_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -237,6 +239,7 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
             state: o.state,
             kind: o.kind,
             bridge_id: o.bridge_id,
+            bridge_name: o.bridge_name,
         })
         .collect();
     Ok(RemoteOutputs {

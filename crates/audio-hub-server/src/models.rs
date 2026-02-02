@@ -119,6 +119,7 @@ pub struct OutputInfo {
     pub name: String,
     pub state: String,
     pub bridge_id: Option<String>,
+    pub bridge_name: Option<String>,
     pub capabilities: OutputCapabilities,
 }
 

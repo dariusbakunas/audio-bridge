@@ -311,7 +311,12 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     .map(|id| id == &out.id)
                     .unwrap_or(false);
                 let tag = if active { " *" } else { "" };
-                let label = format!("{}{}", out.name, tag);
+                let bridge = out
+                    .bridge_name
+                    .as_deref()
+                    .or(out.bridge_id.as_deref())
+                    .unwrap_or("-");
+                let label = format!("{}  [{}]{}", out.name, bridge, tag);
                 items.push(ListItem::new(label));
             }
         }

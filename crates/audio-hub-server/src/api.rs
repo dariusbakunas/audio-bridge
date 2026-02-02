@@ -489,6 +489,12 @@ pub async fn bridge_outputs_list(
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     let bridges = state.bridges.lock().unwrap();
     let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
+    tracing::info!(
+        count = bridges.bridges.len(),
+        ids = ?bridges.bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+        active_bridge_id = %bridges.active_bridge_id,
+        "outputs: bridge inventory"
+    );
     let outputs = build_outputs_from_bridges(&bridges.bridges, &bridges.active_bridge_id, active_online);
     HttpResponse::Ok().json(OutputsResponse {
         active_id: bridges.active_output_id.clone(),
@@ -588,10 +594,26 @@ fn build_outputs_from_bridges(
     let mut by_bridge = Vec::new();
 
     for bridge in bridges {
-        if bridge.id == active_bridge_id && !active_online {
-            continue;
-        }
-        let devices = crate::bridge::http_list_devices(bridge.http_addr).unwrap_or_default();
+        let devices = match crate::bridge::http_list_devices(bridge.http_addr) {
+            Ok(list) => {
+                tracing::info!(
+                    bridge_id = %bridge.id,
+                    bridge_name = %bridge.name,
+                    count = list.len(),
+                    "outputs: devices listed"
+                );
+                list
+            }
+            Err(e) => {
+                tracing::warn!(
+                    bridge_id = %bridge.id,
+                    bridge_name = %bridge.name,
+                    error = %e,
+                    "outputs: device list failed"
+                );
+                Vec::new()
+            }
+        };
         for device in devices {
             *name_counts.entry(device.clone()).or_insert(0) += 1;
             by_bridge.push((bridge, device));
@@ -609,6 +631,7 @@ fn build_outputs_from_bridges(
             name: display_name,
             state: "online".to_string(),
             bridge_id: Some(bridge.id.clone()),
+            bridge_name: Some(bridge.name.clone()),
             capabilities: OutputCapabilities {
                 device_select: true,
                 volume: false,
@@ -631,6 +654,7 @@ fn build_outputs_for_bridge(
             name: device,
             state: "online".to_string(),
             bridge_id: Some(bridge.id.clone()),
+            bridge_name: Some(bridge.name.clone()),
             capabilities: OutputCapabilities {
                 device_select: true,
                 volume: false,

@@ -84,6 +84,11 @@ async fn main() -> Result<()> {
     );
     let library = scan_library(&media_dir)?;
     let bridges = config::bridges_from_config(&cfg)?;
+    tracing::info!(
+        count = bridges.len(),
+        ids = ?bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+        "loaded bridges from config"
+    );
     let mut device_to_set: Option<String> = None;
     let (active_bridge_id, active_output_id) = match cfg.active_output.as_ref() {
         Some(id) => match parse_output_id(id) {
