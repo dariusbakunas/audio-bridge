@@ -23,21 +23,27 @@ pub(crate) struct PlaybackSessionOptions {
     pub(crate) paused: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) peer_tx: Option<std::net::TcpStream>,
+    pub(crate) played_frames: Option<Arc<AtomicU64>>,
+    pub(crate) underrun_frames: Option<Arc<AtomicU64>>,
+    pub(crate) underrun_events: Option<Arc<AtomicU64>>,
 }
 
 struct PlaybackState {
     paused: Option<Arc<std::sync::atomic::AtomicBool>>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     played_frames: Option<Arc<AtomicU64>>,
+    underrun_frames: Option<Arc<AtomicU64>>,
+    underrun_events: Option<Arc<AtomicU64>>,
     reporter: Option<ProgressReporter>,
 }
 
 impl PlaybackState {
     fn new(opts: PlaybackSessionOptions) -> Self {
-        let played_frames = opts
-            .peer_tx
-            .as_ref()
-            .map(|_| Arc::new(AtomicU64::new(0)));
+        let played_frames = match (opts.played_frames.clone(), opts.peer_tx.as_ref()) {
+            (Some(frames), _) => Some(frames),
+            (None, Some(_)) => Some(Arc::new(AtomicU64::new(0))),
+            (None, None) => None,
+        };
 
         let reporter = if let Some(peer_tx) = opts.peer_tx {
             Some(start_progress_reporter(
@@ -53,6 +59,8 @@ impl PlaybackState {
             paused: opts.paused,
             cancel: opts.cancel,
             played_frames,
+            underrun_frames: opts.underrun_frames,
+            underrun_events: opts.underrun_events,
             reporter,
         }
     }
@@ -80,16 +88,22 @@ pub(crate) fn play_decoded_source(
     let state = PlaybackState::new(opts);
 
     let dst_rate = stream_config.sample_rate;
-    let dstq = resample::start_resampler(
-        srcq,
-        src_spec,
-        dst_rate,
-        resample::ResampleConfig {
-            chunk_frames: args.chunk_frames,
-            buffer_seconds: args.buffer_seconds,
-        },
-    )?;
-    tracing::info!(rate_hz = dst_rate, "resampling");
+    let dstq = if src_spec.rate == dst_rate {
+        tracing::info!(rate_hz = dst_rate, "resample skipped");
+        srcq.clone()
+    } else {
+        let out = resample::start_resampler(
+            srcq,
+            src_spec,
+            dst_rate,
+            resample::ResampleConfig {
+                chunk_frames: args.chunk_frames,
+                buffer_seconds: args.buffer_seconds,
+            },
+        )?;
+        tracing::info!(rate_hz = dst_rate, "resampling");
+        out
+    };
 
     let stream = playback::build_output_stream(
         device,
@@ -100,6 +114,8 @@ pub(crate) fn play_decoded_source(
             refill_max_frames: args.refill_max_frames,
             paused: state.paused.clone(),
             played_frames: state.played_frames.clone(),
+            underrun_frames: state.underrun_frames.clone(),
+            underrun_events: state.underrun_events.clone(),
         },
     )?;
     stream.play()?;

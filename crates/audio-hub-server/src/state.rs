@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::AtomicBool;
 
 use crossbeam_channel::Sender;
 
 use crate::bridge::{BridgeCommand, BridgePlayer};
+use crate::config::BridgeConfigResolved;
 use crate::library::LibraryIndex;
 
 #[derive(Debug, Clone, Default)]
@@ -21,10 +23,11 @@ pub struct PlayerStatus {
 
 pub struct AppState {
     pub library: RwLock<LibraryIndex>,
-    pub player: BridgePlayer,
+    pub player: Arc<Mutex<BridgePlayer>>,
     pub status: Arc<Mutex<PlayerStatus>>,
     pub queue: Arc<Mutex<QueueState>>,
-    pub outputs: Arc<Mutex<OutputState>>,
+    pub bridges: Arc<Mutex<BridgeState>>,
+    pub bridge_online: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -33,14 +36,16 @@ impl AppState {
         cmd_tx: Sender<BridgeCommand>,
         status: Arc<Mutex<PlayerStatus>>,
         queue: Arc<Mutex<QueueState>>,
-        outputs: Arc<Mutex<OutputState>>,
+        bridges: Arc<Mutex<BridgeState>>,
+        bridge_online: Arc<AtomicBool>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
-            player: BridgePlayer { cmd_tx },
+            player: Arc::new(Mutex::new(BridgePlayer { cmd_tx })),
             status,
             queue,
-            outputs,
+            bridges,
+            bridge_online,
         }
     }
 }
@@ -50,8 +55,9 @@ pub struct QueueState {
     pub items: Vec<PathBuf>,
 }
 
-#[derive(Debug, Default)]
-pub struct OutputState {
-    pub active_id: String,
-    pub outputs: Vec<crate::models::OutputInfo>,
+#[derive(Debug)]
+pub struct BridgeState {
+    pub bridges: Vec<BridgeConfigResolved>,
+    pub active_bridge_id: String,
+    pub active_output_id: String,
 }

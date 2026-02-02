@@ -1,15 +1,15 @@
 # Example audio-hub-server config
 #
 # bind: HTTP address the server listens on
-# outputs: list of available output targets
-# active_output: id to use by default
+# bridges: list of bridge devices to connect to
+# active_output: output id to use by default (bridge:{bridge_id}:{device_name})
 
 bind = "0.0.0.0:8080"
 media_dir = "/srv/music"
-active_output = "bridge:default"
+active_output = "bridge:living-room:Built-in Output"
 
-[[outputs]]
-id = "bridge:default"
-kind = "bridge"
-name = "Bridge (default)"
-bridge_addr = "192.168.1.50:5555"
+[[bridges]]
+id = "living-room"
+name = "Living Room"
+addr = "192.168.1.50:5555"
+api_port = 5556

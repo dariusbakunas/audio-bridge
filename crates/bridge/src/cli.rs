@@ -37,6 +37,10 @@ pub struct Args {
     /// Temp directory for streamed files (defaults to OS temp dir)
     #[arg(long)]
     pub temp_dir: Option<PathBuf>,
+
+    /// HTTP API bind address, e.g. 0.0.0.0:5556
+    #[arg(long, default_value = "0.0.0.0:5556")]
+    pub http_bind: SocketAddr,
 }
 
 #[derive(Subcommand, Debug)]

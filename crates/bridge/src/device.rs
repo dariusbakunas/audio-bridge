@@ -17,7 +17,7 @@ pub fn select_output(
     needle: Option<&str>,
 ) -> Result<(cpal::Device, cpal::SupportedStreamConfig)> {
     let device = pick_device(host, needle)?;
-    let config = device.default_output_config()?;
+    let config = pick_output_config(&device, None)?;
     Ok((device, config))
 }
 
@@ -49,6 +49,93 @@ pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Devi
 
     host.default_output_device()
         .ok_or_else(|| anyhow!("No default output device"))
+}
+
+/// Pick the best supported output config for the device.
+///
+/// If `target_rate` is `Some`, prefer the highest supported sample rate that is
+/// **<= target_rate**; if none are <=, choose the lowest supported rate above it.
+/// If `None`, choose the highest supported rate.
+pub fn pick_output_config(
+    device: &cpal::Device,
+    target_rate: Option<u32>,
+) -> Result<cpal::SupportedStreamConfig> {
+    let ranges: Vec<cpal::SupportedStreamConfigRange> =
+        device.supported_output_configs()?.collect();
+    if ranges.is_empty() {
+        return Err(anyhow!("No supported output configs"));
+    }
+
+    let target = target_rate.unwrap_or(u32::MAX);
+    let mut best: Option<(bool, u32, u8, cpal::SupportedStreamConfig)> = None;
+
+    for range in ranges {
+        let min = range.min_sample_rate();
+        let max = range.max_sample_rate();
+        let rate = if target_rate.is_some() {
+            if target >= min && target <= max {
+                target
+            } else if target < min {
+                min
+            } else {
+                max
+            }
+        } else {
+            max
+        };
+        let below = target_rate.map(|t| rate <= t).unwrap_or(true);
+        let format_rank = match range.sample_format() {
+            cpal::SampleFormat::F32 => 0,
+            cpal::SampleFormat::I32 => 1,
+            cpal::SampleFormat::I16 => 2,
+            cpal::SampleFormat::U16 => 3,
+            _ => 10,
+        };
+        let cfg = range.with_sample_rate(rate);
+        let candidate = (below, rate, format_rank, cfg);
+        let replace = match &best {
+            None => true,
+            Some((b_below, b_rate, b_rank, _)) => {
+                if below != *b_below {
+                    below && !*b_below
+                } else if rate != *b_rate {
+                    rate > *b_rate
+                } else {
+                    format_rank < *b_rank
+                }
+            }
+        };
+        if replace {
+            best = Some(candidate);
+        }
+    }
+
+    Ok(best.unwrap().3)
+}
+
+/// Pick a stream buffer size, preferring larger values to reduce underruns.
+///
+/// If the device reports a range, choose the max. If `Unknown`, return `None`
+/// so CPAL uses the device default.
+pub fn pick_buffer_size(
+    config: &cpal::SupportedStreamConfig,
+) -> Option<cpal::BufferSize> {
+    match config.buffer_size() {
+        cpal::SupportedBufferSize::Range { min, max } => {
+            const MAX_FRAMES: u32 = 16_384;
+            let chosen = if *max > MAX_FRAMES {
+                if *min > MAX_FRAMES {
+                    *min
+                } else {
+                    MAX_FRAMES
+                }
+            } else {
+                *max
+            };
+            Some(cpal::BufferSize::Fixed(chosen))
+        }
+        cpal::SupportedBufferSize::Unknown => None,
+    }
 }
 
 /// Print available output devices to stdout.

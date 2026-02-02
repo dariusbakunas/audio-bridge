@@ -3,22 +3,30 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::models::{OutputCapabilities, OutputInfo};
+use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub bind: Option<String>,
     pub media_dir: Option<String>,
-    pub outputs: Option<Vec<OutputConfig>>,
+    pub bridges: Option<Vec<BridgeConfig>>,
     pub active_output: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OutputConfig {
+pub struct BridgeConfig {
     pub id: String,
-    pub kind: String,
     pub name: Option<String>,
-    pub bridge_addr: Option<String>,
+    pub addr: String,
+    pub api_port: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeConfigResolved {
+    pub id: String,
+    pub name: String,
+    pub addr: SocketAddr,
+    pub http_addr: SocketAddr,
 }
 
 impl ServerConfig {
@@ -31,49 +39,41 @@ impl ServerConfig {
     }
 }
 
-pub fn outputs_from_config(cfg: ServerConfig) -> Result<(Vec<OutputInfo>, String, std::net::SocketAddr)> {
-    let mut outputs = Vec::new();
-    let mut active_id = cfg.active_output.unwrap_or_else(|| "bridge:default".to_string());
-    let mut bridge_addr: Option<std::net::SocketAddr> = None;
-
-    if let Some(outs) = cfg.outputs {
-        for out in outs {
-            let name = out.name.clone().unwrap_or_else(|| out.id.clone());
-            if out.kind == "bridge" {
-                if let Some(addr) = out.bridge_addr.as_deref() {
-                    if out.id == active_id {
-                        bridge_addr = Some(addr.parse().with_context(|| format!("parse bridge_addr {addr}"))?);
-                    }
-                }
-            }
-            outputs.push(OutputInfo {
-                id: out.id,
-                kind: out.kind,
+pub fn bridges_from_config(cfg: &ServerConfig) -> Result<Vec<BridgeConfigResolved>> {
+    let mut bridges = Vec::new();
+    if let Some(cfg_bridges) = cfg.bridges.as_ref() {
+        for bridge in cfg_bridges {
+            let name = bridge.name.clone().unwrap_or_else(|| bridge.id.clone());
+            let addr: SocketAddr = bridge
+                .addr
+                .parse()
+                .with_context(|| format!("parse bridge addr {}", bridge.addr))?;
+            let http_addr = match bridge.api_port {
+                Some(port) => SocketAddr::new(addr.ip(), port),
+                None => default_http_addr(addr)?,
+            };
+            bridges.push(BridgeConfigResolved {
+                id: bridge.id.clone(),
                 name,
-                state: "online".to_string(),
-                capabilities: OutputCapabilities {
-                    device_select: true,
-                    volume: false,
-                },
+                addr,
+                http_addr,
             });
         }
     }
 
-    if outputs.is_empty() {
-        return Err(anyhow::anyhow!("config must define at least one output"));
+    if bridges.is_empty() {
+        return Err(anyhow::anyhow!("config must define at least one bridge"));
     }
 
-    if !outputs.iter().any(|o| o.id == active_id) {
-        active_id = outputs[0].id.clone();
-    }
+    Ok(bridges)
+}
 
-    let Some(addr) = bridge_addr else {
-        return Err(anyhow::anyhow!(
-            "active output must be a bridge with bridge_addr set"
-        ));
-    };
-
-    Ok((outputs, active_id, addr))
+fn default_http_addr(addr: SocketAddr) -> Result<SocketAddr> {
+    let port = addr.port();
+    let http_port = port
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("cannot default http port for {addr}"))?;
+    Ok(SocketAddr::new(addr.ip(), http_port))
 }
 
 pub fn media_dir_from_config(cfg: &ServerConfig) -> Result<std::path::PathBuf> {

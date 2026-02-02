@@ -15,3 +15,6 @@ ctrlc = { workspace = true }
 audio-bridge-proto = { path = "../audio-bridge-proto" }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tiny_http = "0.12.0"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.137"

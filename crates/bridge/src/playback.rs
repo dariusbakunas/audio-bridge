@@ -28,6 +28,10 @@ pub(crate) struct PlaybackConfig {
 
     /// When set, the callback increments this by the number of output frames produced.
     pub(crate) played_frames: Option<Arc<AtomicU64>>,
+
+    /// When set, the callback increments these when it has to output silence.
+    pub(crate) underrun_frames: Option<Arc<AtomicU64>>,
+    pub(crate) underrun_events: Option<Arc<AtomicU64>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -51,6 +55,7 @@ pub(crate) fn build_output_stream(
     match sample_format {
         cpal::SampleFormat::F32 => build_stream::<f32>(device, config, dstq, cfg),
         cpal::SampleFormat::I16 => build_stream::<i16>(device, config, dstq, cfg),
+        cpal::SampleFormat::I32 => build_stream::<i32>(device, config, dstq, cfg),
         cpal::SampleFormat::U16 => build_stream::<u16>(device, config, dstq, cfg),
         other => Err(anyhow!("Unsupported sample format: {other:?}")),
     }
@@ -81,6 +86,8 @@ where
     let dstq_cb = dstq.clone();
     let paused_flag = cfg.paused.clone();
     let played_frames = cfg.played_frames.clone();
+    let underrun_frames = cfg.underrun_frames.clone();
+    let underrun_events = cfg.underrun_events.clone();
 
     let err_fn = |err| tracing::warn!("stream error: {err}");
 
@@ -97,34 +104,42 @@ where
 
             let mut st = state_cb.lock().unwrap();
 
-            if st.pos >= st.src.len() {
-                st.pos = 0;
-                st.src.clear();
-
-                if let Some(v) = dstq_cb.pop(PopStrategy::NonBlocking { max_frames: refill_max_frames }) {
-                    st.src = v;
-                }
-            }
-
             let frames = data.len() / channels_out;
-            let start_pos = st.pos;
+            let mut filled_frames = 0usize;
 
             for frame in 0..frames {
+                if st.pos >= st.src.len() {
+                    st.pos = 0;
+                    st.src.clear();
+                    if let Some(v) = dstq_cb.pop(PopStrategy::NonBlocking { max_frames: refill_max_frames }) {
+                        st.src = v;
+                    } else {
+                        // No more audio ready; fill the rest with silence.
+                        if let Some(events) = &underrun_events {
+                            events.fetch_add(1, Ordering::Relaxed);
+                        }
+                        if let Some(frames_counter) = &underrun_frames {
+                            let remaining = frames.saturating_sub(frame);
+                            frames_counter.fetch_add(remaining as u64, Ordering::Relaxed);
+                        }
+                        for idx in (frame * channels_out)..data.len() {
+                            data[idx] = <T as cpal::Sample>::from_sample::<f32>(0.0);
+                        }
+                        break;
+                    }
+                }
                 for ch in 0..channels_out {
                     let sample_f32 = next_sample_mapped_from_vec(&mut *st, channels_out, ch);
                     data[frame * channels_out + ch] =
                         <T as cpal::Sample>::from_sample::<f32>(sample_f32);
                 }
+                filled_frames += 1;
             }
 
             if let Some(counter) = &played_frames {
-                let consumed_samples = st.pos.saturating_sub(start_pos);
-                let consumed_frames = if st.src_channels == 0 {
-                    0
-                } else {
-                    consumed_samples / st.src_channels
-                };
-                counter.fetch_add(consumed_frames as u64, Ordering::Relaxed);
+                if filled_frames > 0 {
+                    counter.fetch_add(filled_frames as u64, Ordering::Relaxed);
+                }
             }
         },
         err_fn,

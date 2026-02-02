@@ -58,6 +58,9 @@ pub struct StatusResponse {
     pub album: Option<String>,
     pub format: Option<String>,
     pub output_id: String,
+    pub underrun_frames: Option<u64>,
+    pub underrun_events: Option<u64>,
+    pub buffer_size_frames: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -91,13 +94,16 @@ pub struct QueueRemoveRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct BridgeDevicesResponse {
-    pub devices: Vec<String>,
+pub struct BridgeInfo {
+    pub id: String,
+    pub name: String,
+    pub addr: String,
+    pub state: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct BridgeSetDeviceRequest {
-    pub name: String,
+pub struct BridgesResponse {
+    pub bridges: Vec<BridgeInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -112,6 +118,7 @@ pub struct OutputInfo {
     pub kind: String,
     pub name: String,
     pub state: String,
+    pub bridge_id: Option<String>,
     pub capabilities: OutputCapabilities,
 }
 

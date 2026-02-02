@@ -21,8 +21,11 @@ mod queue;
 mod resample;
 mod net;
 mod pipeline;
+mod status;
+mod http_api;
 
 use std::net::TcpListener;
+use std::sync::atomic::AtomicU64;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -39,6 +42,7 @@ fn main() -> Result<()> {
         .init();
     let host = cpal::default_host();
     let device_selected = std::sync::Arc::new(std::sync::Mutex::new(args.device.clone()));
+    let status = status::BridgeStatus::shared();
 
     if args.list_devices {
         device::list_devices(&host)?;
@@ -62,15 +66,18 @@ fn main() -> Result<()> {
     match &args.cmd {
         cli::Command::Play { path } => {
             let selected = device_selected.lock().unwrap().clone();
-            let (device, config) = device::select_output(&host, selected.as_deref())?;
+            let device = device::pick_device(&host, selected.as_deref())?;
             tracing::info!(device = %device.description()?, "output device");
-            tracing::info!(config = ?config, "device default config");
-            let stream_config: cpal::StreamConfig = config.clone().into();
-            play_one_local(&device, &config, &stream_config, &args, path)?;
+            play_one_local(&device, &args, path)?;
         }
         cli::Command::Listen { bind } => {
             let listener = TcpListener::bind(*bind).with_context(|| format!("bind {bind}"))?;
             tracing::info!(bind = %bind, "listening (one client; many tracks per connection)");
+            let _http = http_api::spawn_http_server(
+                args.http_bind,
+                status.clone(),
+                device_selected.clone(),
+            );
 
             loop {
                 let stream = match net::accept_one(&listener) {
@@ -84,7 +91,7 @@ fn main() -> Result<()> {
                 let device_ctl = net::DeviceControl {
                     selected: device_selected.clone(),
                 };
-                if let Err(e) = serve_one_client(&host, &device_ctl, &args, stream, &temp_dir) {
+                if let Err(e) = serve_one_client(&host, &device_ctl, &args, stream, &temp_dir, status.clone()) {
                     tracing::warn!("client session error: {e:#}");
                 }
 
@@ -102,11 +109,12 @@ fn serve_one_client(
     args: &cli::Args,
     stream: std::net::TcpStream,
     temp_dir: &std::path::Path,
+    status: std::sync::Arc<std::sync::Mutex<status::BridgeStatus>>,
 ) -> Result<()> {
-    let session_rx = net::run_one_client(stream, temp_dir.to_path_buf(), device_ctl.clone())?;
+    let session_rx = net::run_one_client(stream, temp_dir.to_path_buf())?;
 
     while let Ok(sess) = session_rx.recv() {
-        if let Err(e) = play_one_network_session(host, device_ctl, args, sess) {
+        if let Err(e) = play_one_network_session(host, device_ctl, args, sess, status.clone()) {
             tracing::warn!("session playback error: {e:#}");
         }
     }
@@ -119,14 +127,9 @@ fn play_one_network_session(
     device_ctl: &net::DeviceControl,
     args: &cli::Args,
     sess: net::NetSession,
+    status: std::sync::Arc<std::sync::Mutex<status::BridgeStatus>>,
 ) -> Result<()> {
     tracing::info!(path = ?sess.temp_path, "incoming stream spooling");
-
-    let selected = device_ctl.selected.lock().unwrap().clone();
-    let (device, config) = device::select_output(host, selected.as_deref())?;
-    tracing::info!(device = %device.description()?, "output device");
-    tracing::info!(config = ?config, "device default config");
-    let stream_config: cpal::StreamConfig = config.clone().into();
 
     let file_for_read = std::fs::OpenOptions::new()
         .read(true)
@@ -142,17 +145,43 @@ fn play_one_network_session(
         args.buffer_seconds,
     )?;
 
-    let mut peer_tx = sess.peer_tx;
-    if let Ok(desc) = device.description() {
-        let name = desc.to_string();
-        if let Ok(payload) = audio_bridge_proto::encode_device_selector(&name) {
-            let _ = audio_bridge_proto::write_frame(
-                &mut peer_tx,
-                audio_bridge_proto::FrameKind::OutputChanged,
-                &payload,
-            );
+    let selected = device_ctl.selected.lock().unwrap().clone();
+    let device = device::pick_device(host, selected.as_deref())?;
+    let config = device::pick_output_config(&device, Some(src_spec.rate))?;
+    let mut stream_config: cpal::StreamConfig = config.clone().into();
+    if let Some(buf) = device::pick_buffer_size(&config) {
+        stream_config.buffer_size = buf;
+    }
+    tracing::info!(device = %device.description()?, "output device");
+    tracing::info!(
+        source_rate_hz = src_spec.rate,
+        output_rate_hz = stream_config.sample_rate,
+        buffer_size = ?stream_config.buffer_size,
+        "device output config"
+    );
+
+    let played_frames = std::sync::Arc::new(AtomicU64::new(0));
+    let underrun_frames = std::sync::Arc::new(AtomicU64::new(0));
+    let underrun_events = std::sync::Arc::new(AtomicU64::new(0));
+    {
+        if let Ok(mut s) = status.lock() {
+            s.now_playing = Some("stream".to_string());
+            s.device = device.description().ok().map(|d| d.to_string());
+            s.sample_rate = Some(stream_config.sample_rate);
+            s.channels = Some(src_spec.channels.count() as u16);
+            s.duration_ms = duration_ms;
+            s.played_frames = Some(played_frames.clone());
+            s.paused_flag = Some(sess.control.paused.clone());
+            s.underrun_frames = Some(underrun_frames.clone());
+            s.underrun_events = Some(underrun_events.clone());
+            s.buffer_size_frames = match stream_config.buffer_size {
+                cpal::BufferSize::Fixed(frames) => Some(frames),
+                cpal::BufferSize::Default => None,
+            };
         }
     }
+
+    let mut peer_tx = sess.peer_tx;
 
     let track_info_payload = audio_bridge_proto::encode_track_info(
         stream_config.sample_rate,
@@ -176,6 +205,9 @@ fn play_one_network_session(
             paused: Some(sess.control.paused),
             cancel: Some(sess.control.cancel),
             peer_tx: Some(peer_tx),
+            played_frames: Some(played_frames),
+            underrun_frames: Some(underrun_frames),
+            underrun_events: Some(underrun_events),
         },
     );
 
@@ -183,17 +215,24 @@ fn play_one_network_session(
         tracing::warn!("temp cleanup warning: {e}");
     }
 
+    if let Ok(mut s) = status.lock() {
+        s.clear_playback();
+    }
+
     result
 }
 
 fn play_one_local(
     device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    stream_config: &cpal::StreamConfig,
     args: &cli::Args,
     path: &std::path::PathBuf,
 ) -> Result<()> {
     let (src_spec, srcq, _duration_ms) = decode::start_streaming_decode(path, args.buffer_seconds)?;
+    let config = device::pick_output_config(device, Some(src_spec.rate))?;
+    let mut stream_config: cpal::StreamConfig = config.clone().into();
+    if let Some(buf) = device::pick_buffer_size(&config) {
+        stream_config.buffer_size = buf;
+    }
     tracing::info!(
         channels = src_spec.channels.count(),
         rate_hz = src_spec.rate,
@@ -202,8 +241,8 @@ fn play_one_local(
 
     play_decoded_source(
         device,
-        config,
-        stream_config,
+        &config,
+        &stream_config,
         args,
         src_spec,
         srcq,
@@ -211,6 +250,9 @@ fn play_one_local(
             paused: None,
             cancel: None,
             peer_tx: None,
+            played_frames: None,
+            underrun_frames: None,
+            underrun_events: None,
         },
     )
 }

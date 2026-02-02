@@ -15,10 +15,12 @@ use crate::models::{
     QueueRemoveRequest,
     QueueResponse,
     StatusResponse,
-    BridgeDevicesResponse,
-    BridgeSetDeviceRequest,
+    BridgeInfo,
+    BridgesResponse,
     OutputsResponse,
     OutputSelectRequest,
+    OutputInfo,
+    OutputCapabilities,
 };
 use crate::state::AppState;
 
@@ -104,14 +106,14 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
     let output_id = match &body.output_id {
         Some(id) => id.clone(),
-        None => state.outputs.lock().unwrap().active_id.clone(),
+        None => state.bridges.lock().unwrap().active_output_id.clone(),
     };
+    if is_pending_output(&output_id) {
+        return HttpResponse::ServiceUnavailable().body("active output pending");
+    }
     {
-        let outputs = state.outputs.lock().unwrap();
-        let Some(out) = outputs.outputs.iter().find(|o| o.id == output_id) else {
-            return HttpResponse::BadRequest().body("unknown output id");
-        };
-        if out.kind != "bridge" || output_id != outputs.active_id {
+        let bridges = state.bridges.lock().unwrap();
+        if output_id != bridges.active_output_id {
             return HttpResponse::BadRequest().body("unsupported output id");
         }
     }
@@ -147,7 +149,14 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
             queue.items.remove(pos);
         }
     }
-    if state.player.cmd_tx.send(crate::bridge::BridgeCommand::Play { path: path.clone(), ext_hint }).is_ok() {
+    if state
+        .player
+        .lock()
+        .unwrap()
+        .cmd_tx
+        .send(crate::bridge::BridgeCommand::Play { path: path.clone(), ext_hint })
+        .is_ok()
+    {
         if let Ok(mut s) = state.status.lock() {
             s.now_playing = Some(path);
             s.paused = false;
@@ -170,7 +179,14 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
 #[post("/pause")]
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
-    if state.player.cmd_tx.send(crate::bridge::BridgeCommand::PauseToggle).is_ok() {
+    if state
+        .player
+        .lock()
+        .unwrap()
+        .cmd_tx
+        .send(crate::bridge::BridgeCommand::PauseToggle)
+        .is_ok()
+    {
         if let Ok(mut s) = state.status.lock() {
             s.paused = !s.paused;
             s.user_paused = s.paused;
@@ -336,8 +352,16 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         }
         None => (None, None, None, None, None),
     };
-    let output_id = state.outputs.lock().unwrap().active_id.clone();
-    let resp = StatusResponse {
+    let (output_id, http_addr) = {
+        let bridges = state.bridges.lock().unwrap();
+        let http_addr = bridges
+            .bridges
+            .iter()
+            .find(|b| b.id == bridges.active_bridge_id)
+            .map(|b| b.http_addr);
+        (bridges.active_output_id.clone(), http_addr)
+    };
+    let mut resp = StatusResponse {
         now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
         paused: status.paused,
         elapsed_ms: status.elapsed_ms,
@@ -351,68 +375,90 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         album,
         format,
         output_id,
+        underrun_frames: None,
+        underrun_events: None,
+        buffer_size_frames: None,
     };
+    drop(status);
+    if let Some(http_addr) = http_addr {
+        if let Ok(remote) = crate::bridge::http_status(http_addr) {
+            resp.paused = remote.paused;
+            resp.elapsed_ms = remote.elapsed_ms;
+            resp.duration_ms = remote.duration_ms;
+            resp.channels = remote.channels;
+            resp.output_sample_rate = remote.sample_rate;
+            resp.output_device = remote.device;
+            resp.underrun_frames = remote.underrun_frames;
+            resp.underrun_events = remote.underrun_events;
+            resp.buffer_size_frames = remote.buffer_size_frames;
+        }
+    }
     HttpResponse::Ok().json(resp)
 }
 
 #[utoipa::path(
     get,
-    path = "/outputs/{id}/devices",
+    path = "/bridges",
     responses(
-        (status = 200, description = "Output devices", body = BridgeDevicesResponse),
-        (status = 400, description = "Unknown output"),
-        (status = 500, description = "Output unavailable")
+        (status = 200, description = "Configured bridges", body = BridgesResponse)
     )
 )]
-#[get("/outputs/{id}/devices")]
-pub async fn output_devices(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
-    {
-        let outputs = state.outputs.lock().unwrap();
-        let Some(out) = outputs.outputs.iter().find(|o| o.id == id.as_str()) else {
-            return HttpResponse::BadRequest().body("unknown output id");
-        };
-        if out.kind != "bridge" || out.id != outputs.active_id {
-            return HttpResponse::BadRequest().body("unsupported output id");
-        }
-    }
-    match bridge_list_devices(&state) {
-        Ok(devices) => HttpResponse::Ok().json(BridgeDevicesResponse { devices }),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{e:#}")),
-    }
+#[get("/bridges")]
+pub async fn bridges_list(state: web::Data<AppState>) -> impl Responder {
+    let bridges = state.bridges.lock().unwrap();
+    let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
+    let items = bridges
+        .bridges
+        .iter()
+        .map(|b| BridgeInfo {
+            id: b.id.clone(),
+            name: b.name.clone(),
+            addr: b.addr.to_string(),
+            state: if b.id == bridges.active_bridge_id {
+                if active_online {
+                    "online".to_string()
+                } else {
+                    "offline".to_string()
+                }
+            } else {
+                "configured".to_string()
+            },
+        })
+        .collect();
+    HttpResponse::Ok().json(BridgesResponse { bridges: items })
 }
 
 #[utoipa::path(
-    post,
-    path = "/outputs/{id}/device",
-    request_body = BridgeSetDeviceRequest,
+    get,
+    path = "/bridges/{id}/outputs",
     responses(
-        (status = 200, description = "Device set"),
-        (status = 400, description = "Unknown output"),
-        (status = 500, description = "Output unavailable")
+        (status = 200, description = "Bridge outputs", body = OutputsResponse),
+        (status = 400, description = "Unknown bridge"),
+        (status = 500, description = "Bridge unavailable")
     )
 )]
-#[post("/outputs/{id}/device")]
-pub async fn output_set_device(
+#[get("/bridges/{id}/outputs")]
+pub async fn bridge_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
-    body: web::Json<BridgeSetDeviceRequest>,
 ) -> impl Responder {
-    {
-        let outputs = state.outputs.lock().unwrap();
-        let Some(out) = outputs.outputs.iter().find(|o| o.id == id.as_str()) else {
-            return HttpResponse::BadRequest().body("unknown output id");
+    let (bridge, active_output_id) = {
+        let bridges = state.bridges.lock().unwrap();
+        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == id.as_str()) else {
+            return HttpResponse::BadRequest().body("unknown bridge id");
         };
-        if out.kind != "bridge" || out.id != outputs.active_id {
-            return HttpResponse::BadRequest().body("unsupported output id");
-        }
-    }
-    match bridge_set_device_req(&state, &body.name) {
-        Ok(()) => HttpResponse::Ok().finish(),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{e:#}")),
-    }
+        (bridge.clone(), bridges.active_output_id.clone())
+    };
+
+    let outputs = match build_outputs_for_bridge(&bridge) {
+        Ok(outputs) => outputs,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("{e:#}")),
+    };
+
+    HttpResponse::Ok().json(OutputsResponse {
+        active_id: active_output_id,
+        outputs,
+    })
 }
 
 #[utoipa::path(
@@ -424,10 +470,13 @@ pub async fn output_set_device(
 )]
 #[get("/outputs")]
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
-    let state = state.outputs.lock().unwrap();
-    let active_id = state.active_id.clone();
-    let outputs = state.outputs.clone();
-    HttpResponse::Ok().json(OutputsResponse { active_id, outputs })
+    let bridges = state.bridges.lock().unwrap();
+    let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
+    let outputs = build_outputs_from_bridges(&bridges.bridges, &bridges.active_bridge_id, active_online);
+    HttpResponse::Ok().json(OutputsResponse {
+        active_id: bridges.active_output_id.clone(),
+        outputs,
+    })
 }
 
 #[utoipa::path(
@@ -444,40 +493,150 @@ pub async fn outputs_select(
     state: web::Data<AppState>,
     body: web::Json<OutputSelectRequest>,
 ) -> impl Responder {
-    let mut state = state.outputs.lock().unwrap();
-    let Some(out) = state.outputs.iter().find(|o| o.id == body.id) else {
-        return HttpResponse::BadRequest().body("unknown output id");
+    let (bridge_id, device_name) = match parse_output_id(&body.id) {
+        Ok(x) => x,
+        Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    if out.kind != "bridge" {
-        return HttpResponse::BadRequest().body("unsupported output id");
+    let (addr, http_addr) = {
+        let bridges = state.bridges.lock().unwrap();
+        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == bridge_id) else {
+            return HttpResponse::BadRequest().body("unknown bridge id");
+        };
+        (bridge.addr, bridge.http_addr)
+    };
+
+    match crate::bridge::http_list_devices(http_addr) {
+        Ok(devices) => {
+            if !devices.iter().any(|d| d == &device_name) {
+                return HttpResponse::BadRequest().body("unknown device name");
+            }
+        }
+        Err(e) => return HttpResponse::InternalServerError().body(format!("{e:#}")),
     }
-    state.active_id = body.id.clone();
+
+    // Stop current playback before switching outputs.
+    {
+        let cmd_tx = state.player.lock().unwrap().cmd_tx.clone();
+        let _ = cmd_tx.send(crate::bridge::BridgeCommand::Stop);
+    }
+
+    if let Err(e) = switch_active_bridge(&state, &bridge_id, addr) {
+        return HttpResponse::InternalServerError().body(format!("{e:#}"));
+    }
+    if let Err(e) = crate::bridge::http_set_device(http_addr, &device_name) {
+        return HttpResponse::InternalServerError().body(format!("{e:#}"));
+    }
+
+    let mut bridges = state.bridges.lock().unwrap();
+    bridges.active_bridge_id = bridge_id;
+    bridges.active_output_id = body.id.clone();
     HttpResponse::Ok().finish()
 }
 
-fn bridge_list_devices(state: &AppState) -> Result<Vec<String>> {
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    state
-        .player
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::ListDevices { resp_tx: tx })
-        .map_err(|_| anyhow::anyhow!("bridge command channel closed"))?;
-    rx.recv_timeout(std::time::Duration::from_secs(2))
-        .map_err(|_| anyhow::anyhow!("bridge list timeout"))?
+fn build_outputs_from_bridges(
+    bridges: &[crate::config::BridgeConfigResolved],
+    active_bridge_id: &str,
+    active_online: bool,
+) -> Vec<OutputInfo> {
+    let mut outputs = Vec::new();
+    let mut name_counts = std::collections::HashMap::<String, usize>::new();
+    let mut by_bridge = Vec::new();
+
+    for bridge in bridges {
+        if bridge.id == active_bridge_id && !active_online {
+            continue;
+        }
+        let devices = crate::bridge::http_list_devices(bridge.http_addr).unwrap_or_default();
+        for device in devices {
+            *name_counts.entry(device.clone()).or_insert(0) += 1;
+            by_bridge.push((bridge, device));
+        }
+    }
+
+    for (bridge, device) in by_bridge {
+        let mut display_name = device.clone();
+        if name_counts.get(&device).copied().unwrap_or(0) > 1 {
+            display_name = format!("{display_name} [{}]", bridge.name);
+        }
+        outputs.push(OutputInfo {
+            id: format!("bridge:{}:{}", bridge.id, device),
+            kind: "bridge".to_string(),
+            name: display_name,
+            state: "online".to_string(),
+            bridge_id: Some(bridge.id.clone()),
+            capabilities: OutputCapabilities {
+                device_select: true,
+                volume: false,
+            },
+        });
+    }
+
+    outputs
 }
 
-fn bridge_set_device_req(state: &AppState, name: &str) -> Result<()> {
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    state
-        .player
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::SetDevice {
-            name: name.to_string(),
-            resp_tx: tx,
-        })
-        .map_err(|_| anyhow::anyhow!("bridge command channel closed"))?;
-    rx.recv_timeout(std::time::Duration::from_secs(2))
-        .map_err(|_| anyhow::anyhow!("bridge set timeout"))?
+fn build_outputs_for_bridge(
+    bridge: &crate::config::BridgeConfigResolved,
+) -> Result<Vec<OutputInfo>> {
+    let devices = crate::bridge::http_list_devices(bridge.http_addr)?;
+    let mut outputs = Vec::new();
+    for device in devices {
+        outputs.push(OutputInfo {
+            id: format!("bridge:{}:{}", bridge.id, device),
+            kind: "bridge".to_string(),
+            name: device,
+            state: "online".to_string(),
+            bridge_id: Some(bridge.id.clone()),
+            capabilities: OutputCapabilities {
+                device_select: true,
+                volume: false,
+            },
+        });
+    }
+    Ok(outputs)
+}
+
+fn parse_output_id(id: &str) -> Result<(String, String), String> {
+    let mut parts = id.splitn(3, ':');
+    let kind = parts.next().unwrap_or("");
+    let bridge_id = parts.next().unwrap_or("");
+    let device = parts.next().unwrap_or("");
+    if kind != "bridge" || bridge_id.is_empty() || device.is_empty() {
+        return Err("invalid output id".to_string());
+    }
+    Ok((bridge_id.to_string(), device.to_string()))
+}
+
+fn is_pending_output(id: &str) -> bool {
+    id.ends_with(":pending")
+}
+
+fn switch_active_bridge(
+    state: &AppState,
+    bridge_id: &str,
+    addr: std::net::SocketAddr,
+) -> Result<()> {
+    let mut bridges = state.bridges.lock().unwrap();
+    if bridges.active_bridge_id == bridge_id {
+        return Ok(());
+    }
+    bridges.active_bridge_id = bridge_id.to_string();
+    drop(bridges);
+
+    let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+    {
+        let mut player = state.player.lock().unwrap();
+        let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+        player.cmd_tx = cmd_tx.clone();
+    }
+    crate::bridge::spawn_bridge_worker(
+        addr,
+        cmd_rx,
+        cmd_tx,
+        state.status.clone(),
+        state.queue.clone(),
+        state.bridge_online.clone(),
+    );
+    Ok(())
 }
 
 fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, String> {
@@ -504,6 +663,8 @@ fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {
         .to_ascii_lowercase();
     if state
         .player
+        .lock()
+        .unwrap()
         .cmd_tx
         .send(crate::bridge::BridgeCommand::Play {
             path: path.clone(),

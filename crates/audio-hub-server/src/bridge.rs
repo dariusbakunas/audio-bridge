@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -14,19 +15,64 @@ use crate::state::PlayerStatus;
 pub enum BridgeCommand {
     Play { path: PathBuf, ext_hint: String },
     PauseToggle,
+    Stop,
     Quit,
-    ListDevices {
-        resp_tx: crossbeam_channel::Sender<Result<Vec<String>>>,
-    },
-    SetDevice {
-        name: String,
-        resp_tx: crossbeam_channel::Sender<Result<()>>,
-    },
 }
 
 #[derive(Clone)]
 pub struct BridgePlayer {
     pub(crate) cmd_tx: Sender<BridgeCommand>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct HttpDevicesResponse {
+    pub devices: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct HttpStatusResponse {
+    pub now_playing: Option<String>,
+    pub paused: bool,
+    pub elapsed_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
+    pub device: Option<String>,
+    pub underrun_frames: Option<u64>,
+    pub underrun_events: Option<u64>,
+    pub buffer_size_frames: Option<u32>,
+}
+
+pub fn http_list_devices(addr: SocketAddr) -> Result<Vec<String>> {
+    let url = format!("http://{addr}/devices");
+    let resp: HttpDevicesResponse = ureq::get(&url)
+        .timeout(Duration::from_secs(2))
+        .call()
+        .map_err(|e| anyhow::anyhow!("http devices request failed: {e}"))?
+        .into_json()
+        .map_err(|e| anyhow::anyhow!("http devices decode failed: {e}"))?;
+    Ok(resp.devices)
+}
+
+pub fn http_set_device(addr: SocketAddr, name: &str) -> Result<()> {
+    let url = format!("http://{addr}/devices/select");
+    let payload = serde_json::json!({ "name": name });
+    ureq::post(&url)
+        .timeout(Duration::from_secs(2))
+        .send_json(payload)
+        .map_err(|e| anyhow::anyhow!("http set device failed: {e}"))?;
+    Ok(())
+}
+
+pub fn http_status(addr: SocketAddr) -> Result<HttpStatusResponse> {
+    let url = format!("http://{addr}/status");
+    let resp: HttpStatusResponse = ureq::get(&url)
+        .timeout(Duration::from_secs(2))
+        .call()
+        .map_err(|e| anyhow::anyhow!("http status request failed: {e}"))?
+        .into_json()
+        .map_err(|e| anyhow::anyhow!("http status decode failed: {e}"))?;
+    Ok(resp)
 }
 
 pub fn spawn_bridge_worker(
@@ -35,16 +81,15 @@ pub fn spawn_bridge_worker(
     cmd_tx: Sender<BridgeCommand>,
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
+    bridge_online: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
-        let device_waiter: Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>> =
-            Arc::new(Mutex::new(None));
         let mut stream = connect_loop(
             addr,
             status.clone(),
             queue.clone(),
             cmd_tx.clone(),
-            device_waiter.clone(),
+            bridge_online.clone(),
         );
         let mut paused = false;
 
@@ -76,6 +121,23 @@ pub fn spawn_bridge_worker(
                         }
                     }
                 }
+                BridgeCommand::Stop => {
+                    let _ = audio_bridge_proto::write_frame(
+                        &mut stream,
+                        audio_bridge_proto::FrameKind::Next,
+                        &[],
+                    );
+                    if let Ok(mut s) = status.lock() {
+                        s.now_playing = None;
+                        s.paused = false;
+                        s.user_paused = false;
+                        s.elapsed_ms = None;
+                        s.duration_ms = None;
+                        s.sample_rate = None;
+                        s.channels = None;
+                        s.auto_advance_in_flight = false;
+                    }
+                }
                 BridgeCommand::Play { path, ext_hint } => {
                     let mut next = Some((path, ext_hint));
                     while let Some((path, ext_hint)) = next.take() {
@@ -94,7 +156,6 @@ pub fn spawn_bridge_worker(
                             &mut paused,
                             path,
                             ext_hint,
-                            &device_waiter,
                         ) {
                             Ok(Flow::Continue) => break,
                             Ok(Flow::SwitchTo { path, ext_hint }) => {
@@ -109,7 +170,7 @@ pub fn spawn_bridge_worker(
                                         status.clone(),
                                         queue.clone(),
                                         cmd_tx.clone(),
-                                        device_waiter.clone(),
+                                        bridge_online.clone(),
                                     );
                                     continue;
                                 }
@@ -118,21 +179,6 @@ pub fn spawn_bridge_worker(
                             }
                         }
                     }
-                }
-                BridgeCommand::ListDevices { resp_tx } => {
-                    let _ = handle_list_devices(
-                        &mut stream,
-                        &device_waiter,
-                        resp_tx,
-                    );
-                }
-                BridgeCommand::SetDevice { name, resp_tx } => {
-                    let _ = handle_set_device(
-                        &mut stream,
-                        &device_waiter,
-                        name,
-                        resp_tx,
-                    );
                 }
             }
         }
@@ -151,7 +197,7 @@ fn connect_loop(
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
-    device_waiter: Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
+    bridge_online: Arc<AtomicBool>,
 ) -> TcpStream {
     let mut delay = Duration::from_millis(250);
     loop {
@@ -160,13 +206,15 @@ fn connect_loop(
             status.clone(),
             queue.clone(),
             cmd_tx.clone(),
-            device_waiter.clone(),
+            bridge_online.clone(),
         ) {
             Ok(stream) => {
+                bridge_online.store(true, Ordering::Relaxed);
                 tracing::info!(addr = %addr, "bridge connected");
                 return stream;
             }
             Err(_) => {
+                bridge_online.store(false, Ordering::Relaxed);
                 tracing::warn!(addr = %addr, delay_ms = delay.as_millis(), "bridge connect failed");
                 std::thread::sleep(delay);
                 delay = (delay * 2).min(Duration::from_secs(5));
@@ -180,7 +228,7 @@ fn connect_and_handshake(
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
-    device_waiter: Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
+    bridge_online: Arc<AtomicBool>,
 ) -> Result<TcpStream> {
     let mut stream = TcpStream::connect(addr).with_context(|| format!("connect {addr}"))?;
     stream.set_nodelay(true).ok();
@@ -189,7 +237,7 @@ fn connect_and_handshake(
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     let mut stream_rx = stream.try_clone().context("try_clone stream for rx")?;
     audio_bridge_proto::read_prelude(&mut stream_rx).context("read prelude")?;
-    spawn_bridge_reader(stream_rx, status, queue, cmd_tx, device_waiter);
+    spawn_bridge_reader(stream_rx, status, queue, cmd_tx, bridge_online);
     Ok(stream)
 }
 
@@ -198,12 +246,23 @@ fn spawn_bridge_reader(
     status: Arc<Mutex<PlayerStatus>>,
     queue: Arc<Mutex<crate::state::QueueState>>,
     cmd_tx: Sender<BridgeCommand>,
-    device_waiter: Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
+    bridge_online: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || loop {
         let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
             Ok(x) => x,
             Err(_) => {
+                bridge_online.store(false, Ordering::Relaxed);
+                if let Ok(mut s) = status.lock() {
+                    s.now_playing = None;
+                    s.paused = false;
+                    s.user_paused = false;
+                    s.elapsed_ms = None;
+                    s.duration_ms = None;
+                    s.sample_rate = None;
+                    s.channels = None;
+                    s.auto_advance_in_flight = false;
+                }
                 tracing::warn!("bridge reader disconnected");
                 break;
             }
@@ -260,96 +319,13 @@ fn spawn_bridge_reader(
                     }
                 }
             }
-            audio_bridge_proto::FrameKind::DeviceList => {
-                if let Ok(list) = audio_bridge_proto::decode_device_list(&payload) {
-                    if let Some(tx) = device_waiter.lock().ok().and_then(|mut g| g.take()) {
-                        let _ = tx.send(DeviceEvent::List(list));
-                    }
-                }
-            }
-            audio_bridge_proto::FrameKind::DeviceSet => {
-                if let Some(tx) = device_waiter.lock().ok().and_then(|mut g| g.take()) {
-                    let _ = tx.send(DeviceEvent::SetOk);
-                }
-            }
-            audio_bridge_proto::FrameKind::OutputChanged => {
-                if let Ok(name) = audio_bridge_proto::decode_device_selector(&payload) {
-                    if let Ok(mut s) = status.lock() {
-                        s.output_device = Some(name.clone());
-                    }
-                    tracing::info!(device = %name, "bridge output changed");
-                }
-            }
             audio_bridge_proto::FrameKind::Error => {
                 let msg = String::from_utf8_lossy(&payload).to_string();
-                if let Some(tx) = device_waiter.lock().ok().and_then(|mut g| g.take()) {
-                    let _ = tx.send(DeviceEvent::Error(msg));
-                }
+                tracing::warn!("bridge error: {msg}");
             }
             _ => {}
         }
     });
-}
-
-#[derive(Debug)]
-enum DeviceEvent {
-    List(Vec<String>),
-    SetOk,
-    Error(String),
-}
-
-fn handle_list_devices(
-    stream: &mut TcpStream,
-    device_waiter: &Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
-    resp_tx: crossbeam_channel::Sender<Result<Vec<String>>>,
-) -> Result<()> {
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    {
-        if let Ok(mut g) = device_waiter.lock() {
-            *g = Some(tx);
-        }
-    }
-    audio_bridge_proto::write_frame(stream, audio_bridge_proto::FrameKind::ListDevices, &[])?;
-    match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok(DeviceEvent::List(list)) => {
-            let _ = resp_tx.send(Ok(list));
-        }
-        Ok(DeviceEvent::Error(msg)) => {
-            let _ = resp_tx.send(Err(anyhow::anyhow!(msg)));
-        }
-        _ => {
-            let _ = resp_tx.send(Err(anyhow::anyhow!("device list timeout")));
-        }
-    }
-    Ok(())
-}
-
-fn handle_set_device(
-    stream: &mut TcpStream,
-    device_waiter: &Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
-    name: String,
-    resp_tx: crossbeam_channel::Sender<Result<()>>,
-) -> Result<()> {
-    let payload = audio_bridge_proto::encode_device_selector(&name)?;
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    {
-        if let Ok(mut g) = device_waiter.lock() {
-            *g = Some(tx);
-        }
-    }
-    audio_bridge_proto::write_frame(stream, audio_bridge_proto::FrameKind::SetDevice, &payload)?;
-    match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok(DeviceEvent::SetOk) => {
-            let _ = resp_tx.send(Ok(()));
-        }
-        Ok(DeviceEvent::Error(msg)) => {
-            let _ = resp_tx.send(Err(anyhow::anyhow!(msg)));
-        }
-        _ => {
-            let _ = resp_tx.send(Err(anyhow::anyhow!("device set timeout")));
-        }
-    }
-    Ok(())
 }
 
 fn pop_next_from_queue(queue: &Arc<Mutex<crate::state::QueueState>>) -> Option<PathBuf> {
@@ -366,7 +342,6 @@ fn write_all_interruptible(
     buf: &[u8],
     cmd_rx: &Receiver<BridgeCommand>,
     paused: &mut bool,
-    device_waiter: &Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
 ) -> Result<Flow> {
     let mut off = 0usize;
 
@@ -384,11 +359,12 @@ fn write_all_interruptible(
                 audio_bridge_proto::write_frame(&mut *stream, kind, &[])
                     .with_context(|| format!("write {kind:?}"))?;
             }
-            Ok(BridgeCommand::ListDevices { resp_tx }) => {
-                let _ = handle_list_devices(stream, device_waiter, resp_tx);
-            }
-            Ok(BridgeCommand::SetDevice { name, resp_tx }) => {
-                let _ = handle_set_device(stream, device_waiter, name, resp_tx);
+            Ok(BridgeCommand::Stop) => {
+                let _ = audio_bridge_proto::write_frame(
+                    &mut *stream,
+                    audio_bridge_proto::FrameKind::Next,
+                    &[],
+                );
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => return Ok(Flow::Quit),
@@ -433,11 +409,10 @@ fn write_frame_interruptible(
     payload: &[u8],
     cmd_rx: &Receiver<BridgeCommand>,
     paused: &mut bool,
-    device_waiter: &Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
 ) -> Result<Flow> {
     let frame = audio_bridge_proto::encode_frame(kind, payload)
         .context("encode frame")?;
-    write_all_interruptible(stream, &frame, cmd_rx, paused, device_waiter)
+    write_all_interruptible(stream, &frame, cmd_rx, paused)
 }
 
 fn send_one_track_over_existing_connection(
@@ -446,7 +421,6 @@ fn send_one_track_over_existing_connection(
     paused: &mut bool,
     path: PathBuf,
     ext_hint: String,
-    device_waiter: &Arc<Mutex<Option<crossbeam_channel::Sender<DeviceEvent>>>>,
 ) -> Result<Flow> {
     let _ = audio_bridge_proto::write_frame(&mut *stream, audio_bridge_proto::FrameKind::Next, &[]);
 
@@ -458,7 +432,6 @@ fn send_one_track_over_existing_connection(
         &begin,
         cmd_rx,
         paused,
-        device_waiter,
     )? {
         Flow::Continue => {}
         other => return Ok(other),
@@ -482,7 +455,6 @@ fn send_one_track_over_existing_connection(
             &buf[..n],
             cmd_rx,
             paused,
-            device_waiter,
         )? {
             Flow::Continue => {}
             other => return Ok(other),
@@ -495,7 +467,6 @@ fn send_one_track_over_existing_connection(
         &[],
         cmd_rx,
         paused,
-        device_waiter,
     )? {
         Flow::Continue => {}
         other => return Ok(other),

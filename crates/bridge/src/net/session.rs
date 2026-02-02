@@ -7,15 +7,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
-
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver};
 use symphonia::core::probe::Hint;
 
-use crate::device;
 use super::spool::{is_done, make_temp_path, mark_done, Progress};
-use super::{DeviceControl, TEMP_PREFIX};
+use super::TEMP_PREFIX;
 
 /// A network session representing exactly one BEGIN_FILE..(FILE_CHUNK..)..(END_FILE or NEXT).
 ///
@@ -51,20 +48,18 @@ impl SessionControl {
 pub(crate) fn run_one_client(
     mut stream: TcpStream,
     temp_dir: PathBuf,
-    device_ctl: DeviceControl,
 ) -> Result<Receiver<NetSession>> {
     // Handshake once per connection.
     audio_bridge_proto::write_prelude(&mut stream).context("write prelude")?;
     audio_bridge_proto::read_prelude(&mut stream).context("read prelude")?;
 
-    // Clone for receiver->sender messages (TrackInfo, PlaybackPos, OutputChanged).
+    // Clone for receiver->sender messages (TrackInfo, PlaybackPos).
     let peer_tx = stream.try_clone().context("try_clone TcpStream for peer_tx")?;
-    spawn_output_change_notifier(peer_tx.try_clone().context("try_clone peer_tx for notifier")?);
 
     let (session_tx, session_rx) = unbounded::<NetSession>();
 
     thread::spawn(move || {
-        if let Err(e) = reader_thread_main(stream, peer_tx, session_tx, temp_dir, device_ctl) {
+        if let Err(e) = reader_thread_main(stream, peer_tx, session_tx, temp_dir) {
             tracing::warn!("connection reader ended: {e:#}");
         }
     });
@@ -72,38 +67,11 @@ pub(crate) fn run_one_client(
     Ok(session_rx)
 }
 
-fn spawn_output_change_notifier(mut peer_tx: TcpStream) {
-    thread::spawn(move || {
-        let mut last_name = device::default_device_name();
-        loop {
-            thread::sleep(Duration::from_secs(2));
-            let current = device::default_device_name();
-            if current != last_name {
-                if let Some(ref name) = current {
-                    if let Ok(payload) = audio_bridge_proto::encode_device_selector(name) {
-                        if audio_bridge_proto::write_frame(
-                            &mut peer_tx,
-                            audio_bridge_proto::FrameKind::OutputChanged,
-                            &payload,
-                        )
-                        .is_err()
-                        {
-                            break;
-                        }
-                    }
-                }
-                last_name = current;
-            }
-        }
-    });
-}
-
 fn reader_thread_main(
     mut stream: TcpStream,
     mut peer_tx: TcpStream,
     session_tx: crossbeam_channel::Sender<NetSession>,
     temp_dir: PathBuf,
-    device_ctl: DeviceControl,
 ) -> Result<()> {
     loop {
         // Wait for the next BEGIN_FILE.
@@ -114,53 +82,6 @@ fn reader_thread_main(
         };
 
         match kind {
-            audio_bridge_proto::FrameKind::ListDevices => {
-                drain_payload(&mut stream, len);
-                let host = cpal::default_host();
-                let devices = crate::device::list_device_names(&host).unwrap_or_default();
-                if let Ok(payload) = audio_bridge_proto::encode_device_list(&devices) {
-                    let _ = audio_bridge_proto::write_frame(
-                        &mut peer_tx,
-                        audio_bridge_proto::FrameKind::DeviceList,
-                        &payload,
-                    );
-                }
-            }
-
-            audio_bridge_proto::FrameKind::SetDevice => {
-                let mut payload = vec![0u8; len as usize];
-                stream.read_exact(&mut payload).context("read SET_DEVICE payload")?;
-                match audio_bridge_proto::decode_device_selector(&payload) {
-                    Ok(name) => {
-                        let host = cpal::default_host();
-                        match crate::device::pick_device(&host, Some(&name)) {
-                            Ok(_) => {
-                                *device_ctl.selected.lock().unwrap() = Some(name);
-                                let _ = audio_bridge_proto::write_frame(
-                                    &mut peer_tx,
-                                    audio_bridge_proto::FrameKind::DeviceSet,
-                                    &[],
-                                );
-                            }
-                            Err(e) => {
-                                let _ = audio_bridge_proto::write_frame(
-                                    &mut peer_tx,
-                                    audio_bridge_proto::FrameKind::Error,
-                                    e.to_string().as_bytes(),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = audio_bridge_proto::write_frame(
-                            &mut peer_tx,
-                            audio_bridge_proto::FrameKind::Error,
-                            e.to_string().as_bytes(),
-                        );
-                    }
-                }
-            }
-
             audio_bridge_proto::FrameKind::BeginFile => {
                 let mut payload = vec![0u8; len as usize];
                 stream.read_exact(&mut payload).context("read BEGIN_FILE payload")?;
@@ -276,53 +197,6 @@ fn reader_thread_main(
                             break; // back to outer loop, waiting for next BEGIN_FILE
                         }
 
-                        audio_bridge_proto::FrameKind::ListDevices => {
-                            drain_payload(&mut stream, len);
-                            let host = cpal::default_host();
-                            let devices = crate::device::list_device_names(&host).unwrap_or_default();
-                            if let Ok(payload) = audio_bridge_proto::encode_device_list(&devices) {
-                                let _ = audio_bridge_proto::write_frame(
-                                    &mut peer_tx,
-                                    audio_bridge_proto::FrameKind::DeviceList,
-                                    &payload,
-                                );
-                            }
-                        }
-
-                        audio_bridge_proto::FrameKind::SetDevice => {
-                            let mut payload = vec![0u8; len as usize];
-                            stream.read_exact(&mut payload).context("read SET_DEVICE payload")?;
-                            match audio_bridge_proto::decode_device_selector(&payload) {
-                                Ok(name) => {
-                                    let host = cpal::default_host();
-                                    match crate::device::pick_device(&host, Some(&name)) {
-                                        Ok(_) => {
-                                            *device_ctl.selected.lock().unwrap() = Some(name);
-                                            let _ = audio_bridge_proto::write_frame(
-                                                &mut peer_tx,
-                                                audio_bridge_proto::FrameKind::DeviceSet,
-                                                &[],
-                                            );
-                                        }
-                                        Err(e) => {
-                                            let _ = audio_bridge_proto::write_frame(
-                                                &mut peer_tx,
-                                                audio_bridge_proto::FrameKind::Error,
-                                                e.to_string().as_bytes(),
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = audio_bridge_proto::write_frame(
-                                        &mut peer_tx,
-                                        audio_bridge_proto::FrameKind::Error,
-                                        e.to_string().as_bytes(),
-                                    );
-                                }
-                            }
-                        }
-
                         audio_bridge_proto::FrameKind::BeginFile => {
                             // Sender started a new track without an explicit NEXT.
                             // Treat this as a hard cut + immediately start the next session.
@@ -343,10 +217,7 @@ fn reader_thread_main(
                         }
 
                         audio_bridge_proto::FrameKind::TrackInfo
-                        | audio_bridge_proto::FrameKind::PlaybackPos
-                        | audio_bridge_proto::FrameKind::DeviceList
-                        | audio_bridge_proto::FrameKind::DeviceSet
-                        | audio_bridge_proto::FrameKind::OutputChanged => {
+                        | audio_bridge_proto::FrameKind::PlaybackPos => {
                             drain_payload(&mut stream, len);
                         }
                     }

@@ -16,10 +16,10 @@ use crate::models;
         api::queue_clear,
         api::queue_next,
         api::status,
+        api::bridges_list,
+        api::bridge_outputs_list,
         api::outputs_list,
         api::outputs_select,
-        api::output_devices,
-        api::output_set_device,
     ),
     components(
         schemas(
@@ -36,8 +36,8 @@ use crate::models;
             models::OutputInfo,
             models::OutputCapabilities,
             models::OutputSelectRequest,
-            models::BridgeDevicesResponse,
-            models::BridgeSetDeviceRequest,
+            models::BridgeInfo,
+            models::BridgesResponse,
         )
     ),
     tags(
