@@ -15,8 +15,15 @@ struct HealthResponse {
 
 #[derive(serde::Serialize)]
 struct DevicesResponse {
-    devices: Vec<String>,
+    devices: Vec<DeviceInfo>,
     selected: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct DeviceInfo {
+    name: String,
+    min_rate: u32,
+    max_rate: u32,
 }
 
 #[derive(serde::Deserialize)]
@@ -52,13 +59,17 @@ pub(crate) fn spawn_http_server(
                 }
                 (Method::Get, "/devices") => {
                     let host = cpal::default_host();
-                    match device::list_device_names(&host) {
+                    match device::list_device_infos(&host) {
                         Ok(devices) => {
                             let mut seen = std::collections::HashSet::new();
                             let mut deduped = Vec::new();
-                            for name in devices {
-                                if seen.insert(name.clone()) {
-                                    deduped.push(name);
+                            for dev in devices {
+                                if seen.insert(dev.name.clone()) {
+                                    deduped.push(DeviceInfo {
+                                        name: dev.name,
+                                        min_rate: dev.min_rate,
+                                        max_rate: dev.max_rate,
+                                    });
                                 }
                             }
                             let selected = device_selected.lock().ok().and_then(|g| g.clone());

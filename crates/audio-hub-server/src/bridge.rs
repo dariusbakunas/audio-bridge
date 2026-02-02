@@ -26,7 +26,14 @@ pub struct BridgePlayer {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct HttpDevicesResponse {
-    pub devices: Vec<String>,
+    pub devices: Vec<HttpDeviceInfo>,
+}
+
+#[derive(Debug, serde::Deserialize, Clone)]
+pub struct HttpDeviceInfo {
+    pub name: String,
+    pub min_rate: u32,
+    pub max_rate: u32,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -43,7 +50,7 @@ pub struct HttpStatusResponse {
     pub buffer_size_frames: Option<u32>,
 }
 
-pub fn http_list_devices(addr: SocketAddr) -> Result<Vec<String>> {
+pub fn http_list_devices(addr: SocketAddr) -> Result<Vec<HttpDeviceInfo>> {
     let url = format!("http://{addr}/devices");
     let resp: HttpDevicesResponse = ureq::get(&url)
         .timeout(Duration::from_secs(2))

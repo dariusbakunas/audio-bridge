@@ -35,6 +35,7 @@ use crate::models;
             models::OutputsResponse,
             models::OutputInfo,
             models::OutputCapabilities,
+            models::SupportedRates,
             models::OutputSelectRequest,
             models::BridgeInfo,
             models::BridgesResponse,

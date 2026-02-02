@@ -109,15 +109,15 @@ async fn main() -> Result<()> {
             match http_list_devices(bridge.http_addr) {
                 Ok(devices) if !devices.is_empty() => {
                     let device = devices[0].clone();
-                    let active_id = format!("bridge:{}:{}", bridge.id, device);
+                    let active_id = format!("bridge:{}:{}", bridge.id, device.name);
                         tracing::info!(
                             bridge_id = %bridge.id,
                             bridge_name = %bridge.name,
-                            device = %device,
+                            device = %device.name,
                             output_id = %active_id,
                             "active_output not set; defaulting to first available output"
                         );
-                        device_to_set = Some(device);
+                        device_to_set = Some(device.name.clone());
                         found_active = Some((bridge.id.clone(), active_id));
                         break;
                     }
@@ -265,8 +265,8 @@ fn spawn_pending_output_watcher(state: web::Data<AppState>) {
                 match http_list_devices(bridge.http_addr) {
                     Ok(devices) if !devices.is_empty() => {
                         let device = devices[0].clone();
-                        let output_id = format!("bridge:{}:{}", bridge.id, device);
-                        match http_set_device(bridge.http_addr, &device) {
+                        let output_id = format!("bridge:{}:{}", bridge.id, device.name);
+                        match http_set_device(bridge.http_addr, &device.name) {
                             Ok(()) => {
                                 {
                                     let mut bridges_state = state.bridges.lock().unwrap();
@@ -278,7 +278,7 @@ fn spawn_pending_output_watcher(state: web::Data<AppState>) {
                                 tracing::info!(
                                     bridge_id = %bridge.id,
                                     bridge_name = %bridge.name,
-                                    device = %device,
+                                    device = %device.name,
                                     output_id = %output_id,
                                     "active output resolved from pending"
                                 );

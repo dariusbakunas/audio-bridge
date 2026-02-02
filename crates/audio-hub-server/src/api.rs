@@ -21,6 +21,7 @@ use crate::models::{
     OutputSelectRequest,
     OutputInfo,
     OutputCapabilities,
+    SupportedRates,
 };
 use crate::state::AppState;
 
@@ -530,7 +531,7 @@ pub async fn outputs_select(
 
     match crate::bridge::http_list_devices(http_addr) {
         Ok(devices) => {
-            if !devices.iter().any(|d| d == &device_name) {
+            if !devices.iter().any(|d| d.name == device_name) {
                 tracing::warn!(
                     bridge_id = %bridge_id,
                     device = %device_name,
@@ -615,23 +616,25 @@ fn build_outputs_from_bridges(
             }
         };
         for device in devices {
-            *name_counts.entry(device.clone()).or_insert(0) += 1;
+            *name_counts.entry(device.name.clone()).or_insert(0) += 1;
             by_bridge.push((bridge, device));
         }
     }
 
     for (bridge, device) in by_bridge {
-        let mut display_name = device.clone();
-        if name_counts.get(&device).copied().unwrap_or(0) > 1 {
+        let mut display_name = device.name.clone();
+        if name_counts.get(&device.name).copied().unwrap_or(0) > 1 {
             display_name = format!("{display_name} [{}]", bridge.name);
         }
+        let supported_rates = normalize_supported_rates(device.min_rate, device.max_rate);
         outputs.push(OutputInfo {
-            id: format!("bridge:{}:{}", bridge.id, device),
+            id: format!("bridge:{}:{}", bridge.id, device.name),
             kind: "bridge".to_string(),
             name: display_name,
             state: "online".to_string(),
             bridge_id: Some(bridge.id.clone()),
             bridge_name: Some(bridge.name.clone()),
+            supported_rates,
             capabilities: OutputCapabilities {
                 device_select: true,
                 volume: false,
@@ -648,13 +651,15 @@ fn build_outputs_for_bridge(
     let devices = crate::bridge::http_list_devices(bridge.http_addr)?;
     let mut outputs = Vec::new();
     for device in devices {
+        let supported_rates = normalize_supported_rates(device.min_rate, device.max_rate);
         outputs.push(OutputInfo {
-            id: format!("bridge:{}:{}", bridge.id, device),
+            id: format!("bridge:{}:{}", bridge.id, device.name),
             kind: "bridge".to_string(),
-            name: device,
+            name: device.name,
             state: "online".to_string(),
             bridge_id: Some(bridge.id.clone()),
             bridge_name: Some(bridge.name.clone()),
+            supported_rates,
             capabilities: OutputCapabilities {
                 device_select: true,
                 volume: false,
@@ -662,6 +667,13 @@ fn build_outputs_for_bridge(
         });
     }
     Ok(outputs)
+}
+
+fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates> {
+    if min_hz == 0 || max_hz == 0 || max_hz < min_hz || max_hz == u32::MAX {
+        return None;
+    }
+    Some(SupportedRates { min_hz, max_hz })
 }
 
 fn parse_output_id(id: &str) -> Result<(String, String), String> {

@@ -120,7 +120,14 @@ pub struct OutputInfo {
     pub state: String,
     pub bridge_id: Option<String>,
     pub bridge_name: Option<String>,
+    pub supported_rates: Option<SupportedRates>,
     pub capabilities: OutputCapabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SupportedRates {
+    pub min_hz: u32,
+    pub max_hz: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]

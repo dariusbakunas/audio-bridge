@@ -159,6 +159,43 @@ pub fn list_device_names(host: &cpal::Host) -> Result<Vec<String>> {
     Ok(out)
 }
 
+#[derive(Clone, Debug)]
+pub struct DeviceInfo {
+    pub name: String,
+    pub min_rate: u32,
+    pub max_rate: u32,
+}
+
+pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
+    let devices = host.output_devices().context("No output devices")?;
+    let mut out = Vec::new();
+    for d in devices {
+        let name = d.description()?.to_string();
+        let mut min_rate = u32::MAX;
+        let mut max_rate = 0u32;
+        match d.supported_output_configs() {
+            Ok(ranges) => {
+                for r in ranges {
+                    min_rate = min_rate.min(r.min_sample_rate());
+                    max_rate = max_rate.max(r.max_sample_rate());
+                }
+                if min_rate == u32::MAX {
+                    min_rate = 0;
+                }
+                out.push(DeviceInfo { name, min_rate, max_rate });
+            }
+            Err(_) => {
+                out.push(DeviceInfo {
+                    name,
+                    min_rate: 0,
+                    max_rate: 0,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Return the current default output device name, if any.
 pub fn default_device_name() -> Option<String> {
     let host = cpal::default_host();

@@ -57,6 +57,13 @@ struct OutputInfo {
     state: String,
     bridge_id: Option<String>,
     bridge_name: Option<String>,
+    supported_rates: Option<SupportedRates>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SupportedRates {
+    min_hz: u32,
+    max_hz: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -181,6 +188,7 @@ pub(crate) struct RemoteOutput {
     pub(crate) kind: String,
     pub(crate) bridge_id: Option<String>,
     pub(crate) bridge_name: Option<String>,
+    pub(crate) supported_rates: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -240,6 +248,7 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
             kind: o.kind,
             bridge_id: o.bridge_id,
             bridge_name: o.bridge_name,
+            supported_rates: o.supported_rates.map(|r| (r.min_hz, r.max_hz)),
         })
         .collect();
     Ok(RemoteOutputs {

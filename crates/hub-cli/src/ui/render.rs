@@ -316,7 +316,11 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     .as_deref()
                     .or(out.bridge_id.as_deref())
                     .unwrap_or("-");
-                let label = format!("{}  [{}]{}", out.name, bridge, tag);
+                let rates = out
+                    .supported_rates
+                    .map(|(min_hz, max_hz)| format!("{min_hz}-{max_hz} Hz"))
+                    .unwrap_or_else(|| "-".to_string());
+                let label = format!("{}  [{}]  {}{}", out.name, bridge, rates, tag);
                 items.push(ListItem::new(label));
             }
         }
