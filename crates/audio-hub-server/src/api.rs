@@ -423,23 +423,26 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
 )]
 #[get("/bridges")]
 pub async fn bridges_list(state: web::Data<AppState>) -> impl Responder {
-    let bridges = state.bridges.lock().unwrap();
+    let bridges_state = state.bridges.lock().unwrap();
+    let discovered = state.discovered_bridges.lock().unwrap();
     let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
-    let items = bridges
-        .bridges
+    let merged = merge_bridges(&bridges_state.bridges, &discovered);
+    let items = merged
         .iter()
         .map(|b| BridgeInfo {
             id: b.id.clone(),
             name: b.name.clone(),
             addr: b.addr.to_string(),
-            state: if b.id == bridges.active_bridge_id {
+            state: if b.id == bridges_state.active_bridge_id {
                 if active_online {
-                    "online".to_string()
+                    "connected".to_string()
                 } else {
-                    "offline".to_string()
+                    "idle".to_string()
                 }
-            } else {
+            } else if bridges_state.bridges.iter().any(|c| c.id == b.id) {
                 "configured".to_string()
+            } else {
+                "discovered".to_string()
             },
         })
         .collect();
@@ -461,11 +464,13 @@ pub async fn bridge_outputs_list(
     id: web::Path<String>,
 ) -> impl Responder {
     let (bridge, active_output_id) = {
-        let bridges = state.bridges.lock().unwrap();
-        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == id.as_str()) else {
+        let bridges_state = state.bridges.lock().unwrap();
+        let discovered = state.discovered_bridges.lock().unwrap();
+        let merged = merge_bridges(&bridges_state.bridges, &discovered);
+        let Some(bridge) = merged.iter().find(|b| b.id == id.as_str()) else {
             return HttpResponse::BadRequest().body("unknown bridge id");
         };
-        (bridge.clone(), bridges.active_output_id.clone())
+        (bridge.clone(), bridges_state.active_output_id.clone())
     };
 
     let outputs = match build_outputs_for_bridge(&bridge) {
@@ -488,17 +493,41 @@ pub async fn bridge_outputs_list(
 )]
 #[get("/outputs")]
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
-    let bridges = state.bridges.lock().unwrap();
+    let bridges_state = state.bridges.lock().unwrap();
+    let discovered = state.discovered_bridges.lock().unwrap();
     let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
     tracing::info!(
-        count = bridges.bridges.len(),
-        ids = ?bridges.bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
-        active_bridge_id = %bridges.active_bridge_id,
+        count = bridges_state.bridges.len(),
+        ids = ?bridges_state.bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+        active_bridge_id = %bridges_state.active_bridge_id,
         "outputs: bridge inventory"
     );
-    let outputs = build_outputs_from_bridges(&bridges.bridges, &bridges.active_bridge_id, active_online);
+    tracing::info!(
+        count = discovered.len(),
+        ids = ?discovered.keys().cloned().collect::<Vec<_>>(),
+        "outputs: discovered bridges"
+    );
+    let active_id = bridges_state.active_output_id.clone();
+    let active_bridge_id = bridges_state.active_bridge_id.clone();
+    let merged = merge_bridges(&bridges_state.bridges, &discovered);
+    let (outputs, failed) =
+        build_outputs_from_bridges_with_failures(&merged, &active_bridge_id, active_online);
+    if !failed.is_empty() {
+        let configured_ids: std::collections::HashSet<String> =
+            bridges_state.bridges.iter().map(|b| b.id.clone()).collect();
+        drop(bridges_state);
+        drop(discovered);
+        if let Ok(mut map) = state.discovered_bridges.lock() {
+            for id in failed {
+                if !configured_ids.contains(&id) {
+                    map.remove(&id);
+                    tracing::info!(bridge_id = %id, "outputs: removed discovered bridge after device list failure");
+                }
+            }
+        }
+    }
     HttpResponse::Ok().json(OutputsResponse {
-        active_id: bridges.active_output_id.clone(),
+        active_id,
         outputs,
     })
 }
@@ -522,8 +551,10 @@ pub async fn outputs_select(
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
     let (addr, http_addr) = {
-        let bridges = state.bridges.lock().unwrap();
-        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == bridge_id) else {
+        let bridges_state = state.bridges.lock().unwrap();
+        let discovered = state.discovered_bridges.lock().unwrap();
+        let merged = merge_bridges(&bridges_state.bridges, &discovered);
+        let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
             return HttpResponse::BadRequest().body("unknown bridge id");
         };
         (bridge.addr, bridge.http_addr)
@@ -590,9 +621,18 @@ fn build_outputs_from_bridges(
     active_bridge_id: &str,
     active_online: bool,
 ) -> Vec<OutputInfo> {
+    build_outputs_from_bridges_with_failures(bridges, active_bridge_id, active_online).0
+}
+
+fn build_outputs_from_bridges_with_failures(
+    bridges: &[crate::config::BridgeConfigResolved],
+    active_bridge_id: &str,
+    active_online: bool,
+) -> (Vec<OutputInfo>, Vec<String>) {
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
     let mut by_bridge = Vec::new();
+    let mut failed = Vec::new();
 
     for bridge in bridges {
         let devices = match crate::bridge::http_list_devices(bridge.http_addr) {
@@ -612,6 +652,7 @@ fn build_outputs_from_bridges(
                     error = %e,
                     "outputs: device list failed"
                 );
+                failed.push(bridge.id.clone());
                 Vec::new()
             }
         };
@@ -642,7 +683,39 @@ fn build_outputs_from_bridges(
         });
     }
 
-    outputs
+    (outputs, failed)
+}
+
+fn merge_bridges(
+    configured: &[crate::config::BridgeConfigResolved],
+    discovered: &std::collections::HashMap<String, crate::state::DiscoveredBridge>,
+) -> Vec<crate::config::BridgeConfigResolved> {
+    let mut merged = Vec::with_capacity(configured.len() + discovered.len());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_addrs: std::collections::HashSet<std::net::SocketAddr> =
+        std::collections::HashSet::new();
+    for b in configured {
+        seen.insert(b.id.clone());
+        seen_addrs.insert(b.addr);
+        merged.push(b.clone());
+    }
+    for (id, b) in discovered {
+        if seen.contains(id) {
+            continue;
+        }
+        if seen_addrs.contains(&b.bridge.addr) {
+            tracing::info!(
+                bridge_id = %b.bridge.id,
+                bridge_name = %b.bridge.name,
+                addr = %b.bridge.addr,
+                "merge: skipping discovered bridge with configured addr"
+            );
+            continue;
+        }
+        seen_addrs.insert(b.bridge.addr);
+        merged.push(b.bridge.clone());
+    }
+    merged
 }
 
 fn build_outputs_for_bridge(
@@ -725,9 +798,11 @@ async fn ensure_bridge_connected(state: &AppState) -> Result<(), HttpResponse> {
     }
 
     let (bridge_id, addr) = {
-        let bridges = state.bridges.lock().unwrap();
-        let Some(bridge) = bridges.bridges.iter().find(|b| b.id == bridges.active_bridge_id) else {
-            return Err(HttpResponse::InternalServerError().body("active bridge not found"));
+        let bridges_state = state.bridges.lock().unwrap();
+        let discovered = state.discovered_bridges.lock().unwrap();
+        let merged = merge_bridges(&bridges_state.bridges, &discovered);
+        let Some(bridge) = merged.iter().find(|b| b.id == bridges_state.active_bridge_id) else {
+            return Err(HttpResponse::ServiceUnavailable().body("active bridge not found"));
         };
         (bridge.id.clone(), bridge.addr)
     };

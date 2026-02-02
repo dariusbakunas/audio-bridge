@@ -61,10 +61,6 @@ pub fn bridges_from_config(cfg: &ServerConfig) -> Result<Vec<BridgeConfigResolve
         }
     }
 
-    if bridges.is_empty() {
-        return Err(anyhow::anyhow!("config must define at least one bridge"));
-    }
-
     Ok(bridges)
 }
 

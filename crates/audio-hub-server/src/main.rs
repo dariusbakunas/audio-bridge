@@ -17,6 +17,7 @@ use anyhow::Result;
 use clap::Parser;
 use crossbeam_channel::unbounded;
 use tracing_subscriber::EnvFilter;
+use mdns_sd::{ServiceDaemon, ServiceEvent};
 
 use crate::bridge::{http_list_devices, http_set_device};
 use crate::library::scan_library;
@@ -100,68 +101,69 @@ async fn main() -> Result<()> {
             Err(e) => return Err(anyhow::anyhow!(e)),
         },
         None => {
-            let mut first_bridge: Option<crate::config::BridgeConfigResolved> = None;
-            let mut found_active: Option<(String, String)> = None;
-            for bridge in &bridges {
-                if first_bridge.is_none() {
-                    first_bridge = Some(bridge.clone());
-                }
-            match http_list_devices(bridge.http_addr) {
-                Ok(devices) if !devices.is_empty() => {
-                    let device = devices[0].clone();
-                    let active_id = format!("bridge:{}:{}", bridge.id, device.name);
-                        tracing::info!(
-                            bridge_id = %bridge.id,
-                            bridge_name = %bridge.name,
-                            device = %device.name,
-                            output_id = %active_id,
-                            "active_output not set; defaulting to first available output"
-                        );
-                        device_to_set = Some(device.name.clone());
-                        found_active = Some((bridge.id.clone(), active_id));
-                        break;
-                    }
-                    Ok(_) => {
-                        tracing::warn!(
-                            bridge_id = %bridge.id,
-                            bridge_name = %bridge.name,
-                            "bridge returned no outputs while selecting default"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            bridge_id = %bridge.id,
-                            bridge_name = %bridge.name,
-                            error = %e,
-                            "bridge unavailable while selecting default"
-                        );
-                    }
-                }
-            }
-
-            if let Some(found) = found_active {
-                found
+            if bridges.is_empty() {
+                tracing::warn!("no configured bridges; starting with pending output");
+                ("pending".to_string(), "bridge:pending:pending".to_string())
             } else {
-                let bridge = first_bridge.ok_or_else(|| anyhow::anyhow!("config must define at least one bridge"))?;
-                let pending = format!("bridge:{}:pending", bridge.id);
-                tracing::warn!(
-                    bridge_id = %bridge.id,
-                    bridge_name = %bridge.name,
-                    output_id = %pending,
-                    "active_output not set; no bridges available, starting with pending output"
-                );
-                (bridge.id.clone(), pending)
+                let mut first_bridge: Option<crate::config::BridgeConfigResolved> = None;
+                let mut found_active: Option<(String, String)> = None;
+                for bridge in &bridges {
+                    if first_bridge.is_none() {
+                        first_bridge = Some(bridge.clone());
+                    }
+                match http_list_devices(bridge.http_addr) {
+                    Ok(devices) if !devices.is_empty() => {
+                        let device = devices[0].clone();
+                        let active_id = format!("bridge:{}:{}", bridge.id, device.name);
+                            tracing::info!(
+                                bridge_id = %bridge.id,
+                                bridge_name = %bridge.name,
+                                device = %device.name,
+                                output_id = %active_id,
+                                "active_output not set; defaulting to first available output"
+                            );
+                            device_to_set = Some(device.name.clone());
+                            found_active = Some((bridge.id.clone(), active_id));
+                            break;
+                        }
+                        Ok(_) => {
+                            tracing::warn!(
+                                bridge_id = %bridge.id,
+                                bridge_name = %bridge.name,
+                                "bridge returned no outputs while selecting default"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                bridge_id = %bridge.id,
+                                bridge_name = %bridge.name,
+                                error = %e,
+                                "bridge unavailable while selecting default"
+                            );
+                        }
+                    }
+                }
+
+                if let Some(found) = found_active {
+                    found
+                } else {
+                    let bridge = first_bridge.unwrap();
+                    let pending = format!("bridge:{}:pending", bridge.id);
+                    tracing::warn!(
+                        bridge_id = %bridge.id,
+                        bridge_name = %bridge.name,
+                        output_id = %pending,
+                        "active_output not set; no bridges available, starting with pending output"
+                    );
+                    (bridge.id.clone(), pending)
+                }
             }
         }
     };
-    let (_active_addr, active_http_addr) = {
-        let bridge = bridges
-            .iter()
-            .find(|b| b.id == active_bridge_id)
-            .ok_or_else(|| anyhow::anyhow!("active bridge id not found"))?
-            .clone();
-        (bridge.addr, bridge.http_addr)
-    };
+    let active_http_addr = bridges
+        .iter()
+        .find(|b| b.id == active_bridge_id)
+        .map(|b| b.http_addr);
 
     let (cmd_tx, _cmd_rx) = unbounded();
     let shutdown_tx = cmd_tx.clone();
@@ -181,8 +183,9 @@ async fn main() -> Result<()> {
         active_bridge_id: active_bridge_id.clone(),
         active_output_id: active_output_id.clone(),
     }));
-    if let Some(device_name) = device_to_set {
-        let _ = http_set_device(active_http_addr, &device_name);
+    let discovered_bridges = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
+        let _ = http_set_device(http_addr, &device_name);
     }
 
     let state = web::Data::new(AppState::new(
@@ -192,7 +195,10 @@ async fn main() -> Result<()> {
         queue,
         bridges_state,
         bridge_online.clone(),
+        discovered_bridges.clone(),
     ));
+    spawn_mdns_discovery(state.clone());
+    spawn_discovered_health_watcher(state.clone());
     spawn_pending_output_watcher(state.clone());
 
     HttpServer::new(move || {
@@ -225,6 +231,142 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn spawn_mdns_discovery(state: web::Data<AppState>) {
+    std::thread::spawn(move || {
+        let daemon = match ServiceDaemon::new() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "mdns: failed to start daemon");
+                return;
+            }
+        };
+        let receiver = match daemon.browse("_audio-bridge._tcp.local.") {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "mdns: browse failed");
+                return;
+            }
+        };
+        tracing::info!("mdns: browsing for _audio-bridge._tcp.local.");
+        let mut fullname_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for event in receiver {
+            match event {
+                ServiceEvent::ServiceFound(_ty, fullname) => {
+                    tracing::info!(fullname = %fullname, "mdns: service found");
+                    if let Some(id) = fullname_to_id.get(&fullname).cloned() {
+                        if let Ok(mut map) = state.discovered_bridges.lock() {
+                            if let Some(entry) = map.get_mut(&id) {
+                                entry.last_seen = std::time::Instant::now();
+                            }
+                        }
+                    }
+                }
+                ServiceEvent::ServiceResolved(info) => {
+                    tracing::info!(
+                        fullname = %info.get_fullname(),
+                        host = %info.get_hostname(),
+                        port = info.get_port(),
+                        "mdns: service resolved"
+                    );
+                    let id = info
+                        .get_property("id")
+                        .map(|p| p.val_str().to_string())
+                        .map(|s| s.strip_prefix("id=").unwrap_or(&s).to_string())
+                        .unwrap_or_else(|| info.get_fullname().to_string());
+                    let name = info
+                        .get_property("name")
+                        .map(|p| p.val_str().to_string())
+                        .map(|s| s.strip_prefix("name=").unwrap_or(&s).to_string())
+                        .unwrap_or_else(|| id.clone());
+                    let api_port = info
+                        .get_property("api_port")
+                        .and_then(|p| p.val_str().parse::<u16>().ok());
+                    let addr = info
+                        .get_addresses()
+                        .iter()
+                        .find_map(|ip| if let std::net::IpAddr::V4(v4) = ip { Some(*v4) } else { None });
+                    let Some(ip) = addr else {
+                        tracing::warn!(fullname = %info.get_fullname(), "mdns: resolved without IPv4");
+                        continue;
+                    };
+                    let stream_port = info.get_port();
+                    let stream = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), stream_port);
+                    let http_port = api_port.unwrap_or_else(|| stream_port.saturating_add(1));
+                    let http = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), http_port);
+                    let bridge = crate::config::BridgeConfigResolved {
+                        id: id.clone(),
+                        name,
+                        addr: stream,
+                        http_addr: http,
+                    };
+                    if let Ok(mut map) = state.discovered_bridges.lock() {
+                        let now = std::time::Instant::now();
+                        map.insert(
+                            id.clone(),
+                            crate::state::DiscoveredBridge {
+                                bridge,
+                                last_seen: now,
+                            },
+                        );
+                    }
+                    tracing::info!(
+                        bridge_id = %id,
+                        addr = %stream,
+                        http_addr = %http,
+                        "mdns: discovered bridge"
+                    );
+                    fullname_to_id.insert(info.get_fullname().to_string(), id);
+                }
+                ServiceEvent::ServiceRemoved(name, _) => {
+                    if let Some(id) = fullname_to_id.remove(&name) {
+                        if let Ok(mut map) = state.discovered_bridges.lock() {
+                            map.remove(&id);
+                        }
+                        tracing::info!(bridge_id = %id, "mdns: bridge removed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
+fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        let snapshot = match state.discovered_bridges.lock() {
+            Ok(map) => map
+                .iter()
+                .map(|(id, entry)| (id.clone(), entry.bridge.http_addr, entry.last_seen))
+                .collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+
+        let now = std::time::Instant::now();
+        for (id, http_addr, last_seen) in snapshot {
+            let ok = ping_bridge(http_addr);
+            if ok {
+                if let Ok(mut map) = state.discovered_bridges.lock() {
+                    if let Some(entry) = map.get_mut(&id) {
+                        entry.last_seen = now;
+                    }
+                }
+            } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
+                if let Ok(mut map) = state.discovered_bridges.lock() {
+                    map.remove(&id);
+                }
+                tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");
+            }
+        }
+    });
+}
+
+fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
+    let url = format!("http://{http_addr}/health");
+    let resp = ureq::get(&url).timeout(std::time::Duration::from_secs(2)).call();
+    resp.map(|r| r.status() / 100 == 2).unwrap_or(false)
+}
+
 fn parse_output_id(id: &str) -> Result<(String, String), String> {
     let mut parts = id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");
@@ -246,11 +388,23 @@ fn spawn_pending_output_watcher(state: web::Data<AppState>) {
         loop {
             let (pending, active_bridge_id, active_output_id, bridges) = {
                 let bridges = state.bridges.lock().unwrap();
+                let discovered = state.discovered_bridges.lock().unwrap();
+                let mut merged = Vec::new();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for b in bridges.bridges.iter() {
+                    seen.insert(b.id.clone());
+                    merged.push(b.clone());
+                }
+                for (id, b) in discovered.iter() {
+                    if !seen.contains(id) {
+                        merged.push(b.bridge.clone());
+                    }
+                }
                 (
                     is_pending_output(&bridges.active_output_id),
                     bridges.active_bridge_id.clone(),
                     bridges.active_output_id.clone(),
-                    bridges.bridges.clone(),
+                    merged,
                 )
             };
 

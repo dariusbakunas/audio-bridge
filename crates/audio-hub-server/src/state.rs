@@ -28,6 +28,7 @@ pub struct AppState {
     pub queue: Arc<Mutex<QueueState>>,
     pub bridges: Arc<Mutex<BridgeState>>,
     pub bridge_online: Arc<AtomicBool>,
+    pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
 }
 
 impl AppState {
@@ -38,6 +39,7 @@ impl AppState {
         queue: Arc<Mutex<QueueState>>,
         bridges: Arc<Mutex<BridgeState>>,
         bridge_online: Arc<AtomicBool>,
+        discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
@@ -46,8 +48,15 @@ impl AppState {
             queue,
             bridges,
             bridge_online,
+            discovered_bridges,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct DiscoveredBridge {
+    pub bridge: crate::config::BridgeConfigResolved,
+    pub last_seen: std::time::Instant,
 }
 
 #[derive(Debug, Default)]

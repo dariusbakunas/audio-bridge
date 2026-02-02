@@ -23,6 +23,7 @@ mod net;
 mod pipeline;
 mod status;
 mod http_api;
+mod mdns;
 
 use std::net::TcpListener;
 use std::sync::atomic::AtomicU64;
@@ -58,7 +59,16 @@ fn main() -> Result<()> {
     }
 
     let temp_dir_for_signal = temp_dir.clone();
+    let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mdns_for_signal = mdns_handle.clone();
     let _ = ctrlc::set_handler(move || {
+        if let Ok(mut g) = mdns_for_signal.lock() {
+            if let Some(ad) = g.as_ref() {
+                ad.shutdown();
+            }
+            *g = None;
+        }
         let _ = net::cleanup_temp_files(&temp_dir_for_signal);
         std::process::exit(130);
     });
@@ -78,6 +88,9 @@ fn main() -> Result<()> {
                 status.clone(),
                 device_selected.clone(),
             );
+            if let Ok(mut g) = mdns_handle.lock() {
+                *g = mdns::spawn_mdns_advertiser(*bind, args.http_bind);
+            }
 
             let current_conn: std::sync::Arc<std::sync::Mutex<Option<std::net::TcpStream>>> =
                 std::sync::Arc::new(std::sync::Mutex::new(None));
