@@ -38,7 +38,6 @@ pub struct HttpDeviceInfo {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct HttpStatusResponse {
-    pub now_playing: Option<String>,
     pub paused: bool,
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,

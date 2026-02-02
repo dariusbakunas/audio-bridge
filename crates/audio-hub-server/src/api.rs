@@ -496,7 +496,7 @@ pub async fn bridge_outputs_list(
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     let bridges_state = state.bridges.lock().unwrap();
     let discovered = state.discovered_bridges.lock().unwrap();
-    let active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
+    let _active_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
     tracing::info!(
         count = bridges_state.bridges.len(),
         ids = ?bridges_state.bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
@@ -509,10 +509,8 @@ pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
         "outputs: discovered bridges"
     );
     let active_id = bridges_state.active_output_id.clone();
-    let active_bridge_id = bridges_state.active_bridge_id.clone();
     let merged = merge_bridges(&bridges_state.bridges, &discovered);
-    let (outputs, failed) =
-        build_outputs_from_bridges_with_failures(&merged, &active_bridge_id, active_online);
+    let (outputs, failed) = build_outputs_from_bridges_with_failures(&merged);
     if !failed.is_empty() {
         let configured_ids: std::collections::HashSet<String> =
             bridges_state.bridges.iter().map(|b| b.id.clone()).collect();
@@ -617,18 +615,8 @@ pub async fn outputs_select(
     HttpResponse::Ok().finish()
 }
 
-fn build_outputs_from_bridges(
-    bridges: &[crate::config::BridgeConfigResolved],
-    active_bridge_id: &str,
-    active_online: bool,
-) -> Vec<OutputInfo> {
-    build_outputs_from_bridges_with_failures(bridges, active_bridge_id, active_online).0
-}
-
 fn build_outputs_from_bridges_with_failures(
     bridges: &[crate::config::BridgeConfigResolved],
-    active_bridge_id: &str,
-    active_online: bool,
 ) -> (Vec<OutputInfo>, Vec<String>) {
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
@@ -744,7 +732,7 @@ fn switch_active_bridge(
         .bridge_online
         .store(false, std::sync::atomic::Ordering::Relaxed);
     {
-        let mut player = state.player.lock().unwrap();
+    let player = state.player.lock().unwrap();
         let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
     }
     Ok(())
