@@ -8,6 +8,8 @@ This repo is a Rust workspace with two main apps:
 - **`audio-hub-server`** (server): runs on the media rack. Scans your library and exposes a small HTTP API for control.
 - **`hub-cli`** (client): runs on your machine. A small TUI that connects to the server to browse and control playback.
 
+Each binary supports `--version`, which includes the crate version, git SHA, and build date.
+
 ## What this is for
 
 If you have a quiet little box on your network (RPi + USB DAC) and you want:
@@ -28,15 +30,15 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 │ ├─ audio-hub-server/ # HTTP control server 
 │ └─ audio-bridge-proto/ # shared protocol types/utilities 
 ├─ Cross.toml 
-├─ Dockerfile.cross 
+├─ dist-workspace.toml
 └─ Cargo.toml
 
 ```
 
 ## Supported formats
 
-- Sender (`hub-cli`) currently focuses on: **`.flac`** and **`.wav`**
-- Receiver (`bridge`) uses Symphonia for decoding (FLAC enabled).
+Library scanning recognizes: **flac, wav, aiff/aif, mp3, m4a, aac, alac, ogg/oga, opus**.  
+Decoding is provided by Symphonia; exact coverage depends on enabled features and container support.
 
 ## Quick start (local network)
 
@@ -100,6 +102,10 @@ cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/a
 - **r**: rescan directory
 - **q**: quit
 
+### Hub-CLI screenshot
+
+![hub-cli TUI screenshot](docs/screenshots/hub-cli.png)
+
 ## Tuning playback stability vs latency
 
 `bridge` exposes a few knobs that trade latency for underrun resistance.
@@ -123,28 +129,31 @@ cargo run --release -p bridge --
 listen --bind 0.0.0.0:5555
 ```
 
-## Output selection (server API)
+## Server API (quick map)
 
-The server exposes output-agnostic endpoints for device selection:
+- `GET /library` (list a directory; use `?dir=...`)
+- `POST /library/rescan`
+- `POST /play`
+- `POST /pause`
+- `GET /queue`
+- `POST /queue`
+- `POST /queue/remove`
+- `POST /queue/clear`
+- `POST /queue/next`
+- `GET /status`
+- `GET /bridges`
+- `GET /bridges/{id}/outputs`
+- `GET /outputs`
+- `POST /outputs/select`
+- `GET /swagger-ui/` (OpenAPI UI)
 
-- `GET /outputs` (list outputs)
-- `POST /outputs/select` (set active output)
-- `GET /outputs/{id}/devices` (list devices for an output)
-- `POST /outputs/{id}/device` (set device by substring)
+## Releases
 
-## Building for Raspberry Pi / Linux with cross
+Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.
 
-This repo includes a `cross` Docker image setup for Linux builds.
+## Why not AirPlay?
 
-```bash
-docker build --platform linux/amd64 -t audio-bridge-cross:x86_64-gnu -f Dockerfile.cross . 
-cargo install cross 
-rustup toolchain install stable-x86_64-unknown-linux-gnu --force-non-host
-CROSS_CONTAINER_OPTS="--platform linux/amd64"
-cross build --release --target x86_64-unknown-linux-gnu -p bridge -p hub-cli
-```
-
-> Note: the included `Cross.toml` / `Dockerfile.cross` are geared toward a GNU Linux target. Adjust targets as needed for your Pi model/toolchain.
+This is a direct, local-network stream to a dedicated receiver. Audio is decoded on the receiver and resampled to the output device’s native rate, avoiding protocol-level caps and keeping the path simple and controllable.
 
 ## Roadmap (nice-to-haves)
 
