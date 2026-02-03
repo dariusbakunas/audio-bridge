@@ -242,14 +242,22 @@ fn connect_loop(
             bridges_state.clone(),
         ) {
             Ok(stream) => {
-                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                if bridges_state
+                    .lock()
+                    .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id.as_str()))
+                    .unwrap_or(false)
+                {
                     bridge_online.store(true, Ordering::Relaxed);
                 }
                 tracing::info!(bridge_id = %bridge_id, addr = %addr, "bridge connected");
                 return stream;
             }
             Err(e) => {
-                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                if bridges_state
+                    .lock()
+                    .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id.as_str()))
+                    .unwrap_or(false)
+                {
                     bridge_online.store(false, Ordering::Relaxed);
                 }
                 tracing::warn!(
@@ -309,7 +317,11 @@ fn spawn_bridge_reader(
         let (kind, len) = match audio_bridge_proto::read_frame_header(&mut stream_rx) {
             Ok(x) => x,
             Err(_) => {
-                if bridges_state.lock().map(|s| s.active_bridge_id == bridge_id).unwrap_or(false) {
+                if bridges_state
+                    .lock()
+                    .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id.as_str()))
+                    .unwrap_or(false)
+                {
                     bridge_online.store(false, Ordering::Relaxed);
                 }
                 if let Ok(mut s) = status.lock() {

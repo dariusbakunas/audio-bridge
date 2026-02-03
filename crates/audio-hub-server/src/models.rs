@@ -47,6 +47,7 @@ pub enum QueueMode {
 pub struct StatusResponse {
     pub now_playing: Option<String>,
     pub paused: bool,
+    pub bridge_online: bool,
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
@@ -57,7 +58,7 @@ pub struct StatusResponse {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub format: Option<String>,
-    pub output_id: String,
+    pub output_id: Option<String>,
     pub underrun_frames: Option<u64>,
     pub underrun_events: Option<u64>,
     pub buffer_size_frames: Option<u32>,
@@ -108,7 +109,7 @@ pub struct BridgesResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct OutputsResponse {
-    pub active_id: String,
+    pub active_id: Option<String>,
     pub outputs: Vec<OutputInfo>,
 }
 

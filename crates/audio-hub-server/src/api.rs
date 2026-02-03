@@ -106,24 +106,24 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     };
 
     let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
-    let output_id = match &body.output_id {
-        Some(id) => id.clone(),
-        None => state.bridges.lock().unwrap().active_output_id.clone(),
+    let output_id = body
+        .output_id
+        .clone()
+        .or_else(|| state.bridges.lock().unwrap().active_output_id.clone());
+    let Some(output_id) = output_id else {
+        tracing::warn!("play rejected: no active output selected");
+        return HttpResponse::ServiceUnavailable().body("no active output selected");
     };
-    if is_pending_output(&output_id) {
-        tracing::warn!(output_id = %output_id, "play rejected: output pending");
-        return HttpResponse::ServiceUnavailable().body("active output pending");
-    }
     if let Err(resp) = ensure_bridge_connected(&state).await {
         tracing::warn!(output_id = %output_id, "play rejected: bridge offline");
         return resp;
     }
     {
         let bridges = state.bridges.lock().unwrap();
-        if output_id != bridges.active_output_id {
+        if bridges.active_output_id.as_deref() != Some(output_id.as_str()) {
             tracing::warn!(
                 output_id = %output_id,
-                active_output_id = %bridges.active_output_id,
+                active_output_id = ?bridges.active_output_id,
                 "play rejected: unsupported output id"
             );
             return HttpResponse::BadRequest().body("unsupported output id");
@@ -325,6 +325,13 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 )]
 #[post("/queue/next")]
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
+    if state.bridges.lock().unwrap().active_output_id.is_none() {
+        tracing::warn!("queue next rejected: no active output selected");
+        return HttpResponse::ServiceUnavailable().body("no active output selected");
+    }
+    if let Err(resp) = ensure_bridge_connected(&state).await {
+        return resp;
+    }
     let path = {
         let mut queue = state.queue.lock().unwrap();
         if queue.items.is_empty() {
@@ -368,16 +375,20 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
     };
     let (output_id, http_addr) = {
         let bridges = state.bridges.lock().unwrap();
-        let http_addr = bridges
-            .bridges
-            .iter()
-            .find(|b| b.id == bridges.active_bridge_id)
-            .map(|b| b.http_addr);
+        let http_addr = bridges.active_bridge_id.as_ref().and_then(|active_id| {
+            bridges
+                .bridges
+                .iter()
+                .find(|b| b.id == *active_id)
+                .map(|b| b.http_addr)
+        });
         (bridges.active_output_id.clone(), http_addr)
     };
+    let bridge_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
     let mut resp = StatusResponse {
         now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
         paused: status.paused,
+        bridge_online,
         elapsed_ms: status.elapsed_ms,
         duration_ms: status.duration_ms,
         sample_rate,
@@ -434,7 +445,7 @@ pub async fn bridges_list(state: web::Data<AppState>) -> impl Responder {
             id: b.id.clone(),
             name: b.name.clone(),
             addr: b.addr.to_string(),
-            state: if b.id == bridges_state.active_bridge_id {
+            state: if bridges_state.active_bridge_id.as_deref() == Some(b.id.as_str()) {
                 if active_online {
                     "connected".to_string()
                 } else {
@@ -500,7 +511,7 @@ pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     tracing::info!(
         count = bridges_state.bridges.len(),
         ids = ?bridges_state.bridges.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
-        active_bridge_id = %bridges_state.active_bridge_id,
+        active_bridge_id = ?bridges_state.active_bridge_id,
         "outputs: bridge inventory"
     );
     tracing::info!(
@@ -604,14 +615,20 @@ pub async fn outputs_select(
         return HttpResponse::InternalServerError().body(format!("{e:#}"));
     }
 
-    let mut bridges = state.bridges.lock().unwrap();
-    bridges.active_bridge_id = bridge_id;
-    bridges.active_output_id = body.id.clone();
-    tracing::info!(
-        output_id = %bridges.active_output_id,
-        bridge_id = %bridges.active_bridge_id,
-        "output selected"
-    );
+    {
+        let mut bridges = state.bridges.lock().unwrap();
+        bridges.active_bridge_id = Some(bridge_id);
+        bridges.active_output_id = Some(body.id.clone());
+        tracing::info!(
+            output_id = ?bridges.active_output_id,
+            bridge_id = ?bridges.active_bridge_id,
+            "output selected"
+        );
+    }
+
+    if let Err(resp) = ensure_bridge_connected(&state).await {
+        return resp;
+    }
     HttpResponse::Ok().finish()
 }
 
@@ -706,26 +723,22 @@ fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates>
     Some(SupportedRates { min_hz, max_hz })
 }
 
-fn is_pending_output(id: &str) -> bool {
-    id.ends_with(":pending")
-}
-
 fn switch_active_bridge(
     state: &AppState,
     bridge_id: &str,
     addr: std::net::SocketAddr,
 ) -> Result<()> {
     let mut bridges = state.bridges.lock().unwrap();
-    if bridges.active_bridge_id == bridge_id {
+    if bridges.active_bridge_id.as_deref() == Some(bridge_id) {
         return Ok(());
     }
     tracing::info!(
-        from_bridge_id = %bridges.active_bridge_id,
+        from_bridge_id = ?bridges.active_bridge_id,
         to_bridge_id = %bridge_id,
         addr = %addr,
         "switch active bridge"
     );
-    bridges.active_bridge_id = bridge_id.to_string();
+    bridges.active_bridge_id = Some(bridge_id.to_string());
     drop(bridges);
 
     state
@@ -747,7 +760,10 @@ async fn ensure_bridge_connected(state: &AppState) -> Result<(), HttpResponse> {
         let bridges_state = state.bridges.lock().unwrap();
         let discovered = state.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
-        let Some(bridge) = merged.iter().find(|b| b.id == bridges_state.active_bridge_id) else {
+        let Some(active_bridge_id) = bridges_state.active_bridge_id.as_ref() else {
+            return Err(HttpResponse::ServiceUnavailable().body("no active output selected"));
+        };
+        let Some(bridge) = merged.iter().find(|b| b.id == *active_bridge_id) else {
             return Err(HttpResponse::ServiceUnavailable().body("active bridge not found"));
         };
         (bridge.id.clone(), bridge.addr)

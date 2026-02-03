@@ -63,16 +63,10 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .as_deref()
         .map(|s| s.to_string())
         .unwrap_or_else(|| "-".into());
-    let output_device_line = app
-        .remote_output_device
-        .as_deref()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "-".into());
     let header = Paragraph::new(vec![
         Line::from(format!("hub-cli  →  {}", app.server)),
         Line::from(format!("dir: {:?}", app.dir)),
         Line::from(format!("output: {output_line}")),
-        Line::from(format!("device: {output_device_line}")),
     ])
         .block(Block::default().borders(Borders::ALL).title("Target"));
     f.render_widget(header, top_chunks[0]);

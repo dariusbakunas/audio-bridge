@@ -67,6 +67,6 @@ pub struct QueueState {
 #[derive(Debug)]
 pub struct BridgeState {
     pub bridges: Vec<BridgeConfigResolved>,
-    pub active_bridge_id: String,
-    pub active_output_id: String,
+    pub active_bridge_id: Option<String>,
+    pub active_output_id: Option<String>,
 }

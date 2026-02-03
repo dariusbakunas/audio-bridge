@@ -69,10 +69,10 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
                                 elapsed_ms: status.elapsed_ms,
                                 duration_ms: status.duration_ms,
                                 paused: status.paused,
+                                bridge_online: status.bridge_online,
                                 sample_rate: status.sample_rate,
                                 channels: status.channels,
                                 output_sample_rate: status.output_sample_rate,
-                                output_device: status.output_device,
                                 title: status.title,
                                 artist: status.artist,
                                 album: status.album,
@@ -171,10 +171,10 @@ pub(crate) struct App {
 
     pub(crate) remote_duration_ms: Option<u64>,
     pub(crate) remote_paused: Option<bool>,
+    pub(crate) remote_bridge_online: bool,
     pub(crate) remote_elapsed_ms: Option<u64>,
     pub(crate) remote_channels: Option<u16>,
     pub(crate) remote_output_sample_rate: Option<u32>,
-    pub(crate) remote_output_device: Option<String>,
     pub(crate) remote_output_id: Option<String>,
     pub(crate) outputs_open: bool,
     pub(crate) outputs: Vec<crate::server_api::RemoteOutput>,
@@ -236,10 +236,10 @@ impl App {
             last_progress: None,
             remote_duration_ms: None,
             remote_paused: None,
+            remote_bridge_online: false,
             remote_elapsed_ms: None,
             remote_channels: None,
             remote_output_sample_rate: None,
-            remote_output_device: None,
             remote_output_id: None,
             outputs_open: false,
             outputs: Vec::new(),
@@ -257,6 +257,27 @@ impl App {
         self.queue_revision = self.queue_revision.wrapping_add(1);
         self.auto_preview_dirty = true;
         self.auto_base_path = None;
+    }
+
+    fn ensure_output_selected(&mut self) -> bool {
+        let Some(output_id) = self.remote_output_id.clone() else {
+            self.status = "Select an output first (press o)".into();
+            return false;
+        };
+        if self.remote_bridge_online {
+            return true;
+        }
+        match server_api::outputs_select(&self.server, &output_id) {
+            Ok(_) => {
+                self.remote_bridge_online = true;
+                self.status = "Reconnected output".into();
+                true
+            }
+            Err(e) => {
+                self.status = format!("Output offline: {e:#}");
+                false
+            }
+        }
     }
 
     pub(crate) fn refresh_auto_preview_if_needed(&mut self) {
@@ -509,7 +530,7 @@ impl App {
         match server_api::outputs(&self.server) {
             Ok(resp) => {
                 self.outputs = resp.outputs;
-                self.outputs_active_id = Some(resp.active_id);
+                self.outputs_active_id = resp.active_id;
                 self.outputs_state.select(Some(0));
                 if let Some(active) = self.outputs_active_id.as_ref() {
                     if let Some(idx) = self.outputs.iter().position(|o| &o.id == active) {
@@ -544,7 +565,7 @@ impl App {
         }
         self.outputs_active_id = Some(output.id.clone());
         self.remote_output_id = Some(output.id.clone());
-        self.remote_output_device = Some(output.name.clone());
+        self.remote_bridge_online = true;
         self.outputs_open = false;
         self.status = format!("Output set: {}", output.name);
     }
@@ -600,6 +621,9 @@ impl App {
     }
 
     fn play_track_at(&mut self, index: usize, _cmd_tx: &Sender<Command>) {
+        if !self.ensure_output_selected() {
+            return;
+        }
         let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
             return;
         };
@@ -655,10 +679,10 @@ fn ui_loop(
                     elapsed_ms,
                     duration_ms,
                     paused,
+                    bridge_online,
                     sample_rate,
                     channels,
                     output_sample_rate,
-                    output_device,
                     title,
                     artist,
                     album,
@@ -676,13 +700,13 @@ fn ui_loop(
                         app.now_playing_meta = None;
                         app.remote_channels = None;
                         app.remote_output_sample_rate = None;
-                        app.remote_output_device = None;
                     }
                     if duration_ms.is_some() {
                         app.remote_duration_ms = duration_ms;
                     }
                     app.remote_elapsed_ms = elapsed_ms;
                     app.remote_paused = Some(paused);
+                    app.remote_bridge_online = bridge_online;
                     if title.is_some() || artist.is_some() || album.is_some() || format.is_some() {
                         let mut meta = app.now_playing_meta.clone().unwrap_or_default();
                         if artist.is_some() {
@@ -706,8 +730,7 @@ fn ui_loop(
                     }
                     app.remote_channels = channels;
                     app.remote_output_sample_rate = output_sample_rate;
-                    app.remote_output_device = output_device;
-                    app.remote_output_id = Some(output_id);
+                    app.remote_output_id = output_id;
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),
             }
@@ -755,8 +778,10 @@ fn ui_loop(
                         cmd_tx.send(Command::PauseToggle).ok();
                     }
                     KeyCode::Char('n') => {
-                        cmd_tx.send(Command::Next).ok();
-                        app.status = "Skipping".into();
+                        if app.ensure_output_selected() {
+                            cmd_tx.send(Command::Next).ok();
+                            app.status = "Skipping".into();
+                        }
                     }
                     KeyCode::Char('k') => {
                         app.toggle_queue_selected();

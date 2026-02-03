@@ -30,6 +30,7 @@ struct LibraryResponse {
 struct StatusResponse {
     now_playing: Option<String>,
     paused: bool,
+    bridge_online: bool,
     elapsed_ms: Option<u64>,
     duration_ms: Option<u64>,
     sample_rate: Option<u32>,
@@ -40,12 +41,12 @@ struct StatusResponse {
     artist: Option<String>,
     album: Option<String>,
     format: Option<String>,
-    output_id: String,
+    output_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OutputsResponse {
-    active_id: String,
+    active_id: Option<String>,
     outputs: Vec<OutputInfo>,
 }
 
@@ -174,15 +175,15 @@ pub(crate) struct RemoteStatus {
     pub(crate) elapsed_ms: Option<u64>,
     pub(crate) duration_ms: Option<u64>,
     pub(crate) paused: bool,
+    pub(crate) bridge_online: bool,
     pub(crate) sample_rate: Option<u32>,
     pub(crate) channels: Option<u16>,
     pub(crate) output_sample_rate: Option<u32>,
-    pub(crate) output_device: Option<String>,
     pub(crate) title: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) album: Option<String>,
     pub(crate) format: Option<String>,
-    pub(crate) output_id: String,
+    pub(crate) output_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -196,7 +197,7 @@ pub(crate) struct RemoteOutput {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteOutputs {
-    pub(crate) active_id: String,
+    pub(crate) active_id: Option<String>,
     pub(crate) outputs: Vec<RemoteOutput>,
 }
 
@@ -223,10 +224,10 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
         elapsed_ms: resp.elapsed_ms,
         duration_ms: resp.duration_ms,
         paused: resp.paused,
+        bridge_online: resp.bridge_online,
         sample_rate: resp.sample_rate,
         channels: resp.channels,
         output_sample_rate: resp.output_sample_rate,
-        output_device: resp.output_device,
         title: resp.title,
         artist: resp.artist,
         album: resp.album,

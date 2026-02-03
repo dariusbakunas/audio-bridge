@@ -10,7 +10,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
 use crate::bridge::{http_list_devices, http_set_device};
-use crate::bridge_manager::{parse_output_id, spawn_pending_output_watcher};
+use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
 use crate::library::scan_library;
@@ -37,13 +37,14 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let mut device_to_set: Option<String> = None;
     let (active_bridge_id, active_output_id) =
         resolve_active_output(&cfg, &bridges, &mut device_to_set)?;
-    let active_http_addr = bridges
-        .iter()
-        .find(|b| b.id == active_bridge_id)
-        .map(|b| b.http_addr);
+    let active_http_addr = active_bridge_id.as_ref().and_then(|bridge_id| {
+        bridges
+            .iter()
+            .find(|b| b.id == *bridge_id)
+            .map(|b| b.http_addr)
+    });
 
     let (cmd_tx, _cmd_rx) = unbounded();
-    setup_shutdown(cmd_tx.clone());
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
     let bridge_online = Arc::new(AtomicBool::new(false));
@@ -66,10 +67,9 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         bridge_online.clone(),
         discovered_bridges.clone(),
     ));
+    setup_shutdown(state.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
-    spawn_pending_output_watcher(state.clone());
-
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
@@ -149,20 +149,20 @@ fn resolve_active_output(
     cfg: &config::ServerConfig,
     bridges: &[crate::config::BridgeConfigResolved],
     device_to_set: &mut Option<String>,
-) -> Result<(String, String)> {
+) -> Result<(Option<String>, Option<String>)> {
     let result = match cfg.active_output.as_ref() {
         Some(id) => match parse_output_id(id) {
             Ok((bridge_id, device_name)) => {
                 let active_id = format!("bridge:{}:{}", bridge_id, device_name);
                 *device_to_set = Some(device_name);
-                (bridge_id, active_id)
+                (Some(bridge_id), Some(active_id))
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
         },
         None => {
             if bridges.is_empty() {
-                tracing::warn!("no configured bridges; starting with pending output");
-                ("pending".to_string(), "bridge:pending:pending".to_string())
+                tracing::warn!("no configured bridges; starting without active output");
+                (None, None)
             } else {
                 let mut first_bridge: Option<crate::config::BridgeConfigResolved> = None;
                 let mut found_active: Option<(String, String)> = None;
@@ -204,17 +204,15 @@ fn resolve_active_output(
                 }
 
                 if let Some(found) = found_active {
-                    found
+                    (Some(found.0), Some(found.1))
                 } else {
                     let bridge = first_bridge.unwrap();
-                    let pending = format!("bridge:{}:pending", bridge.id);
                     tracing::warn!(
                         bridge_id = %bridge.id,
                         bridge_name = %bridge.name,
-                        output_id = %pending,
-                        "active_output not set; no bridges available, starting with pending output"
+                        "active_output not set; no outputs available, starting without active output"
                     );
-                    (bridge.id.clone(), pending)
+                    (None, None)
                 }
             }
         }
@@ -222,9 +220,11 @@ fn resolve_active_output(
     Ok(result)
 }
 
-fn setup_shutdown(shutdown_tx: crossbeam_channel::Sender<crate::bridge::BridgeCommand>) {
+fn setup_shutdown(player: std::sync::Arc<std::sync::Mutex<crate::bridge::BridgePlayer>>) {
     let _ = ctrlc::set_handler(move || {
-        let _ = shutdown_tx.send(crate::bridge::BridgeCommand::Quit);
+        if let Ok(player) = player.lock() {
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+        }
         if let Some(system) = actix_web::rt::System::try_current() {
             system.stop();
         } else {
