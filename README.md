@@ -27,9 +27,9 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 ```text
 . 
 ├─ crates/ 
-│ ├─ bridge/ # receiver (bridge)
-│ ├─ hub-cli/ # sender TUI app 
-│ ├─ audio-hub-server/ # HTTP control server 
+│ ├─ bridge/ # audio receiver (bridge)
+│ ├─ hub-cli/ # HUB client, TUI app 
+│ ├─ audio-hub-server/ # HTTP control server, audio library scanner, audio source
 │ └─ audio-bridge-proto/ # shared protocol types/utilities 
 ├─ Cross.toml 
 ├─ dist-workspace.toml
