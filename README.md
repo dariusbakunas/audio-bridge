@@ -1,5 +1,7 @@
 # audio-hub
 
+[![CI](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml)
+
 Stream audio files from your laptop/desktop to a small network “receiver” (perfect for a Raspberry Pi connected to a USB DAC).
 
 This repo is a Rust workspace with two main apps:
