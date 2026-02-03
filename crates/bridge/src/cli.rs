@@ -8,8 +8,17 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("GIT_SHA"),
+    ", ",
+    env!("BUILD_DATE"),
+    ")"
+);
+
 #[derive(Parser, Debug)]
-#[command(name = "bridge")]
+#[command(name = "bridge", version = VERSION)]
 pub struct Args {
     #[command(subcommand)]
     pub cmd: Command,

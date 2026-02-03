@@ -14,8 +14,17 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 use std::path::PathBuf;
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("GIT_SHA"),
+    ", ",
+    env!("BUILD_DATE"),
+    ")"
+);
+
 #[derive(Parser, Debug)]
-#[command(name = "audio-hub-server")]
+#[command(name = "audio-hub-server", version = VERSION)]
 pub(crate) struct Args {
     /// HTTP bind address, e.g. 0.0.0.0:8080
     #[arg(long)]

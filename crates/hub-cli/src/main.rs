@@ -17,8 +17,17 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("GIT_SHA"),
+    ", ",
+    env!("BUILD_DATE"),
+    ")"
+);
+
 #[derive(Parser, Debug)]
-#[command(name = "hub-cli")]
+#[command(name = "hub-cli", version = VERSION)]
 struct Args {
     /// Base URL of the audio server, e.g. http://192.168.1.10:8080
     #[arg(long)]

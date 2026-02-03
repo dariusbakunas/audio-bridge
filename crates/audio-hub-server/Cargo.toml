@@ -2,6 +2,7 @@
 name = "audio-hub-server"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 repository = "https://github.com/dariusbakunas/audio-bridge.git"
 
 [dependencies]
@@ -21,3 +22,6 @@ utoipa-swagger-ui = { version = "7.1.0", features = ["actix-web"] }
 toml = "0.8.23"
 ureq = { version = "2.10.1", features = ["json"] }
 mdns-sd = "0.13.0"
+
+[build-dependencies]
+time = { version = "0.3", features = ["formatting"] }
