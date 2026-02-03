@@ -80,13 +80,13 @@ Use a TOML config to define the media path, outputs, and default output:
 ```toml
 bind = "0.0.0.0:8080"
 media_dir = "/srv/music"
-active_output = "bridge:default"
+active_output = "bridge:living-room:Built-in Output"
 
-[[outputs]]
-id = "bridge:default"
-kind = "bridge"
-name = "Bridge (default)"
-bridge_addr = "192.168.1.50:5555"
+[[bridges]]
+id = "living-room"
+name = "Living Room"
+addr = "192.168.1.50:5555"
+api_port = 5556
 ```
 
 Pass it via `--config` (you can still override the media path via `--media-dir`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
