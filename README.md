@@ -153,6 +153,17 @@ listen --bind 0.0.0.0:5555
 
 Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.
 
+### Releasing a single crate
+
+If you only want to publish one binary (e.g. `hub-cli`), bump that crate’s version and tag using the `package/version` format:
+
+```bash
+git tag hub-cli/0.1.2
+git push origin hub-cli/0.1.2
+```
+
+This triggers a release for just that package (the tag name must match the Cargo package name).
+
 ## Why not AirPlay?
 
 This is a direct, local-network stream to a dedicated receiver. Audio is decoded on the receiver and resampled to the output device’s native rate, avoiding protocol-level caps and keeping the path simple and controllable.
