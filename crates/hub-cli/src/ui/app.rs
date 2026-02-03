@@ -41,7 +41,7 @@ struct ScanResp {
 
 
 /// Launch the TUI, spawn the worker thread, and drive the event loop.
-pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
+pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) -> Result<()> {
     let entries = list_entries_with_parent(&server, &dir)?;
     let (cmd_tx, cmd_rx) = unbounded::<Command>();
     let (evt_tx, evt_rx) = unbounded::<Event>();
@@ -135,6 +135,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf) -> Result<()> {
         entries,
         scan_tx,
         scan_done_rx,
+        log_rx,
     );
 
     let mut term = init_terminal()?;
@@ -181,6 +182,12 @@ pub(crate) struct App {
     pub(crate) outputs_active_id: Option<String>,
     pub(crate) outputs_state: ListState,
     pub(crate) outputs_error: Option<String>,
+
+    pub(crate) logs_open: bool,
+    pub(crate) logs: VecDeque<String>,
+    pub(crate) logs_scroll: usize,
+    last_status_snapshot: String,
+    log_rx: Receiver<String>,
 }
 
 impl App {
@@ -190,6 +197,7 @@ impl App {
         entries: Vec<LibraryItem>,
         scan_tx: Sender<ScanReq>,
         scan_rx: Receiver<ScanResp>,
+        log_rx: Receiver<String>,
     ) -> Self {
         let mut list_state = ListState::default();
         if !entries.is_empty() {
@@ -246,6 +254,11 @@ impl App {
             outputs_active_id: None,
             outputs_state: ListState::default(),
             outputs_error: None,
+            logs_open: false,
+            logs: VecDeque::new(),
+            logs_scroll: 0,
+            last_status_snapshot: String::new(),
+            log_rx,
         }
     }
 
@@ -552,6 +565,45 @@ impl App {
         self.outputs_open = false;
     }
 
+    fn toggle_logs(&mut self) {
+        self.logs_open = !self.logs_open;
+        if !self.logs_open {
+            self.logs_scroll = 0;
+        }
+    }
+
+    fn scroll_logs_up(&mut self) {
+        let max = self.logs.len().saturating_sub(1);
+        self.logs_scroll = (self.logs_scroll + 1).min(max);
+    }
+
+    fn scroll_logs_down(&mut self) {
+        self.logs_scroll = self.logs_scroll.saturating_sub(1);
+    }
+
+    fn push_log_line(&mut self, line: String) {
+        const LOG_CAP: usize = 500;
+        if self.logs.len() >= LOG_CAP {
+            self.logs.pop_front();
+        }
+        self.logs.push_back(line);
+    }
+
+    fn note_status_change(&mut self) {
+        if self.last_status_snapshot == self.status {
+            return;
+        }
+        let line = self.status.clone();
+        self.last_status_snapshot = self.status.clone();
+        self.push_log_line(line);
+    }
+
+    fn drain_logs(&mut self) {
+        while let Ok(line) = self.log_rx.try_recv() {
+            self.push_log_line(line);
+        }
+    }
+
     fn select_output(&mut self) {
         let Some(idx) = self.outputs_state.selected() else {
             return;
@@ -738,11 +790,25 @@ fn ui_loop(
 
         app.drain_scan_results();
 
+        app.drain_logs();
         terminal.draw(|f| render::draw(f, app))?;
 
         let timeout = tick.saturating_sub(last_tick.elapsed());
         if event::poll(timeout).context("poll terminal events")? {
             if let CEvent::Key(k) = event::read().context("read terminal event")? {
+                if app.logs_open {
+                    match k.code {
+                        KeyCode::Char('q') => {
+                            cmd_tx.send(Command::Quit).ok();
+                            return Ok(());
+                        }
+                        KeyCode::Esc | KeyCode::Char('l') => app.toggle_logs(),
+                        KeyCode::Up => app.scroll_logs_up(),
+                        KeyCode::Down => app.scroll_logs_down(),
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.outputs_open {
                     match k.code {
                         KeyCode::Esc => app.close_outputs(),
@@ -795,10 +861,15 @@ fn ui_loop(
                     KeyCode::Char('o') => {
                         app.open_outputs();
                     }
+                    KeyCode::Char('l') => {
+                        app.toggle_logs();
+                    }
                     _ => {}
                 }
             }
         }
+
+        app.note_status_change();
 
         if last_tick.elapsed() >= tick {
             last_tick = Instant::now();
@@ -860,12 +931,14 @@ mod tests {
     fn app_with_entries(entries: Vec<LibraryItem>) -> App {
         let (scan_tx, _scan_req_rx) = unbounded::<ScanReq>();
         let (_scan_done_tx, scan_rx) = unbounded::<ScanResp>();
+        let (_log_tx, log_rx) = unbounded::<String>();
         App::new(
             "http://127.0.0.1:8080".to_string(),
             PathBuf::from("/music"),
             entries,
             scan_tx,
             scan_rx,
+            log_rx,
         )
     }
 

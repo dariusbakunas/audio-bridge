@@ -9,6 +9,7 @@
 //! - k: toggle queue for selected track
 //! - K: queue all tracks in current folder
 //! - r: rescan directory
+//! - l: logs
 //! - q: quit
 
 mod app;

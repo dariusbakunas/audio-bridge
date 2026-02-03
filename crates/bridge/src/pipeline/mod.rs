@@ -11,6 +11,7 @@ use anyhow::Result;
 use cpal::traits::StreamTrait;
 
 use crate::{playback, queue, resample};
+use crate::config::PlaybackConfig;
 use progress::{ProgressReporter, start_progress_reporter};
 
 /// Optional knobs for a single playback session (network sessions use these).
@@ -79,7 +80,7 @@ pub(crate) fn play_decoded_source(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,
     stream_config: &cpal::StreamConfig,
-    args: &crate::cli::Args,
+    playback: &PlaybackConfig,
     src_spec: symphonia::core::audio::SignalSpec,
     srcq: Arc<queue::SharedAudio>,
     opts: PlaybackSessionOptions,
@@ -97,10 +98,10 @@ pub(crate) fn play_decoded_source(
             src_spec,
             dst_rate,
             resample::ResampleConfig {
-                chunk_frames: args.chunk_frames,
-                buffer_seconds: args.buffer_seconds,
-            },
-        )?;
+            chunk_frames: playback.chunk_frames,
+            buffer_seconds: playback.buffer_seconds,
+        },
+    )?;
         tracing::info!(rate_hz = dst_rate, "resampling");
         out
     };
@@ -111,7 +112,7 @@ pub(crate) fn play_decoded_source(
         config.sample_format(),
         &dstq,
         playback::PlaybackConfig {
-            refill_max_frames: args.refill_max_frames,
+            refill_max_frames: playback.refill_max_frames,
             paused: state.paused.clone(),
             played_frames: state.played_frames.clone(),
             underrun_frames: state.underrun_frames.clone(),

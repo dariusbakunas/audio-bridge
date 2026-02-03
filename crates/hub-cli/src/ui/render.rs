@@ -283,7 +283,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | o outputs | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | o outputs | l logs | r rescan | q quit",
         )),
         footer_chunks[4],
     );
@@ -323,6 +323,28 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
         f.render_stateful_widget(list, area, &mut app.outputs_state);
+    }
+
+    if app.logs_open {
+        let area = centered_rect(90, 80, f.area());
+        f.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("Logs (Esc to close, ↑/↓ scroll)");
+        let inner = block.inner(area);
+        let height = inner.height as usize;
+        let total = app.logs.len();
+        let end = total.saturating_sub(app.logs_scroll);
+        let start = end.saturating_sub(height);
+        let mut items = Vec::new();
+        for line in app.logs.iter().skip(start).take(end.saturating_sub(start)) {
+            items.push(ListItem::new(line.clone()));
+        }
+        if items.is_empty() {
+            items.push(ListItem::new("<no logs>"));
+        }
+        let list = List::new(items).block(block);
+        f.render_widget(list, area);
     }
 }
 
