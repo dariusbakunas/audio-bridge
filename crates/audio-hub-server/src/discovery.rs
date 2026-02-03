@@ -56,7 +56,10 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                     let addr = info
                         .get_addresses()
                         .iter()
-                        .find_map(|ip| if let std::net::IpAddr::V4(v4) = ip { Some(*v4) } else { None });
+                        .find_map(|ip| match ip {
+                            mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
+                            _ => None,
+                        });
                     let Some(ip) = addr else {
                         tracing::warn!(fullname = %info.get_fullname(), "mdns: resolved without IPv4");
                         continue;
@@ -135,6 +138,10 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
 
 fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
     let url = format!("http://{http_addr}/health");
-    let resp = ureq::get(&url).timeout(std::time::Duration::from_secs(2)).call();
-    resp.map(|r| r.status() / 100 == 2).unwrap_or(false)
+    let resp = ureq::get(&url)
+        .config()
+        .timeout_per_call(Some(std::time::Duration::from_secs(2)))
+        .build()
+        .call();
+    resp.map(|r| r.status().is_success()).unwrap_or(false)
 }

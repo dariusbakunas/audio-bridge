@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::library::{LibraryItem, Track};
 
@@ -118,11 +118,12 @@ pub(crate) fn list_entries(server: &str, dir: &Path) -> Result<Vec<LibraryItem>>
         server.trim_end_matches('/'),
         urlencoding::encode(&dir_str)
     );
-    let resp: LibraryResponse = ureq::get(&url)
-        .call()
-        .context("request /library")?
-        .into_json()
-        .context("decode /library response")?;
+    let resp: LibraryResponse = read_json(
+        ureq::get(&url)
+            .call()
+            .context("request /library")?,
+        "library",
+    )?;
 
     let mut out = Vec::with_capacity(resp.entries.len());
     for entry in resp.entries {
@@ -148,8 +149,10 @@ pub(crate) fn list_entries(server: &str, dir: &Path) -> Result<Vec<LibraryItem>>
 
 pub(crate) fn rescan(server: &str) -> Result<()> {
     let url = format!("{}/library/rescan", server.trim_end_matches('/'));
-    let resp = ureq::post(&url).call().context("request /library/rescan")?;
-    if resp.status() / 100 != 2 {
+    let resp = ureq::post(&url)
+        .send_empty()
+        .context("request /library/rescan")?;
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("rescan failed with {}", resp.status()));
     }
     Ok(())
@@ -157,8 +160,10 @@ pub(crate) fn rescan(server: &str) -> Result<()> {
 
 pub(crate) fn pause_toggle(server: &str) -> Result<()> {
     let url = format!("{}/pause", server.trim_end_matches('/'));
-    let resp = ureq::post(&url).call().context("request /pause")?;
-    if resp.status() / 100 != 2 {
+    let resp = ureq::post(&url)
+        .send_empty()
+        .context("request /pause")?;
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("pause failed with {}", resp.status()));
     }
     Ok(())
@@ -207,11 +212,12 @@ pub(crate) struct RemoteQueue {
 
 pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
     let url = format!("{}/status", server.trim_end_matches('/'));
-    let resp: StatusResponse = ureq::get(&url)
-        .call()
-        .context("request /status")?
-        .into_json()
-        .context("decode /status response")?;
+    let resp: StatusResponse = read_json(
+        ureq::get(&url)
+            .call()
+            .context("request /status")?,
+        "status",
+    )?;
     Ok(RemoteStatus {
         now_playing: resp.now_playing,
         elapsed_ms: resp.elapsed_ms,
@@ -231,11 +237,12 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
 
 pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
     let url = format!("{}/outputs", server.trim_end_matches('/'));
-    let resp: OutputsResponse = ureq::get(&url)
-        .call()
-        .context("request /outputs")?
-        .into_json()
-        .context("decode /outputs response")?;
+    let resp: OutputsResponse = read_json(
+        ureq::get(&url)
+            .call()
+            .context("request /outputs")?,
+        "outputs",
+    )?;
     let outputs = resp
         .outputs
         .into_iter()
@@ -259,7 +266,7 @@ pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
     let resp = ureq::post(&url)
         .send_json(body)
         .context("request /outputs/select")?;
-    if resp.status() / 100 != 2 {
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("outputs select failed with {}", resp.status()));
     }
     Ok(())
@@ -267,11 +274,12 @@ pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
 
 pub(crate) fn queue_list(server: &str) -> Result<RemoteQueue> {
     let url = format!("{}/queue", server.trim_end_matches('/'));
-    let resp: QueueResponse = ureq::get(&url)
-        .call()
-        .context("request /queue")?
-        .into_json()
-        .context("decode /queue response")?;
+    let resp: QueueResponse = read_json(
+        ureq::get(&url)
+            .call()
+            .context("request /queue")?,
+        "queue",
+    )?;
     let items = resp
         .items
         .into_iter()
@@ -316,7 +324,7 @@ pub(crate) fn queue_add(server: &str, paths: &[PathBuf]) -> Result<()> {
     let resp = ureq::post(&url)
         .send_json(body)
         .context("request /queue")?;
-    if resp.status() / 100 != 2 {
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("queue add failed with {}", resp.status()));
     }
     Ok(())
@@ -330,7 +338,7 @@ pub(crate) fn queue_remove(server: &str, path: &Path) -> Result<()> {
     let resp = ureq::post(&url)
         .send_json(body)
         .context("request /queue/remove")?;
-    if resp.status() / 100 != 2 {
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("queue remove failed with {}", resp.status()));
     }
     Ok(())
@@ -339,9 +347,9 @@ pub(crate) fn queue_remove(server: &str, path: &Path) -> Result<()> {
 pub(crate) fn queue_next(server: &str) -> Result<bool> {
     let url = format!("{}/queue/next", server.trim_end_matches('/'));
     let resp = ureq::post(&url)
-        .call()
+        .send_empty()
         .context("request /queue/next")?;
-    Ok(resp.status() / 100 == 2)
+    Ok(resp.status().is_success())
 }
 
 pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
@@ -352,8 +360,19 @@ pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
             queue_mode: Some(QueueMode::Replace),
         })
         .context("request /play (replace)")?;
-    if resp.status() / 100 != 2 {
+    if !resp.status().is_success() {
         return Err(anyhow::anyhow!("play replace failed with {}", resp.status()));
     }
     Ok(())
+}
+
+fn read_json<T: DeserializeOwned>(
+    mut resp: ureq::http::Response<ureq::Body>,
+    label: &str,
+) -> Result<T> {
+    let body = resp
+        .body_mut()
+        .read_to_string()
+        .with_context(|| format!("read /{label} response body"))?;
+    serde_json::from_str(&body).with_context(|| format!("decode /{label} response"))
 }

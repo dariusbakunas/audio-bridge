@@ -51,11 +51,15 @@ pub struct HttpStatusResponse {
 
 pub fn http_list_devices(addr: SocketAddr) -> Result<Vec<HttpDeviceInfo>> {
     let url = format!("http://{addr}/devices");
-    let resp: HttpDevicesResponse = ureq::get(&url)
-        .timeout(Duration::from_secs(2))
+    let mut resp = ureq::get(&url)
+        .config()
+        .timeout_per_call(Some(Duration::from_secs(2)))
+        .build()
         .call()
-        .map_err(|e| anyhow::anyhow!("http devices request failed: {e}"))?
-        .into_json()
+        .map_err(|e| anyhow::anyhow!("http devices request failed: {e}"))?;
+    let resp: HttpDevicesResponse = resp
+        .body_mut()
+        .read_json()
         .map_err(|e| anyhow::anyhow!("http devices decode failed: {e}"))?;
     Ok(resp.devices)
 }
@@ -64,7 +68,9 @@ pub fn http_set_device(addr: SocketAddr, name: &str) -> Result<()> {
     let url = format!("http://{addr}/devices/select");
     let payload = serde_json::json!({ "name": name });
     ureq::post(&url)
-        .timeout(Duration::from_secs(2))
+        .config()
+        .timeout_per_call(Some(Duration::from_secs(2)))
+        .build()
         .send_json(payload)
         .map_err(|e| anyhow::anyhow!("http set device failed: {e}"))?;
     Ok(())
@@ -72,11 +78,15 @@ pub fn http_set_device(addr: SocketAddr, name: &str) -> Result<()> {
 
 pub fn http_status(addr: SocketAddr) -> Result<HttpStatusResponse> {
     let url = format!("http://{addr}/status");
-    let resp: HttpStatusResponse = ureq::get(&url)
-        .timeout(Duration::from_secs(2))
+    let mut resp = ureq::get(&url)
+        .config()
+        .timeout_per_call(Some(Duration::from_secs(2)))
+        .build()
         .call()
-        .map_err(|e| anyhow::anyhow!("http status request failed: {e}"))?
-        .into_json()
+        .map_err(|e| anyhow::anyhow!("http status request failed: {e}"))?;
+    let resp: HttpStatusResponse = resp
+        .body_mut()
+        .read_json()
         .map_err(|e| anyhow::anyhow!("http status decode failed: {e}"))?;
     Ok(resp)
 }
