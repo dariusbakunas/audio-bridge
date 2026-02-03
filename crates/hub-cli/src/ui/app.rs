@@ -188,6 +188,7 @@ pub(crate) struct App {
     pub(crate) logs_scroll: usize,
     last_status_snapshot: String,
     log_rx: Receiver<String>,
+    pub(crate) list_view_height: usize,
 }
 
 impl App {
@@ -259,6 +260,7 @@ impl App {
             logs_scroll: 0,
             last_status_snapshot: String::new(),
             log_rx,
+            list_view_height: 0,
         }
     }
 
@@ -493,6 +495,45 @@ impl App {
         }
         let i = self.selected_index().unwrap_or(0);
         let ni = i.saturating_sub(1);
+        self.list_state.select(Some(ni));
+    }
+
+    fn select_first(&mut self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        self.list_state.select(Some(0));
+    }
+
+    fn select_last(&mut self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let last = self.entries.len() - 1;
+        self.list_state.select(Some(last));
+    }
+
+    fn page_step(&self) -> usize {
+        self.list_view_height.max(1)
+    }
+
+    fn page_down(&mut self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let step = self.page_step();
+        let i = self.selected_index().unwrap_or(0);
+        let ni = (i + step).min(self.entries.len() - 1);
+        self.list_state.select(Some(ni));
+    }
+
+    fn page_up(&mut self) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let step = self.page_step();
+        let i = self.selected_index().unwrap_or(0);
+        let ni = i.saturating_sub(step);
         self.list_state.select(Some(ni));
     }
 
@@ -826,6 +867,8 @@ fn ui_loop(
                     }
                     KeyCode::Up => app.select_prev(),
                     KeyCode::Down => app.select_next(),
+                    KeyCode::PageUp => app.page_up(),
+                    KeyCode::PageDown => app.page_down(),
                     KeyCode::Left | KeyCode::Backspace => {
                         app.go_parent()?;
                     }
