@@ -2,7 +2,11 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use actix_web::{App, HttpServer, web, middleware::Logger};
+use actix_web::{App, HttpServer, web};
+use actix_web::dev::{Service, ServiceRequest, ServiceResponse};
+use actix_web::Error;
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use std::task::{Context, Poll};
 use anyhow::Result;
 use crossbeam_channel::unbounded;
 use utoipa::OpenApi;
@@ -76,7 +80,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .wrap(Logger::default().exclude("/queue").exclude("/stream").exclude("/outputs"))
+            .wrap(FilteredLogger)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-doc/openapi.json", openapi::ApiDoc::openapi()),
@@ -103,6 +107,82 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     .await?;
 
     Ok(())
+}
+
+fn should_log_path(path: &str) -> bool {
+    if path == "/queue" || path == "/stream" {
+        return false;
+    }
+    if path.starts_with("/outputs/") && path != "/outputs/select" {
+        return false;
+    }
+    true
+}
+
+struct FilteredLogger;
+
+impl<S, B> actix_web::dev::Transform<S, ServiceRequest> for FilteredLogger
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = FilteredLoggerMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(FilteredLoggerMiddleware { service })
+    }
+}
+
+struct FilteredLoggerMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for FilteredLoggerMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let path = req.path().to_string();
+        let should_log = should_log_path(&path);
+        let method = req.method().clone();
+        let peer = req.connection_info().realip_remote_addr().unwrap_or("-").to_string();
+        let ua = req
+            .headers()
+            .get("User-Agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("-")
+            .to_string();
+        let start = std::time::Instant::now();
+        let fut = self.service.call(req);
+        Box::pin(async move {
+            let res = fut.await?;
+            if should_log {
+                tracing::info!(
+                    method = %method,
+                    path = %path,
+                    status = %res.status().as_u16(),
+                    user_agent = %ua,
+                    peer = %peer,
+                    elapsed_ms = %start.elapsed().as_millis(),
+                    "http request"
+                );
+            }
+            Ok(res)
+        })
+    }
 }
 
 fn load_config(path: Option<&PathBuf>) -> Result<config::ServerConfig> {

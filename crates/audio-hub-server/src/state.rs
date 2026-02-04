@@ -18,6 +18,13 @@ pub struct PlayerStatus {
     pub sample_rate: Option<u32>,
     pub channels: Option<u16>,
     pub output_device: Option<String>,
+    pub source_codec: Option<String>,
+    pub source_bit_depth: Option<u16>,
+    pub container: Option<String>,
+    pub output_sample_format: Option<String>,
+    pub resampling: Option<bool>,
+    pub resample_from_hz: Option<u32>,
+    pub resample_to_hz: Option<u32>,
     pub auto_advance_in_flight: bool,
 }
 

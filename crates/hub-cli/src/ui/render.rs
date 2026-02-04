@@ -24,14 +24,35 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     let total = format_duration_ms(total_ms);
                     let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms));
                     let pct = (elapsed_ms as f64 / total_ms as f64 * 100.0).clamp(0.0, 100.0);
-                    format!(
+                    let mut base = format!(
                         "remote: {elapsed} / {total} (left {remaining}, {pct:.1}%) [{state}]"
-                    )
+                    );
+                    let extra = signal_path_line(app);
+                    if !extra.is_empty() {
+                        base.push_str(" | ");
+                        base.push_str(&extra);
+                    }
+                    base
                 }
-                _ => format!("remote: {:.1}s [{state}]", elapsed_ms as f64 / 1000.0),
+                _ => {
+                    let mut base = format!("remote: {:.1}s [{state}]", elapsed_ms as f64 / 1000.0);
+                    let extra = signal_path_line(app);
+                    if !extra.is_empty() {
+                        base.push_str(" | ");
+                        base.push_str(&extra);
+                    }
+                    base
+                }
             }
         }
-        _ => "remote: -".to_string(),
+        _ => {
+            let extra = signal_path_line(app);
+            if extra.is_empty() {
+                "remote: -".to_string()
+            } else {
+                format!("remote: - | {extra}")
+            }
+        }
     };
 
     let remote_gauge = match (app.remote_elapsed_ms, app.remote_duration_ms, app.remote_paused) {
@@ -232,14 +253,6 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
 
     f.render_widget(queue_list, mid_chunks[1]);
 
-    let progress_line = match app.last_progress {
-        Some((sent, Some(total))) if total > 0 => {
-            format!("sent: {} / {} bytes ({:.1}%)", sent, total, (sent as f64 * 100.0) / total as f64)
-        }
-        Some((sent, None)) => format!("sent: {} bytes", sent),
-        _ => "sent: -".to_string(),
-    };
-
     let footer_block = Block::default().borders(Borders::ALL).title("Status");
     let footer_inner = footer_block.inner(chunks[2]);
     f.render_widget(footer_block, chunks[2]);
@@ -251,7 +264,6 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(1),
         ])
         .split(footer_inner);
 
@@ -259,13 +271,12 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         Paragraph::new(Line::from(format!("status: {}", app.status))),
         footer_chunks[0],
     );
-    f.render_widget(Paragraph::new(Line::from(progress_line)), footer_chunks[1]);
-    f.render_widget(Paragraph::new(Line::from(remote_status)), footer_chunks[2]);
+    f.render_widget(Paragraph::new(Line::from(remote_status)), footer_chunks[1]);
     if let Some((ratio, label)) = remote_gauge {
         let gauge_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(10), Constraint::Length(40)])
-            .split(footer_chunks[3]);
+            .split(footer_chunks[2]);
 
         let gauge = Gauge::default()
             .ratio(ratio)
@@ -279,14 +290,14 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     } else {
         f.render_widget(
             Paragraph::new(Line::from("remote progress: -")),
-            footer_chunks[3],
+            footer_chunks[2],
         );
     }
     f.render_widget(
         Paragraph::new(Line::from(
             "keys: ↑/↓ select | Enter play/enter | Space pause | n next | ←/→ seek | o outputs | l logs | h help | q quit",
         )),
-        footer_chunks[4],
+        footer_chunks[3],
     );
 
     if app.help_open {
@@ -381,6 +392,44 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         let list = List::new(items).block(block);
         f.render_widget(list, area);
     }
+}
+
+fn signal_path_line(app: &App) -> String {
+    let mut parts = Vec::new();
+    if let Some(codec) = app.remote_source_codec.as_deref() {
+        let mut src = codec.to_string();
+        if let Some(bit) = app.remote_source_bit_depth {
+            src.push(' ');
+            src.push_str(&format!("{bit}b"));
+        }
+        if let Some(container) = app.remote_container.as_deref() {
+            src.push(' ');
+            src.push_str(container);
+        }
+        parts.push(format!("src {src}"));
+    }
+    if let Some(kbps) = app.remote_bitrate_kbps {
+        parts.push(format!("br {kbps} kbps"));
+    }
+    if let Some(out_sr) = app.remote_output_sample_rate {
+        let fmt = app
+            .remote_output_sample_format
+            .as_deref()
+            .unwrap_or("-");
+        parts.push(format!("out {out_sr}Hz {fmt}"));
+    }
+    if let Some(resampling) = app.remote_resampling {
+        if resampling {
+            if let (Some(from), Some(to)) = (app.remote_resample_from_hz, app.remote_resample_to_hz) {
+                parts.push(format!("rs {from}->{to}"));
+            } else {
+                parts.push("rs yes".to_string());
+            }
+        } else {
+            parts.push("rs no".to_string());
+        }
+    }
+    parts.join(" | ")
 }
 
 fn truncate_label(label: &str, max: usize) -> String {

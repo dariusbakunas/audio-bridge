@@ -156,6 +156,13 @@ pub fn spawn_bridge_worker(
                             s.duration_ms = None;
                             s.sample_rate = None;
                             s.channels = None;
+                            s.source_codec = None;
+                            s.source_bit_depth = None;
+                            s.container = None;
+                            s.output_sample_format = None;
+                            s.resampling = None;
+                            s.resample_from_hz = None;
+                            s.resample_to_hz = None;
                             s.auto_advance_in_flight = false;
                         }
                     }
@@ -186,6 +193,13 @@ pub fn spawn_bridge_worker(
                             s.elapsed_ms = Some(0);
                             s.sample_rate = None;
                             s.channels = None;
+                            s.source_codec = None;
+                            s.source_bit_depth = None;
+                            s.container = None;
+                            s.output_sample_format = None;
+                            s.resampling = None;
+                            s.resample_from_hz = None;
+                            s.resample_to_hz = None;
                             s.auto_advance_in_flight = false;
                         }
                     }
@@ -199,13 +213,20 @@ pub fn spawn_bridge_worker(
 
         if let Ok(remote) = http_status(http_addr) {
             bridge_online.store(true, Ordering::Relaxed);
-            if let Ok(mut s) = status.lock() {
-                s.paused = remote.paused;
+                if let Ok(mut s) = status.lock() {
+                    s.paused = remote.paused;
                     s.elapsed_ms = remote.elapsed_ms;
                     s.duration_ms = remote.duration_ms;
                     s.sample_rate = remote.sample_rate;
                     s.channels = remote.channels;
                     s.output_device = remote.device;
+                    s.source_codec = remote.source_codec;
+                    s.source_bit_depth = remote.source_bit_depth;
+                    s.container = remote.container;
+                    s.output_sample_format = remote.output_sample_format;
+                    s.resampling = remote.resampling;
+                    s.resample_from_hz = remote.resample_from_hz;
+                    s.resample_to_hz = remote.resample_to_hz;
 
                     if !s.auto_advance_in_flight {
                         if let (Some(elapsed), Some(duration)) = (s.elapsed_ms, s.duration_ms) {
