@@ -8,6 +8,7 @@ mod models;
 mod openapi;
 mod output_controller;
 mod output_providers;
+mod queue_playback;
 mod local_player;
 mod startup;
 mod state;

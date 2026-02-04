@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 
+use crate::queue_playback::dispatch_next_from_queue;
 use crate::state::PlayerStatus;
 use audio_bridge_types::BridgeStatus;
 
@@ -117,7 +118,6 @@ pub fn spawn_bridge_worker(
         tracing::info!(bridge_id = %bridge_id, http_addr = %http_addr, "bridge worker start");
         let mut next_poll = Instant::now();
         let mut last_duration_ms: Option<u64> = None;
-        let mut last_elapsed_ms: Option<u64> = None;
 
         loop {
             let now = Instant::now();
@@ -150,10 +150,14 @@ pub fn spawn_bridge_worker(
                             s.resample_from_hz = None;
                             s.resample_to_hz = None;
                             s.auto_advance_in_flight = false;
+                            s.seek_in_flight = false;
                         }
                     }
                     BridgeCommand::Seek { ms } => {
                         let _ = http_seek(http_addr, ms);
+                        if let Ok(mut s) = status.lock() {
+                            s.seek_in_flight = true;
+                        }
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
                         let url = build_stream_url(&public_base_url, &path);
@@ -187,6 +191,7 @@ pub fn spawn_bridge_worker(
                             s.resample_from_hz = None;
                             s.resample_to_hz = None;
                             s.auto_advance_in_flight = false;
+                            s.seek_in_flight = false;
                         }
                     }
                 }
@@ -204,6 +209,7 @@ pub fn spawn_bridge_worker(
                         && remote.duration_ms.is_none()
                         && remote.elapsed_ms.is_none()
                         && !s.user_paused
+                        && !s.seek_in_flight
                         && s.now_playing.is_some();
                     s.paused = remote.paused;
                     s.elapsed_ms = remote.elapsed_ms;
@@ -219,49 +225,24 @@ pub fn spawn_bridge_worker(
                     s.resample_from_hz = remote.resample_from_hz;
                     s.resample_to_hz = remote.resample_to_hz;
                     last_duration_ms = s.duration_ms;
-                    last_elapsed_ms = s.elapsed_ms;
 
                     if ended && !s.auto_advance_in_flight {
                         drop(s);
-                        if let Some(path) = pop_next_from_queue(&queue) {
-                            let ext_hint = path
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .unwrap_or("")
-                                .to_ascii_lowercase();
-                            let _ = cmd_tx.send(BridgeCommand::Play {
-                                path,
-                                ext_hint,
-                                seek_ms: None,
-                                start_paused: false,
-                            });
-                            if let Ok(mut s2) = status.lock() {
-                                s2.auto_advance_in_flight = true;
-                            }
-                        }
+                        let _ = dispatch_next_from_queue(&queue, &status, &cmd_tx, true);
                         continue;
                     }
 
-                    if !s.auto_advance_in_flight {
+                    if s.seek_in_flight {
+                        if s.elapsed_ms.is_some() && s.duration_ms.is_some() {
+                            s.seek_in_flight = false;
+                        }
+                    }
+
+                    if !s.auto_advance_in_flight && !s.seek_in_flight {
                         if let (Some(elapsed), Some(duration)) = (s.elapsed_ms, s.duration_ms) {
                             if elapsed + 50 >= duration && !s.user_paused {
                                 drop(s);
-                                if let Some(path) = pop_next_from_queue(&queue) {
-                                    let ext_hint = path
-                                        .extension()
-                                        .and_then(|ext| ext.to_str())
-                                        .unwrap_or("")
-                                        .to_ascii_lowercase();
-                                        let _ = cmd_tx.send(BridgeCommand::Play {
-                                            path,
-                                            ext_hint,
-                                            seek_ms: None,
-                                            start_paused: false,
-                                        });
-                                    if let Ok(mut s2) = status.lock() {
-                                        s2.auto_advance_in_flight = true;
-                                    }
-                                }
+                                let _ = dispatch_next_from_queue(&queue, &status, &cmd_tx, true);
                             }
                         }
                     }
@@ -340,13 +321,4 @@ fn build_stream_url(base: &str, path: &PathBuf) -> String {
     let path_str = path.to_string_lossy();
     let encoded = urlencoding::encode(&path_str);
     format!("{}/stream?path={encoded}", base.trim_end_matches('/'))
-}
-
-fn pop_next_from_queue(queue: &Arc<Mutex<crate::state::QueueState>>) -> Option<PathBuf> {
-    let mut q = queue.lock().ok()?;
-    if q.items.is_empty() {
-        None
-    } else {
-        Some(q.items.remove(0))
-    }
 }

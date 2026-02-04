@@ -73,6 +73,7 @@ impl HttpRangeSource {
 
     fn fetch_range(&self, start: u64, end: u64) -> io::Result<(Vec<u8>, Option<u64>)> {
         let range = format!("bytes={start}-{end}");
+        let start = std::time::Instant::now();
         let resp = ureq::get(&self.url)
             .config()
             .timeout_per_call(Some(self.config.timeout))
@@ -80,6 +81,7 @@ impl HttpRangeSource {
             .header("Range", &range)
             .call()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("http range request failed: {e}")))?;
+        let elapsed = start.elapsed();
 
         let status = resp.status();
         let content_range = resp
@@ -98,6 +100,20 @@ impl HttpRangeSource {
         body.into_reader()
             .read_to_end(&mut buf)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("http read failed: {e}")))?;
+        if elapsed > Duration::from_millis(250) {
+            let kbps = if elapsed.as_millis() > 0 {
+                (buf.len() as u128 * 1000 / elapsed.as_millis()) / 1024
+            } else {
+                0
+            };
+            tracing::warn!(
+                took_ms = elapsed.as_millis(),
+                bytes = buf.len(),
+                kbps = kbps as u64,
+                range = range.as_str(),
+                "http range fetch slow"
+            );
+        }
 
         let len = match status {
             ureq::http::StatusCode::PARTIAL_CONTENT => content_range

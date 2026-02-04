@@ -1,9 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
 use actix_web::http::{header, StatusCode};
 use actix_web::body::SizedStream;
-use anyhow::Result;
 use serde::Deserialize;
 use utoipa::ToSchema;
 use tokio_util::io::ReaderStream;
@@ -15,7 +14,6 @@ use crate::models::{
     PlayRequest,
     QueueMode,
     QueueAddRequest,
-    QueueItem,
     QueueRemoveRequest,
     QueueResponse,
     StatusResponse,
@@ -23,7 +21,6 @@ use crate::models::{
     OutputSelectRequest,
     ProvidersResponse,
 };
-use crate::output_controller;
 use crate::state::AppState;
 
 #[derive(Deserialize, ToSchema)]
@@ -59,9 +56,9 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
         .map(PathBuf::from)
         .unwrap_or_else(|| state.library.read().unwrap().root().to_path_buf());
 
-    let dir = match canonicalize_under_root(&state, &dir) {
+    let dir = match state.output_controller.canonicalize_under_root(&state, &dir) {
         Ok(dir) => dir,
-        Err(e) => return HttpResponse::BadRequest().body(e),
+        Err(err) => return err.into_response(),
     };
 
     let library = state.library.read().unwrap();
@@ -96,9 +93,9 @@ pub async fn stream_track(
     query: web::Query<StreamQuery>,
 ) -> impl Responder {
     let path = PathBuf::from(&query.path);
-    let path = match canonicalize_under_root(&state, &path) {
+    let path = match state.output_controller.canonicalize_under_root(&state, &path) {
         Ok(dir) => dir,
-        Err(e) => return HttpResponse::BadRequest().body(e),
+        Err(err) => return err.into_response(),
     };
 
     let mut file = match tokio::fs::File::open(&path).await {
@@ -187,92 +184,23 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
 #[post("/play")]
 pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>) -> impl Responder {
     let path = PathBuf::from(&body.path);
-    let path = match canonicalize_under_root(&state, &path) {
+    let path = match state.output_controller.canonicalize_under_root(&state, &path) {
         Ok(dir) => dir,
-        Err(e) => return HttpResponse::BadRequest().body(e),
+        Err(err) => return err.into_response(),
     };
 
     let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
-    let output_id = body
-        .output_id
-        .clone()
-        .or_else(|| state.bridge.bridges.lock().unwrap().active_output_id.clone());
-    let Some(output_id) = output_id else {
-        tracing::warn!("play rejected: no active output selected");
-        return HttpResponse::ServiceUnavailable().body("no active output selected");
-    };
-    if let Err(resp) = output_controller::ensure_active_output_connected(&state).await {
-        tracing::warn!(output_id = %output_id, "play rejected: bridge offline");
-        return resp;
-    }
-    {
-        let bridges = state.bridge.bridges.lock().unwrap();
-        if bridges.active_output_id.as_deref() != Some(output_id.as_str()) {
-            tracing::warn!(
-                output_id = %output_id,
-                active_output_id = ?bridges.active_output_id,
-                "play rejected: unsupported output id"
-            );
-            return HttpResponse::BadRequest().body("unsupported output id");
-        }
-    }
-    match mode {
-        QueueMode::Keep => {
-            let mut queue = state.bridge.queue.lock().unwrap();
-            if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-                queue.items.remove(pos);
-            }
-        }
-        QueueMode::Replace => {
-            let mut queue = state.bridge.queue.lock().unwrap();
-            queue.items.clear();
-        }
-        QueueMode::Append => {
-            let mut queue = state.bridge.queue.lock().unwrap();
-            if !queue.items.iter().any(|p| p == &path) {
-                queue.items.push(path.clone());
-            }
-        }
-    }
-
-    let ext_hint = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
     tracing::info!(path = %path.display(), "play request");
+    let output_id = match state
+        .output_controller
+        .play_request(&state, path.clone(), mode, body.output_id.as_deref())
+        .await
     {
-        let mut queue = state.bridge.queue.lock().unwrap();
-        if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-            queue.items.remove(pos);
-        }
-    }
-    if state
-        .bridge
-        .player
-        .lock()
-        .unwrap()
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::Play {
-            path: path.clone(),
-            ext_hint,
-            seek_ms: None,
-            start_paused: false,
-        })
-        .is_ok()
-    {
-        tracing::info!(output_id = %output_id, "play dispatched");
-        if let Ok(mut s) = state.bridge.status.lock() {
-            s.now_playing = Some(path);
-            s.paused = false;
-            s.user_paused = false;
-        }
-        HttpResponse::Ok().finish()
-    } else {
-        tracing::warn!(output_id = %output_id, "play failed: command channel closed");
-        HttpResponse::InternalServerError().body("player offline")
-    }
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    tracing::info!(output_id = %output_id, "play dispatched");
+    HttpResponse::Ok().finish()
 }
 
 #[utoipa::path(
@@ -286,22 +214,9 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
 #[post("/pause")]
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
-    if state
-        .bridge
-        .player
-        .lock()
-        .unwrap()
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::PauseToggle)
-        .is_ok()
-    {
-        if let Ok(mut s) = state.bridge.status.lock() {
-            s.paused = !s.paused;
-            s.user_paused = s.paused;
-        }
-        HttpResponse::Ok().finish()
-    } else {
-        HttpResponse::InternalServerError().body("player offline")
+    match state.output_controller.pause_toggle(&state).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
     }
 }
 
@@ -317,18 +232,9 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
 #[post("/seek")]
 pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl Responder {
     let ms = body.ms;
-    if state
-        .bridge
-        .player
-        .lock()
-        .unwrap()
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::Seek { ms })
-        .is_ok()
-    {
-        HttpResponse::Ok().finish()
-    } else {
-        HttpResponse::InternalServerError().body("player offline")
+    match state.output_controller.seek(&state, ms).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
     }
 }
 
@@ -341,36 +247,7 @@ pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl
 )]
 #[get("/queue")]
 pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
-    let queue = state.bridge.queue.lock().unwrap();
-    let library = state.library.read().unwrap();
-    let items = queue
-        .items
-        .iter()
-        .map(|path| match library.find_track_by_path(path) {
-            Some(crate::models::LibraryEntry::Track {
-                path,
-                file_name,
-                duration_ms,
-                sample_rate,
-                album,
-                artist,
-                format,
-                ..
-            }) => QueueItem::Track {
-                path,
-                file_name,
-                duration_ms,
-                sample_rate,
-                album,
-                artist,
-                format,
-            },
-            _ => QueueItem::Missing {
-                path: path.to_string_lossy().to_string(),
-            },
-        })
-        .collect();
-    HttpResponse::Ok().json(QueueResponse { items })
+    HttpResponse::Ok().json(state.output_controller.queue_list(&state))
 }
 
 #[utoipa::path(
@@ -383,19 +260,9 @@ pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
 )]
 #[post("/queue")]
 pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddRequest>) -> impl Responder {
-    let mut added = 0usize;
-    {
-        let mut queue = state.bridge.queue.lock().unwrap();
-        for path_str in &body.paths {
-            let path = PathBuf::from(path_str);
-            let path = match canonicalize_under_root(&state, &path) {
-                Ok(dir) => dir,
-                Err(_) => continue,
-            };
-            queue.items.push(path);
-            added += 1;
-        }
-    }
+    let added = state
+        .output_controller
+        .queue_add_paths(&state, body.paths.clone());
     HttpResponse::Ok().body(format!("added {added}"))
 }
 
@@ -410,16 +277,13 @@ pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddReque
 )]
 #[post("/queue/remove")]
 pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemoveRequest>) -> impl Responder {
-    let path = PathBuf::from(&body.path);
-    let path = match canonicalize_under_root(&state, &path) {
-        Ok(dir) => dir,
-        Err(e) => return HttpResponse::BadRequest().body(e),
-    };
-    let mut queue = state.bridge.queue.lock().unwrap();
-    if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-        queue.items.remove(pos);
+    match state
+        .output_controller
+        .queue_remove_path(&state, &body.path)
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
     }
-    HttpResponse::Ok().finish()
 }
 
 #[utoipa::path(
@@ -431,8 +295,7 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
 )]
 #[post("/queue/clear")]
 pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
-    let mut queue = state.bridge.queue.lock().unwrap();
-    queue.items.clear();
+    state.output_controller.queue_clear(&state);
     HttpResponse::Ok().finish()
 }
 
@@ -446,25 +309,11 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 )]
 #[post("/queue/next")]
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
-    if state.bridge.bridges.lock().unwrap().active_output_id.is_none() {
-        tracing::warn!("queue next rejected: no active output selected");
-        return HttpResponse::ServiceUnavailable().body("no active output selected");
+    match state.output_controller.queue_next(&state).await {
+        Ok(true) => HttpResponse::Ok().finish(),
+        Ok(false) => HttpResponse::NoContent().finish(),
+        Err(err) => err.into_response(),
     }
-    if let Err(resp) = output_controller::ensure_active_output_connected(&state).await {
-        return resp;
-    }
-    let path = {
-        let mut queue = state.bridge.queue.lock().unwrap();
-        if queue.items.is_empty() {
-            None
-        } else {
-            Some(queue.items.remove(0))
-        }
-    };
-    if let Some(path) = path {
-        return start_path(&state, path);
-    }
-    HttpResponse::NoContent().finish()
 }
 
 #[utoipa::path(
@@ -484,9 +333,9 @@ pub async fn status_for_output(
     id: web::Path<String>,
 ) -> impl Responder {
     let output_id = id.into_inner();
-    match output_controller::status_for_output(&state, &output_id).await {
+    match state.output_controller.status_for_output(&state, &output_id).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
-        Err(resp) => resp,
+        Err(err) => err.into_response(),
     }
 }
 
@@ -499,7 +348,7 @@ pub async fn status_for_output(
 )]
 #[get("/providers")]
 pub async fn providers_list(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(output_controller::list_providers(&state))
+    HttpResponse::Ok().json(state.output_controller.list_providers(&state))
 }
 
 #[utoipa::path(
@@ -516,9 +365,9 @@ pub async fn provider_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
 ) -> impl Responder {
-    match output_controller::outputs_for_provider(&state, id.as_str()) {
+    match state.output_controller.outputs_for_provider(&state, id.as_str()) {
         Ok(resp) => HttpResponse::Ok().json(resp),
-        Err(resp) => resp,
+        Err(err) => err.into_response(),
     }
 }
 
@@ -531,7 +380,7 @@ pub async fn provider_outputs_list(
 )]
 #[get("/outputs")]
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(output_controller::list_outputs(&state))
+    HttpResponse::Ok().json(state.output_controller.list_outputs(&state))
 }
 
 #[utoipa::path(
@@ -548,26 +397,10 @@ pub async fn outputs_select(
     state: web::Data<AppState>,
     body: web::Json<OutputSelectRequest>,
 ) -> impl Responder {
-    match output_controller::select_output(&state, &body.id).await {
+    match state.output_controller.select_output(&state, &body.id).await {
         Ok(()) => HttpResponse::Ok().finish(),
-        Err(resp) => resp,
+        Err(err) => err.into_response(),
     }
-}
-
-fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, String> {
-    let root = state.library.read().unwrap().root().to_path_buf();
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        root.join(path)
-    };
-    let canon = candidate
-        .canonicalize()
-        .map_err(|_| format!("path does not exist: {:?}", path))?;
-    if !canon.starts_with(&root) {
-        return Err(format!("path outside library root: {:?}", path));
-    }
-    Ok(canon)
 }
 
 fn parse_single_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
@@ -591,34 +424,4 @@ fn parse_single_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
         return None;
     }
     Some((start, end.min(total_len.saturating_sub(1))))
-}
-
-fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {
-    let ext_hint = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if state
-        .bridge
-        .player
-        .lock()
-        .unwrap()
-        .cmd_tx
-        .send(crate::bridge::BridgeCommand::Play {
-            path: path.clone(),
-            ext_hint,
-            seek_ms: None,
-            start_paused: false,
-        })
-        .is_ok()
-    {
-        if let Ok(mut s) = state.bridge.status.lock() {
-            s.now_playing = Some(path);
-            s.paused = false;
-        }
-        HttpResponse::Ok().finish()
-    } else {
-        HttpResponse::InternalServerError().body("player offline")
-    }
 }

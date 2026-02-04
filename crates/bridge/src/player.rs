@@ -117,6 +117,7 @@ fn player_thread_main(
                     title,
                     Some(ms),
                     paused,
+                    false,
                 );
             }
             PlayerCommand::Play {
@@ -142,6 +143,7 @@ fn player_thread_main(
                     title,
                     seek_ms,
                     paused,
+                    true,
                 );
             }
         }
@@ -152,6 +154,15 @@ fn cancel_session(session: &mut Option<SessionHandle>) {
     if let Some(sess) = session.take() {
         sess.cancel.store(true, Ordering::Relaxed);
         let _ = sess.join.join();
+    }
+}
+
+fn cancel_session_async(session: &mut Option<SessionHandle>) {
+    if let Some(sess) = session.take() {
+        sess.cancel.store(true, Ordering::Relaxed);
+        std::thread::spawn(move || {
+            let _ = sess.join.join();
+        });
     }
 }
 
@@ -167,8 +178,13 @@ fn start_new_session(
     title: Option<String>,
     seek_ms: Option<u64>,
     paused: bool,
+    wait_for_cancel: bool,
 ) {
-    cancel_session(session);
+    if wait_for_cancel {
+        cancel_session(session);
+    } else {
+        cancel_session_async(session);
+    }
 
     let cancel = Arc::new(AtomicBool::new(false));
     let paused_flag = Arc::new(AtomicBool::new(paused));

@@ -7,6 +7,7 @@ use crossbeam_channel::Sender;
 use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::library::LibraryIndex;
+use crate::output_controller::OutputController;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerStatus {
@@ -26,12 +27,14 @@ pub struct PlayerStatus {
     pub resample_from_hz: Option<u32>,
     pub resample_to_hz: Option<u32>,
     pub auto_advance_in_flight: bool,
+    pub seek_in_flight: bool,
 }
 
 pub struct AppState {
     pub library: RwLock<LibraryIndex>,
     pub bridge: Arc<BridgeProviderState>,
     pub local: Arc<LocalProviderState>,
+    pub output_controller: OutputController,
 }
 
 impl AppState {
@@ -44,6 +47,7 @@ impl AppState {
             library: RwLock::new(library),
             bridge,
             local,
+            output_controller: OutputController::default(),
         }
     }
 }

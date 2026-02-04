@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Thread-safe bounded queue for interleaved `f32` audio samples.
 ///
@@ -32,6 +32,7 @@ pub struct SharedAudio {
     inner: Mutex<SharedInner>,
     cv: Condvar,
     max_buffered_samples: usize,
+    low_watermark_ms: std::sync::atomic::AtomicU64,
 }
 
 struct SharedInner {
@@ -80,12 +81,25 @@ impl SharedAudio {
             }),
             cv: Condvar::new(),
             max_buffered_samples,
+            low_watermark_ms: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
     /// Number of channels for the interleaved sample stream carried by this queue.
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// Current buffered frames (best-effort snapshot).
+    pub fn len_frames(&self) -> usize {
+        let g = self.inner.lock().unwrap();
+        g.queue.len() / self.channels
+    }
+
+    /// Whether the queue has been closed by its producer.
+    pub fn is_done(&self) -> bool {
+        let g = self.inner.lock().unwrap();
+        g.done
     }
 
     /// Mark the queue as finished and wake all waiters.
@@ -159,6 +173,7 @@ impl SharedAudio {
 
                 drop(g);
                 self.cv.notify_all();
+                self.log_low_watermark();
                 Some(out)
             }
             PopStrategy::BlockingUpTo { max_frames } => {
@@ -183,6 +198,7 @@ impl SharedAudio {
 
                 drop(g);
                 self.cv.notify_all();
+                self.log_low_watermark();
                 Some(out)
             }
             PopStrategy::NonBlocking { max_frames } => {
@@ -203,9 +219,44 @@ impl SharedAudio {
 
                 drop(g);
                 self.cv.notify_all();
+                self.log_low_watermark();
                 Some(out)
             }
         }
+    }
+
+    fn log_low_watermark(&self) {
+        let threshold = (self.max_buffered_samples / 8).max(self.channels * 16);
+        let queued = {
+            let g = self.inner.lock().unwrap();
+            g.queue.len()
+        };
+        if queued > 0 && queued < threshold {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_millis(0))
+                .as_millis() as u64;
+            let last = self.low_watermark_ms.load(Ordering::Relaxed);
+            if now.saturating_sub(last) > 1000 {
+                self.low_watermark_ms.store(now, Ordering::Relaxed);
+                tracing::info!(
+                    queued_samples = queued,
+                    threshold_samples = threshold,
+                    "audio queue low watermark"
+                );
+            }
+        }
+    }
+
+    /// Wait briefly for any buffered audio to appear.
+    pub fn wait_for_any(&self, timeout: Duration) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        if !g.queue.is_empty() {
+            return true;
+        }
+        let (g2, _timeout) = self.cv.wait_timeout(g, timeout).unwrap();
+        g = g2;
+        !g.queue.is_empty()
     }
 }
 

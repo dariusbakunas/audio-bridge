@@ -76,13 +76,12 @@ where
 {
     let channels_out = config.channels as usize;
 
+    let refill_max_frames = cfg.refill_max_frames.max(1);
     let state = Arc::new(Mutex::new(PlaybackState {
         pos: 0,
         src_channels: dstq.channels(),
         src: Vec::new(),
     }));
-
-    let refill_max_frames = cfg.refill_max_frames.max(1);
     let dstq_cb = dstq.clone();
     let paused_flag = cfg.paused.clone();
     let played_frames = cfg.played_frames.clone();
@@ -116,7 +115,16 @@ where
                     } else {
                         // No more audio ready; fill the rest with silence.
                         if let Some(events) = &underrun_events {
-                            events.fetch_add(1, Ordering::Relaxed);
+                            let prev = events.fetch_add(1, Ordering::Relaxed);
+                            if prev == 0 {
+                                let frames = dstq_cb.len_frames();
+                                let done = dstq_cb.is_done();
+                                tracing::warn!(
+                                    queued_frames = frames,
+                                    done,
+                                    "audio underrun: queue empty in output callback"
+                                );
+                            }
                         }
                         if let Some(frames_counter) = &underrun_frames {
                             let remaining = frames.saturating_sub(frame);
