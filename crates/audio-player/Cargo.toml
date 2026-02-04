@@ -1,0 +1,13 @@
+[package]
+name = "audio-player"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+cpal = { workspace = true }
+rubato = { workspace = true }
+symphonia = { workspace = true }
+audioadapter-buffers = { workspace = true }
+tracing = "0.1.41"
+audio-bridge-types = { path = "../audio-bridge-types" }

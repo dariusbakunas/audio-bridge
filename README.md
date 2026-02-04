@@ -151,6 +151,17 @@ listen
 - `POST /outputs/select`
 - `GET /swagger-ui/` (OpenAPI UI)
 
+Notes:
+- Provider IDs are namespaced by kind (e.g. `bridge:roon-bridge`).
+- Output IDs include kind + provider + device (e.g. `bridge:roon-bridge:alsa:hw:CARD=DAC,DEV=0`).
+
+## Local Outputs
+
+To expose local audio devices on the hub server itself, enable local outputs in
+`config.toml` via `local_outputs` (see `crates/audio-hub-server/config.example.toml`).
+This adds a provider `local:local` (id configurable) that lists the host’s devices
+and plays locally without running a separate bridge.
+
 ## Releases
 
 Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.

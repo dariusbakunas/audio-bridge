@@ -19,7 +19,7 @@ use crate::config;
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
 use crate::library::scan_library;
 use crate::openapi;
-use crate::state::{AppState, BridgeState, PlayerStatus, QueueState};
+use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderState, PlayerStatus, QueueState};
 
 pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let cfg = load_config(args.config.as_ref())?;
@@ -64,8 +64,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         let _ = http_set_device(http_addr, &device_name);
     }
 
-    let state = web::Data::new(AppState::new(
-        library,
+    let bridge_state = Arc::new(BridgeProviderState::new(
         cmd_tx,
         status,
         queue,
@@ -74,7 +73,47 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         discovered_bridges.clone(),
         public_base_url,
     ));
-    setup_shutdown(state.player.clone());
+    let local_enabled = cfg.local_outputs.unwrap_or(false);
+    let local_id = cfg
+        .local_id
+        .clone()
+        .unwrap_or_else(|| "local".to_string());
+    let local_name = cfg
+        .local_name
+        .clone()
+        .unwrap_or_else(|| "Local Host".to_string());
+    let local_device = cfg.local_device.clone().filter(|s| !s.trim().is_empty());
+    if local_enabled {
+        let host = cpal::default_host();
+        match audio_player::device::list_device_infos(&host) {
+            Ok(devices) => {
+                if devices.is_empty() {
+                    tracing::warn!("local outputs enabled but no devices were found");
+                } else {
+                    tracing::info!(
+                        count = devices.len(),
+                        names = ?devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>(),
+                        "local output devices detected"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "local outputs enabled but device enumeration failed");
+            }
+        }
+    }
+    let local_device_selected = Arc::new(Mutex::new(local_device.clone()));
+    let (local_cmd_tx, _local_cmd_rx) = unbounded();
+    let local_state = Arc::new(LocalProviderState {
+        enabled: local_enabled,
+        id: local_id,
+        name: local_name,
+        player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+        device_selected: local_device_selected,
+        running: Arc::new(AtomicBool::new(false)),
+    });
+    let state = web::Data::new(AppState::new(library, bridge_state, local_state));
+    setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
     HttpServer::new(move || {
@@ -236,6 +275,7 @@ fn resolve_active_output(
     device_to_set: &mut Option<String>,
 ) -> Result<(Option<String>, Option<String>)> {
     let result = match cfg.active_output.as_ref() {
+        Some(id) if id.starts_with("local:") => (None, Some(id.clone())),
         Some(id) => match parse_output_id(id) {
             Ok((bridge_id, device_id)) => {
                 let http_addr = bridges

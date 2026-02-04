@@ -30,35 +30,20 @@ pub struct PlayerStatus {
 
 pub struct AppState {
     pub library: RwLock<LibraryIndex>,
-    pub player: Arc<Mutex<BridgePlayer>>,
-    pub status: Arc<Mutex<PlayerStatus>>,
-    pub queue: Arc<Mutex<QueueState>>,
-    pub bridges: Arc<Mutex<BridgeState>>,
-    pub bridge_online: Arc<AtomicBool>,
-    pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
-    pub public_base_url: String,
+    pub bridge: Arc<BridgeProviderState>,
+    pub local: Arc<LocalProviderState>,
 }
 
 impl AppState {
     pub fn new(
         library: LibraryIndex,
-        cmd_tx: Sender<BridgeCommand>,
-        status: Arc<Mutex<PlayerStatus>>,
-        queue: Arc<Mutex<QueueState>>,
-        bridges: Arc<Mutex<BridgeState>>,
-        bridge_online: Arc<AtomicBool>,
-        discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
-        public_base_url: String,
+        bridge: Arc<BridgeProviderState>,
+        local: Arc<LocalProviderState>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
-            player: Arc::new(Mutex::new(BridgePlayer { cmd_tx })),
-            status,
-            queue,
-            bridges,
-            bridge_online,
-            discovered_bridges,
-            public_base_url,
+            bridge,
+            local,
         }
     }
 }
@@ -79,4 +64,45 @@ pub struct BridgeState {
     pub bridges: Vec<BridgeConfigResolved>,
     pub active_bridge_id: Option<String>,
     pub active_output_id: Option<String>,
+}
+
+pub struct BridgeProviderState {
+    pub player: Arc<Mutex<BridgePlayer>>,
+    pub status: Arc<Mutex<PlayerStatus>>,
+    pub queue: Arc<Mutex<QueueState>>,
+    pub bridges: Arc<Mutex<BridgeState>>,
+    pub bridge_online: Arc<AtomicBool>,
+    pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+    pub public_base_url: String,
+}
+
+impl BridgeProviderState {
+    pub fn new(
+        cmd_tx: Sender<BridgeCommand>,
+        status: Arc<Mutex<PlayerStatus>>,
+        queue: Arc<Mutex<QueueState>>,
+        bridges: Arc<Mutex<BridgeState>>,
+        bridge_online: Arc<AtomicBool>,
+        discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+        public_base_url: String,
+    ) -> Self {
+        Self {
+            player: Arc::new(Mutex::new(BridgePlayer { cmd_tx })),
+            status,
+            queue,
+            bridges,
+            bridge_online,
+            discovered_bridges,
+            public_base_url,
+        }
+    }
+}
+
+pub struct LocalProviderState {
+    pub enabled: bool,
+    pub id: String,
+    pub name: String,
+    pub player: Arc<Mutex<BridgePlayer>>,
+    pub device_selected: Arc<Mutex<Option<String>>>,
+    pub running: Arc<AtomicBool>,
 }

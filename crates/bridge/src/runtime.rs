@@ -1,8 +1,9 @@
 use anyhow::Result;
 use cpal::traits::DeviceTrait;
 
-use crate::config::{BridgeListenConfig, BridgePlayConfig, PlaybackConfig};
-use crate::{decode, device, http_api, mdns, pipeline, status, player};
+use crate::config::{BridgeListenConfig, BridgePlayConfig};
+use crate::{http_api, mdns, player};
+use audio_player::{decode, device, pipeline, config::PlaybackConfig, status::PlayerStatusState};
 
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
@@ -18,7 +19,7 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
 
 pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()> {
     let device_selected = std::sync::Arc::new(std::sync::Mutex::new(config.device.clone()));
-    let status = status::BridgeStatusState::shared();
+    let status = PlayerStatusState::shared();
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));

@@ -26,7 +26,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                 ServiceEvent::ServiceFound(_ty, fullname) => {
                     tracing::info!(fullname = %fullname, "mdns: service found");
                     if let Some(id) = fullname_to_id.get(&fullname).cloned() {
-                        if let Ok(mut map) = state.discovered_bridges.lock() {
+                        if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                             if let Some(entry) = map.get_mut(&id) {
                                 entry.last_seen = std::time::Instant::now();
                             }
@@ -68,7 +68,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                         name,
                         http_addr: http,
                     };
-                    if let Ok(mut map) = state.discovered_bridges.lock() {
+                    if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                         let now = std::time::Instant::now();
                         map.insert(
                             id.clone(),
@@ -87,7 +87,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                 }
                 ServiceEvent::ServiceRemoved(name, _) => {
                     if let Some(id) = fullname_to_id.remove(&name) {
-                        if let Ok(mut map) = state.discovered_bridges.lock() {
+                        if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                             map.remove(&id);
                         }
                         tracing::info!(bridge_id = %id, "mdns: bridge removed");
@@ -102,7 +102,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
 pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(15));
-        let snapshot = match state.discovered_bridges.lock() {
+        let snapshot = match state.bridge.discovered_bridges.lock() {
             Ok(map) => map
                 .iter()
                 .map(|(id, entry)| (id.clone(), entry.bridge.http_addr, entry.last_seen))
@@ -114,13 +114,13 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
         for (id, http_addr, last_seen) in snapshot {
             let ok = ping_bridge(http_addr);
             if ok {
-                if let Ok(mut map) = state.discovered_bridges.lock() {
+                if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                     if let Some(entry) = map.get_mut(&id) {
                         entry.last_seen = now;
                     }
                 }
             } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
-                if let Ok(mut map) = state.discovered_bridges.lock() {
+                if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                     map.remove(&id);
                 }
                 tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");

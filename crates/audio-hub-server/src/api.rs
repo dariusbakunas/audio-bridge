@@ -196,17 +196,17 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     let output_id = body
         .output_id
         .clone()
-        .or_else(|| state.bridges.lock().unwrap().active_output_id.clone());
+        .or_else(|| state.bridge.bridges.lock().unwrap().active_output_id.clone());
     let Some(output_id) = output_id else {
         tracing::warn!("play rejected: no active output selected");
         return HttpResponse::ServiceUnavailable().body("no active output selected");
     };
-    if let Err(resp) = output_controller::ensure_active_bridge_connected(&state).await {
+    if let Err(resp) = output_controller::ensure_active_output_connected(&state).await {
         tracing::warn!(output_id = %output_id, "play rejected: bridge offline");
         return resp;
     }
     {
-        let bridges = state.bridges.lock().unwrap();
+        let bridges = state.bridge.bridges.lock().unwrap();
         if bridges.active_output_id.as_deref() != Some(output_id.as_str()) {
             tracing::warn!(
                 output_id = %output_id,
@@ -218,17 +218,17 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     }
     match mode {
         QueueMode::Keep => {
-            let mut queue = state.queue.lock().unwrap();
+            let mut queue = state.bridge.queue.lock().unwrap();
             if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                 queue.items.remove(pos);
             }
         }
         QueueMode::Replace => {
-            let mut queue = state.queue.lock().unwrap();
+            let mut queue = state.bridge.queue.lock().unwrap();
             queue.items.clear();
         }
         QueueMode::Append => {
-            let mut queue = state.queue.lock().unwrap();
+            let mut queue = state.bridge.queue.lock().unwrap();
             if !queue.items.iter().any(|p| p == &path) {
                 queue.items.push(path.clone());
             }
@@ -243,12 +243,13 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
 
     tracing::info!(path = %path.display(), "play request");
     {
-        let mut queue = state.queue.lock().unwrap();
+        let mut queue = state.bridge.queue.lock().unwrap();
         if let Some(pos) = queue.items.iter().position(|p| p == &path) {
             queue.items.remove(pos);
         }
     }
     if state
+        .bridge
         .player
         .lock()
         .unwrap()
@@ -262,7 +263,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         .is_ok()
     {
         tracing::info!(output_id = %output_id, "play dispatched");
-        if let Ok(mut s) = state.status.lock() {
+        if let Ok(mut s) = state.bridge.status.lock() {
             s.now_playing = Some(path);
             s.paused = false;
             s.user_paused = false;
@@ -286,6 +287,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
     if state
+        .bridge
         .player
         .lock()
         .unwrap()
@@ -293,7 +295,7 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
         .send(crate::bridge::BridgeCommand::PauseToggle)
         .is_ok()
     {
-        if let Ok(mut s) = state.status.lock() {
+        if let Ok(mut s) = state.bridge.status.lock() {
             s.paused = !s.paused;
             s.user_paused = s.paused;
         }
@@ -316,6 +318,7 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
 pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl Responder {
     let ms = body.ms;
     if state
+        .bridge
         .player
         .lock()
         .unwrap()
@@ -338,7 +341,7 @@ pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl
 )]
 #[get("/queue")]
 pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
-    let queue = state.queue.lock().unwrap();
+    let queue = state.bridge.queue.lock().unwrap();
     let library = state.library.read().unwrap();
     let items = queue
         .items
@@ -382,7 +385,7 @@ pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
 pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddRequest>) -> impl Responder {
     let mut added = 0usize;
     {
-        let mut queue = state.queue.lock().unwrap();
+        let mut queue = state.bridge.queue.lock().unwrap();
         for path_str in &body.paths {
             let path = PathBuf::from(path_str);
             let path = match canonicalize_under_root(&state, &path) {
@@ -412,7 +415,7 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
         Ok(dir) => dir,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let mut queue = state.queue.lock().unwrap();
+    let mut queue = state.bridge.queue.lock().unwrap();
     if let Some(pos) = queue.items.iter().position(|p| p == &path) {
         queue.items.remove(pos);
     }
@@ -428,7 +431,7 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
 )]
 #[post("/queue/clear")]
 pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
-    let mut queue = state.queue.lock().unwrap();
+    let mut queue = state.bridge.queue.lock().unwrap();
     queue.items.clear();
     HttpResponse::Ok().finish()
 }
@@ -443,15 +446,15 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 )]
 #[post("/queue/next")]
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
-    if state.bridges.lock().unwrap().active_output_id.is_none() {
+    if state.bridge.bridges.lock().unwrap().active_output_id.is_none() {
         tracing::warn!("queue next rejected: no active output selected");
         return HttpResponse::ServiceUnavailable().body("no active output selected");
     }
-    if let Err(resp) = output_controller::ensure_active_bridge_connected(&state).await {
+    if let Err(resp) = output_controller::ensure_active_output_connected(&state).await {
         return resp;
     }
     let path = {
-        let mut queue = state.queue.lock().unwrap();
+        let mut queue = state.bridge.queue.lock().unwrap();
         if queue.items.is_empty() {
             None
         } else {
@@ -597,6 +600,7 @@ fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {
         .unwrap_or("")
         .to_ascii_lowercase();
     if state
+        .bridge
         .player
         .lock()
         .unwrap()
@@ -609,7 +613,7 @@ fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {
         })
         .is_ok()
     {
-        if let Ok(mut s) = state.status.lock() {
+        if let Ok(mut s) = state.bridge.status.lock() {
             s.now_playing = Some(path);
             s.paused = false;
         }

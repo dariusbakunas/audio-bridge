@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use crossbeam_channel::Sender;
 
-use crate::device;
+use audio_player::device;
 use crate::player::PlayerCommand;
 use crate::status::{BridgeStatusState, StatusSnapshot};
 

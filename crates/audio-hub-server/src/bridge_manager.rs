@@ -9,6 +9,16 @@ pub(crate) fn parse_output_id(id: &str) -> Result<(String, String), String> {
     Ok((bridge_id.to_string(), device_id.to_string()))
 }
 
+pub(crate) fn parse_provider_id(id: &str) -> Result<String, String> {
+    let mut parts = id.splitn(2, ':');
+    let kind = parts.next().unwrap_or("");
+    let bridge_id = parts.next().unwrap_or("");
+    if kind != "bridge" || bridge_id.is_empty() {
+        return Err("invalid provider id".to_string());
+    }
+    Ok(bridge_id.to_string())
+}
+
 pub(crate) fn merge_bridges(
     configured: &[crate::config::BridgeConfigResolved],
     discovered: &std::collections::HashMap<String, crate::state::DiscoveredBridge>,

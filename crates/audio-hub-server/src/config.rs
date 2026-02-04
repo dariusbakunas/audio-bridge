@@ -12,6 +12,10 @@ pub struct ServerConfig {
     pub public_base_url: Option<String>,
     pub bridges: Option<Vec<BridgeConfig>>,
     pub active_output: Option<String>,
+    pub local_outputs: Option<bool>,
+    pub local_id: Option<String>,
+    pub local_name: Option<String>,
+    pub local_device: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

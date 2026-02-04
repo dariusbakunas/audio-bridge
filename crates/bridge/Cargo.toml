@@ -23,6 +23,7 @@ mdns-sd = "0.17.2"
 gethostname = "1.1.0"
 ureq = { version = "3.1.4", features = ["json"] }
 audio-bridge-types = { path = "../audio-bridge-types" }
+audio-player = { path = "../audio-player" }
 
 [build-dependencies]
 time = { version = "0.3", features = ["formatting"] }

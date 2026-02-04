@@ -1,5 +1,5 @@
-//! HTTP-controlled playback manager.
-
+use std::fs::File;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,37 +9,18 @@ use cpal::traits::DeviceTrait;
 use symphonia::core::probe::Hint;
 
 use audio_player::config::PlaybackConfig;
-use audio_player::decode;
-use audio_player::device;
-use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
-use audio_player::pipeline;
-use crate::status::BridgeStatusState;
+use audio_player::{decode, device, pipeline};
 
-#[derive(Debug, Clone)]
-pub(crate) enum PlayerCommand {
-    Play {
-        url: String,
-        ext_hint: Option<String>,
-        title: Option<String>,
-        seek_ms: Option<u64>,
-    },
-    PauseToggle,
-    Pause,
-    Resume,
-    Stop,
-    Seek { ms: u64 },
-    Quit,
-}
+use crate::bridge::BridgeCommand;
+use crate::state::PlayerStatus;
 
 #[derive(Clone)]
-pub(crate) struct PlayerHandle {
-    pub(crate) cmd_tx: Sender<PlayerCommand>,
+pub(crate) struct LocalPlayerHandle {
+    pub(crate) cmd_tx: Sender<BridgeCommand>,
 }
 
 struct CurrentTrack {
-    url: String,
-    ext_hint: Option<String>,
-    title: Option<String>,
+    path: PathBuf,
 }
 
 struct SessionHandle {
@@ -48,21 +29,21 @@ struct SessionHandle {
     join: std::thread::JoinHandle<()>,
 }
 
-pub(crate) fn spawn_player(
+pub(crate) fn spawn_local_player(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<BridgeStatusState>>,
+    status: Arc<Mutex<PlayerStatus>>,
     playback: PlaybackConfig,
-) -> PlayerHandle {
+) -> LocalPlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || player_thread_main(device_selected, status, playback, cmd_rx));
-    PlayerHandle { cmd_tx }
+    LocalPlayerHandle { cmd_tx }
 }
 
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<BridgeStatusState>>,
+    status: Arc<Mutex<PlayerStatus>>,
     playback: PlaybackConfig,
-    cmd_rx: Receiver<PlayerCommand>,
+    cmd_rx: Receiver<BridgeCommand>,
 ) {
     let session_id = Arc::new(AtomicU64::new(0));
     let mut current: Option<CurrentTrack> = None;
@@ -71,75 +52,66 @@ fn player_thread_main(
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
-            PlayerCommand::Quit => {
+            BridgeCommand::Quit => {
                 cancel_session(&mut session);
                 break;
             }
-            PlayerCommand::Stop => {
+            BridgeCommand::Stop => {
                 cancel_session(&mut session);
                 current = None;
                 paused = false;
                 if let Ok(mut s) = status.lock() {
-                    s.clear_playback();
+                    s.now_playing = None;
+                    s.paused = false;
+                    s.user_paused = false;
+                    s.elapsed_ms = None;
+                    s.duration_ms = None;
+                    s.sample_rate = None;
+                    s.channels = None;
+                    s.source_codec = None;
+                    s.source_bit_depth = None;
+                    s.container = None;
+                    s.output_sample_format = None;
+                    s.resampling = None;
+                    s.resample_from_hz = None;
+                    s.resample_to_hz = None;
                 }
             }
-            PlayerCommand::PauseToggle => {
+            BridgeCommand::PauseToggle => {
                 paused = !paused;
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(paused, Ordering::Relaxed);
                 }
-            }
-            PlayerCommand::Pause => {
-                paused = true;
-                if let Some(sess) = session.as_ref() {
-                    sess.paused.store(true, Ordering::Relaxed);
+                if let Ok(mut s) = status.lock() {
+                    s.paused = paused;
+                    s.user_paused = paused;
                 }
             }
-            PlayerCommand::Resume => {
-                paused = false;
-                if let Some(sess) = session.as_ref() {
-                    sess.paused.store(false, Ordering::Relaxed);
-                }
-            }
-            PlayerCommand::Seek { ms } => {
+            BridgeCommand::Seek { ms } => {
                 let Some(track) = current.as_ref() else { continue };
-                let url = track.url.clone();
-                let ext_hint = track.ext_hint.clone();
-                let title = track.title.clone();
                 start_new_session(
                     &device_selected,
                     &status,
                     &playback,
                     &session_id,
                     &mut session,
-                    url,
-                    ext_hint,
-                    title,
+                    track.path.clone(),
                     Some(ms),
                     paused,
                 );
             }
-            PlayerCommand::Play {
-                url,
-                ext_hint,
-                title,
-                seek_ms,
-            } => {
+            BridgeCommand::Play { path, seek_ms, start_paused, .. } => {
                 current = Some(CurrentTrack {
-                    url: url.clone(),
-                    ext_hint: ext_hint.clone(),
-                    title: title.clone(),
+                    path: path.clone(),
                 });
-                paused = false;
+                paused = start_paused;
                 start_new_session(
                     &device_selected,
                     &status,
                     &playback,
                     &session_id,
                     &mut session,
-                    url,
-                    ext_hint,
-                    title,
+                    path,
                     seek_ms,
                     paused,
                 );
@@ -158,13 +130,11 @@ fn cancel_session(session: &mut Option<SessionHandle>) {
 #[allow(clippy::too_many_arguments)]
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<BridgeStatusState>>,
+    status: &Arc<Mutex<PlayerStatus>>,
     playback: &PlaybackConfig,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
-    url: String,
-    ext_hint: Option<String>,
-    title: Option<String>,
+    path: PathBuf,
     seek_ms: Option<u64>,
     paused: bool,
 ) {
@@ -183,21 +153,19 @@ fn start_new_session(
 
     let join = std::thread::spawn(move || {
         let host = cpal::default_host();
-        if let Err(e) = play_one_http(
+        if let Err(e) = play_one_file(
             &host,
             &device_selected,
             &status,
             &playback,
-            url,
-            ext_hint,
-            title,
+            path,
             seek_ms,
             cancel_for_thread,
             paused_for_thread,
             my_id,
             session_id,
         ) {
-            tracing::warn!("http playback error: {e:#}");
+            tracing::warn!("local playback error: {e:#}");
         }
     });
 
@@ -208,15 +176,12 @@ fn start_new_session(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
-fn play_one_http(
+fn play_one_file(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<BridgeStatusState>>,
+    status: &Arc<Mutex<PlayerStatus>>,
     playback: &PlaybackConfig,
-    url: String,
-    ext_hint: Option<String>,
-    title: Option<String>,
+    path: PathBuf,
     seek_ms: Option<u64>,
     cancel: Arc<AtomicBool>,
     paused_flag: Arc<AtomicBool>,
@@ -224,10 +189,8 @@ fn play_one_http(
     session_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut hint = Hint::new();
-    if let Some(ext) = ext_hint.as_ref().and_then(|s| if s.is_empty() { None } else { Some(s) }) {
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);
-    } else if let Some(ext) = infer_ext_from_url(&url) {
-        hint.with_extension(&ext);
     }
 
     let mut playback_eff = playback.clone();
@@ -237,15 +200,15 @@ fn play_one_http(
         playback_eff.chunk_frames = playback_eff.chunk_frames.min(1024);
     }
 
-    let source = HttpRangeSource::new(url.clone(), HttpRangeConfig::default(), Some(cancel.clone()));
+    let file = File::open(&path).with_context(|| format!("open {:?}", path))?;
     let (src_spec, srcq, duration_ms, source_info) =
         decode::start_streaming_decode_from_media_source_at(
-            Box::new(source),
+            Box::new(file),
             hint,
             playback_eff.buffer_seconds,
             seek_ms,
         )
-        .context("decode from http")?;
+        .context("decode local file")?;
 
     let selected = device_selected.lock().unwrap().clone();
     let device = device::pick_device(host, selected.as_deref())?;
@@ -271,34 +234,26 @@ fn play_one_http(
     let underrun_frames = Arc::new(AtomicU64::new(0));
     let underrun_events = Arc::new(AtomicU64::new(0));
     let output_sample_format = Some(format!("{:?}", config.sample_format()));
-    let container = ext_hint
-        .clone()
-        .or_else(|| infer_ext_from_url(&url))
+    let container = path
+        .extension()
+        .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_uppercase());
     let resampling = src_spec.rate != stream_config.sample_rate;
-    {
-        if let Ok(mut s) = status.lock() {
-            s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
-            s.device = device.description().ok().map(|d| d.to_string());
-            s.sample_rate = Some(stream_config.sample_rate);
-            s.channels = Some(src_spec.channels.count() as u16);
-            s.duration_ms = duration_ms;
-            s.source_codec = source_info.codec.clone();
-            s.source_bit_depth = source_info.bit_depth;
-            s.container = container.or_else(|| source_info.container.clone());
-            s.output_sample_format = output_sample_format.clone();
-            s.resampling = Some(resampling);
-            s.resample_from_hz = Some(src_spec.rate);
-            s.resample_to_hz = Some(stream_config.sample_rate);
-            s.played_frames = Some(played_frames.clone());
-            s.paused_flag = Some(paused_flag.clone());
-            s.underrun_frames = Some(underrun_frames.clone());
-            s.underrun_events = Some(underrun_events.clone());
-            s.buffer_size_frames = match stream_config.buffer_size {
-                cpal::BufferSize::Fixed(frames) => Some(frames),
-                cpal::BufferSize::Default => None,
-            };
-        }
+    if let Ok(mut s) = status.lock() {
+        s.now_playing = Some(path.clone());
+        s.output_device = device.description().ok().map(|d| d.to_string());
+        s.sample_rate = Some(stream_config.sample_rate);
+        s.channels = Some(src_spec.channels.count() as u16);
+        s.duration_ms = duration_ms;
+        s.source_codec = source_info.codec.clone();
+        s.source_bit_depth = source_info.bit_depth;
+        s.container = container.or_else(|| source_info.container.clone());
+        s.output_sample_format = output_sample_format.clone();
+        s.resampling = Some(resampling);
+        s.resample_from_hz = Some(src_spec.rate);
+        s.resample_to_hz = Some(stream_config.sample_rate);
+        s.elapsed_ms = seek_ms;
+        s.paused = paused_flag.load(Ordering::Relaxed);
     }
 
     let result = pipeline::play_decoded_source(
@@ -319,21 +274,11 @@ fn play_one_http(
 
     if session_id.load(Ordering::Relaxed) == my_id {
         if let Ok(mut s) = status.lock() {
-            s.clear_playback();
+            s.now_playing = None;
+            s.elapsed_ms = None;
+            s.duration_ms = None;
         }
     }
 
     result
-}
-
-fn infer_ext_from_url(url: &str) -> Option<String> {
-    let tail = url.split('?').next().unwrap_or(url);
-    let file = tail.rsplit('/').next().unwrap_or(tail);
-    let mut parts = file.rsplit('.');
-    let ext = parts.next()?;
-    if parts.next().is_some() {
-        Some(ext.to_ascii_lowercase())
-    } else {
-        None
-    }
 }
