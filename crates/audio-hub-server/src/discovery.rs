@@ -50,9 +50,6 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                         .map(|p| p.val_str().to_string())
                         .map(|s| s.strip_prefix("name=").unwrap_or(&s).to_string())
                         .unwrap_or_else(|| id.clone());
-                    let api_port = info
-                        .get_property("api_port")
-                        .and_then(|p| p.val_str().parse::<u16>().ok());
                     let addr = info
                         .get_addresses()
                         .iter()
@@ -64,14 +61,11 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                         tracing::warn!(fullname = %info.get_fullname(), "mdns: resolved without IPv4");
                         continue;
                     };
-                    let stream_port = info.get_port();
-                    let stream = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), stream_port);
-                    let http_port = api_port.unwrap_or_else(|| stream_port.saturating_add(1));
+                    let http_port = info.get_port();
                     let http = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), http_port);
                     let bridge = crate::config::BridgeConfigResolved {
                         id: id.clone(),
                         name,
-                        addr: stream,
                         http_addr: http,
                     };
                     if let Ok(mut map) = state.discovered_bridges.lock() {
@@ -86,7 +80,6 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                     }
                     tracing::info!(
                         bridge_id = %id,
-                        addr = %stream,
                         http_addr = %http,
                         "mdns: discovered bridge"
                     );

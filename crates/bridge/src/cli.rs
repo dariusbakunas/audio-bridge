@@ -43,10 +43,6 @@ pub struct Args {
     #[arg(long, default_value_t = 2.0)]
     pub buffer_seconds: f32,
 
-    /// Temp directory for streamed files (defaults to OS temp dir)
-    #[arg(long)]
-    pub temp_dir: Option<PathBuf>,
-
     /// HTTP API bind address, e.g. 0.0.0.0:5556
     #[arg(long, default_value = "0.0.0.0:5556")]
     pub http_bind: SocketAddr,
@@ -60,10 +56,6 @@ pub enum Command {
         path: PathBuf,
     },
 
-    /// Listen for a TCP connection and play exactly one streamed file per connection
-    Listen {
-        /// Address to bind, e.g. 0.0.0.0:5555
-        #[arg(long, default_value = "0.0.0.0:5555")]
-        bind: SocketAddr,
-    },
+    /// Run the bridge HTTP API for remote playback control
+    Listen,
 }

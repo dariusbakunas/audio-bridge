@@ -1,7 +1,5 @@
 //! Playback pipeline wiring: resample + playback + optional reporting/cancel.
 
-mod progress;
-
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -12,18 +10,14 @@ use cpal::traits::StreamTrait;
 
 use crate::{playback, queue, resample};
 use crate::config::PlaybackConfig;
-use progress::{ProgressReporter, start_progress_reporter};
-
 /// Optional knobs for a single playback session (network sessions use these).
 ///
 /// This lets the pipeline wire in:
 /// - pause/resume state
 /// - a cancel flag (for "next track" interrupts)
-/// - a peer socket for progress reporting
 pub(crate) struct PlaybackSessionOptions {
     pub(crate) paused: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-    pub(crate) peer_tx: Option<std::net::TcpStream>,
     pub(crate) played_frames: Option<Arc<AtomicU64>>,
     pub(crate) underrun_frames: Option<Arc<AtomicU64>>,
     pub(crate) underrun_events: Option<Arc<AtomicU64>>,
@@ -35,41 +29,20 @@ struct PlaybackState {
     played_frames: Option<Arc<AtomicU64>>,
     underrun_frames: Option<Arc<AtomicU64>>,
     underrun_events: Option<Arc<AtomicU64>>,
-    reporter: Option<ProgressReporter>,
 }
 
 impl PlaybackState {
     fn new(opts: PlaybackSessionOptions) -> Self {
-        let played_frames = match (opts.played_frames.clone(), opts.peer_tx.as_ref()) {
-            (Some(frames), _) => Some(frames),
-            (None, Some(_)) => Some(Arc::new(AtomicU64::new(0))),
-            (None, None) => None,
-        };
-
-        let reporter = if let Some(peer_tx) = opts.peer_tx {
-            Some(start_progress_reporter(
-                peer_tx,
-                played_frames.clone().unwrap(),
-                opts.paused.clone(),
-            ))
-        } else {
-            None
-        };
-
         Self {
             paused: opts.paused,
             cancel: opts.cancel,
-            played_frames,
+            played_frames: opts.played_frames,
             underrun_frames: opts.underrun_frames,
             underrun_events: opts.underrun_events,
-            reporter,
         }
     }
 
     fn stop_reporter(self) {
-        if let Some(reporter) = self.reporter {
-            reporter.stop();
-        }
     }
 }
 

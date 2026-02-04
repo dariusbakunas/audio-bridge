@@ -561,7 +561,7 @@ pub async fn bridges_list(state: web::Data<AppState>) -> impl Responder {
         .map(|b| BridgeInfo {
             id: b.id.clone(),
             name: b.name.clone(),
-            addr: b.addr.to_string(),
+            addr: b.http_addr.to_string(),
             state: if bridges_state.active_bridge_id.as_deref() == Some(b.id.as_str()) {
                 if active_online {
                     "connected".to_string()

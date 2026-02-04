@@ -230,12 +230,19 @@ fn play_one_http(
         hint.with_extension(&ext);
     }
 
+    let mut playback_eff = playback.clone();
+    if seek_ms.is_some() {
+        playback_eff.buffer_seconds = playback_eff.buffer_seconds.min(1.0);
+        playback_eff.refill_max_frames = playback_eff.refill_max_frames.min(2048);
+        playback_eff.chunk_frames = playback_eff.chunk_frames.min(1024);
+    }
+
     let source = HttpRangeSource::new(url.clone(), HttpRangeConfig::default(), Some(cancel.clone()));
     let (src_spec, srcq, duration_ms) =
         decode::start_streaming_decode_from_media_source_at(
             Box::new(source),
             hint,
-            playback.buffer_seconds,
+            playback_eff.buffer_seconds,
             seek_ms,
         )
         .context("decode from http")?;
@@ -249,6 +256,18 @@ fn play_one_http(
     }
 
     let played_frames = Arc::new(AtomicU64::new(0));
+    if let Some(ms) = seek_ms {
+        let mut target_ms = ms;
+        if let Some(total) = duration_ms {
+            if target_ms > total {
+                target_ms = total;
+            }
+        }
+        if stream_config.sample_rate > 0 {
+            let frames = target_ms.saturating_mul(stream_config.sample_rate as u64) / 1000;
+            played_frames.store(frames, Ordering::Relaxed);
+        }
+    }
     let underrun_frames = Arc::new(AtomicU64::new(0));
     let underrun_events = Arc::new(AtomicU64::new(0));
     {
@@ -273,13 +292,12 @@ fn play_one_http(
         &device,
         &config,
         &stream_config,
-        playback,
+        &playback_eff,
         src_spec,
         srcq,
         pipeline::PlaybackSessionOptions {
             paused: Some(paused_flag),
             cancel: Some(cancel),
-            peer_tx: None,
             played_frames: Some(played_frames),
             underrun_frames: Some(underrun_frames),
             underrun_events: Some(underrun_events),

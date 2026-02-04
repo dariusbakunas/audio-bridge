@@ -13,5 +13,4 @@ active_output = "bridge:living-room:Built-in Output"
 [[bridges]]
 id = "living-room"
 name = "Living Room"
-addr = "192.168.1.50:5555"
-api_port = 5556
+http_addr = "192.168.1.50:5556"

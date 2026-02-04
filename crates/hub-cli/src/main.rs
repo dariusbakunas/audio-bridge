@@ -48,10 +48,6 @@ struct Args {
     #[arg(long, default_value_t = false)]
     no_bridge: bool,
 
-    /// Embedded bridge stream bind address, e.g. 0.0.0.0:5555
-    #[arg(long, default_value = "0.0.0.0:5555")]
-    bridge_bind: SocketAddr,
-
     /// Embedded bridge HTTP API bind address, e.g. 0.0.0.0:5556
     #[arg(long, default_value = "0.0.0.0:5556")]
     bridge_http_bind: SocketAddr,
@@ -60,9 +56,6 @@ struct Args {
     #[arg(long)]
     bridge_device: Option<String>,
 
-    /// Temp directory for streamed files (defaults to OS temp dir).
-    #[arg(long)]
-    bridge_temp_dir: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -138,10 +131,8 @@ fn main() -> Result<()> {
         .init();
     if !args.no_bridge {
         let cfg = BridgeListenConfig {
-            bind: args.bridge_bind,
             http_bind: args.bridge_http_bind,
             device: args.bridge_device.clone(),
-            temp_dir: args.bridge_temp_dir.clone(),
             playback: PlaybackConfig::default(),
         };
         std::thread::spawn(move || {

@@ -6,7 +6,6 @@ pub(crate) struct MdnsAdvertiser {
 }
 
 pub(crate) fn spawn_mdns_advertiser(
-    stream_bind: std::net::SocketAddr,
     http_bind: std::net::SocketAddr,
 ) -> Option<MdnsAdvertiser> {
     let daemon = match ServiceDaemon::new() {
@@ -36,17 +35,17 @@ pub(crate) fn spawn_mdns_advertiser(
     ]
     .into_iter()
     .collect();
-    let ip = if stream_bind.ip().is_unspecified() {
+    let ip = if http_bind.ip().is_unspecified() {
         local_ip().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
     } else {
-        stream_bind.ip()
+        http_bind.ip()
     };
     let info = ServiceInfo::new(
         service_type,
         &instance,
         &host,
         ip,
-        stream_bind.port(),
+        http_bind.port(),
         properties,
     )
     .ok()?;
@@ -55,12 +54,10 @@ pub(crate) fn spawn_mdns_advertiser(
         tracing::warn!(error = %e, "mdns: register failed");
         return None;
     }
-    let advertised_http = std::net::SocketAddr::new(ip, http_bind.port());
     tracing::info!(
         bridge_id = %id,
         bridge_name = %name,
-        addr = %std::net::SocketAddr::new(ip, stream_bind.port()),
-        http_addr = %advertised_http,
+        http_addr = %std::net::SocketAddr::new(ip, http_bind.port()),
         "mdns: advertised bridge"
     );
     Some(MdnsAdvertiser { daemon, fullname })

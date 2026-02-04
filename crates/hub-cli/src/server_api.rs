@@ -98,6 +98,11 @@ struct QueueRemoveRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+struct SeekRequest {
+    ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum QueueMode {
     Keep,
@@ -166,6 +171,17 @@ pub(crate) fn pause_toggle(server: &str) -> Result<()> {
         .context("request /pause")?;
     if !resp.status().is_success() {
         return Err(anyhow::anyhow!("pause failed with {}", resp.status()));
+    }
+    Ok(())
+}
+
+pub(crate) fn seek(server: &str, ms: u64) -> Result<()> {
+    let url = format!("{}/seek", server.trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .send_json(SeekRequest { ms })
+        .context("request /seek")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("seek failed with {}", resp.status()));
     }
     Ok(())
 }

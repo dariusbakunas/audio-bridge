@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::{
-    event::{self, Event as CEvent, KeyCode},
+    event::{self, Event as CEvent, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -293,6 +293,27 @@ impl App {
                 false
             }
         }
+    }
+
+    fn seek_relative(&mut self, delta_ms: i64, cmd_tx: &Sender<crate::worker::Command>) {
+        if !self.ensure_output_selected() {
+            return;
+        }
+        let Some(elapsed) = self.remote_elapsed_ms else {
+            self.status = "Seek unavailable (no progress yet)".into();
+            return;
+        };
+        let mut target = if delta_ms >= 0 {
+            elapsed.saturating_add(delta_ms as u64)
+        } else {
+            elapsed.saturating_sub(delta_ms.unsigned_abs())
+        };
+        if let Some(total) = self.remote_duration_ms {
+            if target > total {
+                target = total;
+            }
+        }
+        cmd_tx.send(crate::worker::Command::Seek { ms: target }).ok();
     }
 
     pub(crate) fn refresh_auto_preview_if_needed(&mut self) {
@@ -860,6 +881,7 @@ fn ui_loop(
                     }
                     continue;
                 }
+                let shift = k.modifiers.contains(KeyModifiers::SHIFT);
                 match k.code {
                     KeyCode::Char('q') => {
                         cmd_tx.send(Command::Quit).ok();
@@ -869,7 +891,15 @@ fn ui_loop(
                     KeyCode::Down => app.select_next(),
                     KeyCode::PageUp => app.page_up(),
                     KeyCode::PageDown => app.page_down(),
-                    KeyCode::Left | KeyCode::Backspace => {
+                    KeyCode::Left => {
+                        let delta = if shift { -30_000 } else { -5_000 };
+                        app.seek_relative(delta, &cmd_tx);
+                    }
+                    KeyCode::Right => {
+                        let delta = if shift { 30_000 } else { 5_000 };
+                        app.seek_relative(delta, &cmd_tx);
+                    }
+                    KeyCode::Backspace => {
                         app.go_parent()?;
                     }
                     KeyCode::Char('r') => {

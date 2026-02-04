@@ -20,10 +20,8 @@ impl Default for PlaybackConfig {
 
 #[derive(Clone, Debug)]
 pub struct BridgeListenConfig {
-    pub bind: SocketAddr,
     pub http_bind: SocketAddr,
     pub device: Option<String>,
-    pub temp_dir: Option<PathBuf>,
     pub playback: PlaybackConfig,
 }
 

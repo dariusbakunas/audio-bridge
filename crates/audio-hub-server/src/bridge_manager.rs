@@ -19,23 +19,23 @@ pub(crate) fn merge_bridges(
         std::collections::HashSet::new();
     for b in configured {
         seen.insert(b.id.clone());
-        seen_addrs.insert(b.addr);
+        seen_addrs.insert(b.http_addr);
         merged.push(b.clone());
     }
     for (id, b) in discovered {
         if seen.contains(id) {
             continue;
         }
-        if seen_addrs.contains(&b.bridge.addr) {
+        if seen_addrs.contains(&b.bridge.http_addr) {
             tracing::info!(
                 bridge_id = %b.bridge.id,
                 bridge_name = %b.bridge.name,
-                addr = %b.bridge.addr,
+                http_addr = %b.bridge.http_addr,
                 "merge: skipping discovered bridge with configured addr"
             );
             continue;
         }
-        seen_addrs.insert(b.bridge.addr);
+        seen_addrs.insert(b.bridge.http_addr);
         merged.push(b.bridge.clone());
     }
     merged

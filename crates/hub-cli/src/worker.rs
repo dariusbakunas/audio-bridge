@@ -9,6 +9,7 @@ use crate::server_api;
 pub enum Command {
     PauseToggle,
     Next,
+    Seek { ms: u64 },
     Quit,
 }
 
@@ -59,6 +60,13 @@ pub fn worker_main(server: String, cmd_rx: Receiver<Command>, evt_tx: Sender<Eve
                     Err(e) => {
                         let _ = evt_tx.send(Event::Error(format!("Next failed: {e:#}")));
                     }
+                }
+            }
+            Command::Seek { ms } => {
+                if let Err(e) = server_api::seek(&server, ms) {
+                    let _ = evt_tx.send(Event::Error(format!("Seek failed: {e:#}")));
+                } else {
+                    let _ = evt_tx.send(Event::Status(format!("Seek: {}ms", ms)));
                 }
             }
         }

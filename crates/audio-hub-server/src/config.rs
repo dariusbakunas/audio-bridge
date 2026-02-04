@@ -18,15 +18,13 @@ pub struct ServerConfig {
 pub struct BridgeConfig {
     pub id: String,
     pub name: Option<String>,
-    pub addr: String,
-    pub api_port: Option<u16>,
+    pub http_addr: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct BridgeConfigResolved {
     pub id: String,
     pub name: String,
-    pub addr: SocketAddr,
     pub http_addr: SocketAddr,
 }
 
@@ -45,32 +43,19 @@ pub fn bridges_from_config(cfg: &ServerConfig) -> Result<Vec<BridgeConfigResolve
     if let Some(cfg_bridges) = cfg.bridges.as_ref() {
         for bridge in cfg_bridges {
             let name = bridge.name.clone().unwrap_or_else(|| bridge.id.clone());
-            let addr: SocketAddr = bridge
-                .addr
+            let http_addr: SocketAddr = bridge
+                .http_addr
                 .parse()
-                .with_context(|| format!("parse bridge addr {}", bridge.addr))?;
-            let http_addr = match bridge.api_port {
-                Some(port) => SocketAddr::new(addr.ip(), port),
-                None => default_http_addr(addr)?,
-            };
+                .with_context(|| format!("parse bridge http_addr {}", bridge.http_addr))?;
             bridges.push(BridgeConfigResolved {
                 id: bridge.id.clone(),
                 name,
-                addr,
                 http_addr,
             });
         }
     }
 
     Ok(bridges)
-}
-
-fn default_http_addr(addr: SocketAddr) -> Result<SocketAddr> {
-    let port = addr.port();
-    let http_port = port
-        .checked_add(1)
-        .ok_or_else(|| anyhow::anyhow!("cannot default http port for {addr}"))?;
-    Ok(SocketAddr::new(addr.ip(), http_port))
 }
 
 pub fn media_dir_from_config(cfg: &ServerConfig) -> Result<std::path::PathBuf> {

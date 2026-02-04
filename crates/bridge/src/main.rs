@@ -34,12 +34,10 @@ fn main() -> Result<()> {
             };
             runtime::run_play(cfg)?;
         }
-        cli::Command::Listen { bind } => {
+        cli::Command::Listen => {
             let cfg = BridgeListenConfig {
-                bind: *bind,
                 http_bind: args.http_bind,
                 device: args.device.clone(),
-                temp_dir: args.temp_dir.clone(),
                 playback,
             };
             runtime::run_listen(cfg, true)?;

@@ -7,7 +7,6 @@ mod device;
 mod http_api;
 mod http_stream;
 mod mdns;
-mod net;
 mod pipeline;
 mod player;
 mod playback;
