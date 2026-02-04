@@ -295,10 +295,94 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | Space pause | n next | ←/→ seek | o outputs | l logs | h help | q quit",
+            "keys: ↑/↓ select | Enter play/enter | Space pause | n next | ←/→ seek | o outputs | l logs | i info | h help | q quit",
         )),
         footer_chunks[3],
     );
+
+    if app.now_playing_open {
+        let area = centered_rect(70, 70, f.area());
+        f.render_widget(Clear, area);
+        let title = app
+            .now_playing_meta
+            .as_ref()
+            .and_then(|m| m.format.clone())
+            .unwrap_or_else(|| "Now Playing".to_string());
+        let track = app
+            .now_playing_path
+            .as_ref()
+            .and_then(|p| p.file_name().and_then(|s| s.to_str()))
+            .unwrap_or("-");
+        let artist = app
+            .now_playing_meta
+            .as_ref()
+            .and_then(|m| m.artist.clone())
+            .unwrap_or_else(|| "-".into());
+        let album = app
+            .now_playing_meta
+            .as_ref()
+            .and_then(|m| m.album.clone())
+            .unwrap_or_else(|| "-".into());
+        let duration = app
+            .remote_duration_ms
+            .map(format_duration_ms)
+            .unwrap_or_else(|| "-".into());
+        let elapsed = app
+            .remote_elapsed_ms
+            .map(format_duration_ms)
+            .unwrap_or_else(|| "-".into());
+        let source_codec = app.remote_source_codec.as_deref().unwrap_or("-");
+        let source_bits = app
+            .remote_source_bit_depth
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "-".into());
+        let container = app.remote_container.as_deref().unwrap_or("-");
+        let bitrate = app
+            .remote_bitrate_kbps
+            .map(|b| format!("{b} kbps"))
+            .unwrap_or_else(|| "-".into());
+        let out_sr = app
+            .remote_output_sample_rate
+            .map(|v| format!("{v} Hz"))
+            .unwrap_or_else(|| "-".into());
+        let out_fmt = app
+            .remote_output_sample_format
+            .as_deref()
+            .unwrap_or("-");
+        let out_dev = app
+            .remote_output_id
+            .as_deref()
+            .unwrap_or("-");
+        let resample = match app.remote_resampling {
+            Some(true) => {
+                if let (Some(from), Some(to)) = (app.remote_resample_from_hz, app.remote_resample_to_hz) {
+                    format!("{from} -> {to}")
+                } else {
+                    "yes".to_string()
+                }
+            }
+            Some(false) => "no".to_string(),
+            None => "-".to_string(),
+        };
+        let body = [
+            format!("Track: {track}"),
+            format!("Artist: {artist}"),
+            format!("Album: {album}"),
+            format!("Position: {elapsed} / {duration}"),
+            "".to_string(),
+            format!("Source: {source_codec} {source_bits}b ({container})"),
+            format!("Bitrate: {bitrate}"),
+            "".to_string(),
+            format!("Output: {out_sr} {out_fmt}"),
+            format!("Resample: {resample}"),
+            format!("Device: {out_dev}"),
+            "".to_string(),
+            "Press i or Esc to close".to_string(),
+        ]
+        .join("\n");
+        let block = Block::default().title(title).borders(Borders::ALL);
+        f.render_widget(Paragraph::new(body).block(block), area);
+    }
 
     if app.help_open {
         let area = centered_rect(70, 70, f.area());
@@ -325,6 +409,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             "  r            rescan",
             "  o            outputs",
             "  l            logs",
+            "  i            now playing",
             "  h or ?       help",
             "  q            quit",
             "  Esc          close modal",
