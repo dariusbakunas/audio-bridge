@@ -1,8 +1,10 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use audio_bridge_types::BridgeStatus as BridgeStatusSnapshot;
+
 #[derive(Debug, Default)]
-pub(crate) struct BridgeStatus {
+pub(crate) struct BridgeStatusState {
     pub(crate) now_playing: Option<String>,
     pub(crate) device: Option<String>,
     pub(crate) sample_rate: Option<u32>,
@@ -22,28 +24,9 @@ pub(crate) struct BridgeStatus {
     pub(crate) buffer_size_frames: Option<u32>,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub(crate) struct StatusSnapshot {
-    pub now_playing: Option<String>,
-    pub paused: bool,
-    pub elapsed_ms: Option<u64>,
-    pub duration_ms: Option<u64>,
-    pub source_codec: Option<String>,
-    pub source_bit_depth: Option<u16>,
-    pub container: Option<String>,
-    pub output_sample_format: Option<String>,
-    pub resampling: Option<bool>,
-    pub resample_from_hz: Option<u32>,
-    pub resample_to_hz: Option<u32>,
-    pub sample_rate: Option<u32>,
-    pub channels: Option<u16>,
-    pub device: Option<String>,
-    pub underrun_frames: Option<u64>,
-    pub underrun_events: Option<u64>,
-    pub buffer_size_frames: Option<u32>,
-}
+pub(crate) type StatusSnapshot = BridgeStatusSnapshot;
 
-impl BridgeStatus {
+impl BridgeStatusState {
     pub(crate) fn shared() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self::default()))
     }
@@ -61,7 +44,7 @@ impl BridgeStatus {
             }
             _ => None,
         };
-        StatusSnapshot {
+        BridgeStatusSnapshot {
             now_playing: self.now_playing.clone(),
             paused,
             elapsed_ms,

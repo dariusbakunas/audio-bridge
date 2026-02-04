@@ -78,29 +78,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
                             active_output_id = Some(id);
                         }
                         if evt_tx
-                            .send(Event::RemoteStatus {
-                                now_playing: status.now_playing,
-                                elapsed_ms: status.elapsed_ms,
-                                duration_ms: status.duration_ms,
-                                paused: status.paused,
-                                bridge_online: status.bridge_online,
-                                source_codec: status.source_codec,
-                                source_bit_depth: status.source_bit_depth,
-                                container: status.container,
-                                output_sample_format: status.output_sample_format,
-                                resampling: status.resampling,
-                                resample_from_hz: status.resample_from_hz,
-                                resample_to_hz: status.resample_to_hz,
-                                sample_rate: status.sample_rate,
-                                channels: status.channels,
-                                output_sample_rate: status.output_sample_rate,
-                                title: status.title,
-                                artist: status.artist,
-                                album: status.album,
-                                format: status.format,
-                                output_id: status.output_id,
-                                bitrate_kbps: status.bitrate_kbps,
-                            })
+                            .send(Event::RemoteStatus(status))
                             .is_err()
                         {
                             break;
@@ -839,29 +817,28 @@ fn ui_loop(
                     }
                     app.mark_queue_dirty();
                 }
-                Event::RemoteStatus {
-                    now_playing,
-                    elapsed_ms,
-                    duration_ms,
-                    paused,
-                    bridge_online,
-                    source_codec,
-                    source_bit_depth,
-                    container,
-                    output_sample_format,
-                    resampling,
-                    resample_from_hz,
-                    resample_to_hz,
-                    sample_rate,
-                    channels,
-                    output_sample_rate,
-                    title,
-                    artist,
-                    album,
-                    format,
-                    output_id,
-                    bitrate_kbps,
-                } => {
+                Event::RemoteStatus(status) => {
+                    let now_playing = status.now_playing.clone();
+                    let elapsed_ms = status.elapsed_ms;
+                    let duration_ms = status.duration_ms;
+                    let paused = status.paused;
+                    let bridge_online = status.bridge_online;
+                    let source_codec = status.source_codec.clone();
+                    let source_bit_depth = status.source_bit_depth;
+                    let container = status.container.clone();
+                    let output_sample_format = status.output_sample_format.clone();
+                    let resampling = status.resampling;
+                    let resample_from_hz = status.resample_from_hz;
+                    let resample_to_hz = status.resample_to_hz;
+                    let sample_rate = status.sample_rate;
+                    let channels = status.channels;
+                    let output_sample_rate = status.output_sample_rate;
+                    let title = status.title.clone();
+                    let artist = status.artist.clone();
+                    let album = status.album.clone();
+                    let format = status.format.clone();
+                    let output_id = status.output_id.clone();
+                    let bitrate_kbps = status.bitrate_kbps;
                     if let Some(path) = now_playing {
                         let path = PathBuf::from(path);
                         app.now_playing_path = Some(path.clone());

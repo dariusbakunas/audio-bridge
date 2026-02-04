@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use audio_bridge_types::PlaybackStatus;
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -43,34 +44,7 @@ pub enum QueueMode {
     Append,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct StatusResponse {
-    pub now_playing: Option<String>,
-    pub paused: bool,
-    pub bridge_online: bool,
-    pub elapsed_ms: Option<u64>,
-    pub duration_ms: Option<u64>,
-    pub source_codec: Option<String>,
-    pub source_bit_depth: Option<u16>,
-    pub container: Option<String>,
-    pub output_sample_format: Option<String>,
-    pub resampling: Option<bool>,
-    pub resample_from_hz: Option<u32>,
-    pub resample_to_hz: Option<u32>,
-    pub sample_rate: Option<u32>,
-    pub channels: Option<u16>,
-    pub output_sample_rate: Option<u32>,
-    pub output_device: Option<String>,
-    pub title: Option<String>,
-    pub artist: Option<String>,
-    pub album: Option<String>,
-    pub format: Option<String>,
-    pub output_id: Option<String>,
-    pub bitrate_kbps: Option<u32>,
-    pub underrun_frames: Option<u64>,
-    pub underrun_events: Option<u64>,
-    pub buffer_size_frames: Option<u32>,
-}
+pub type StatusResponse = PlaybackStatus;
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -103,19 +77,6 @@ pub struct QueueRemoveRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct BridgeInfo {
-    pub id: String,
-    pub name: String,
-    pub addr: String,
-    pub state: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct BridgesResponse {
-    pub bridges: Vec<BridgeInfo>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct OutputsResponse {
     pub active_id: Option<String>,
     pub outputs: Vec<OutputInfo>,
@@ -127,8 +88,8 @@ pub struct OutputInfo {
     pub kind: String,
     pub name: String,
     pub state: String,
-    pub bridge_id: Option<String>,
-    pub bridge_name: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
     pub supported_rates: Option<SupportedRates>,
     pub capabilities: OutputCapabilities,
 }
@@ -148,4 +109,18 @@ pub struct OutputCapabilities {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct OutputSelectRequest {
     pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ProviderInfo {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub state: String,
+    pub capabilities: OutputCapabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ProvidersResponse {
+    pub providers: Vec<ProviderInfo>,
 }

@@ -2,11 +2,11 @@ pub(crate) fn parse_output_id(id: &str) -> Result<(String, String), String> {
     let mut parts = id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");
     let bridge_id = parts.next().unwrap_or("");
-    let device = parts.next().unwrap_or("");
-    if kind != "bridge" || bridge_id.is_empty() || device.is_empty() {
+    let device_id = parts.next().unwrap_or("");
+    if kind != "bridge" || bridge_id.is_empty() || device_id.is_empty() {
         return Err("invalid output id".to_string());
     }
-    Ok((bridge_id.to_string(), device.to_string()))
+    Ok((bridge_id.to_string(), device_id.to_string()))
 }
 
 pub(crate) fn merge_bridges(

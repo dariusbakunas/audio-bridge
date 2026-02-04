@@ -437,9 +437,9 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
                     .unwrap_or(false);
                 let tag = if active { " *" } else { "" };
                 let bridge = out
-                    .bridge_name
+                    .provider_name
                     .as_deref()
-                    .or(out.bridge_id.as_deref())
+                    .or(out.provider_id.as_deref())
                     .unwrap_or("-");
                 let rates = out
                     .supported_rates

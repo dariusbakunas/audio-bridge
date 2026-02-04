@@ -145,8 +145,8 @@ listen
 - `POST /queue/next`
 - `GET /outputs/{id}/status`
 - `GET /stream` (range-enabled)
-- `GET /bridges`
-- `GET /bridges/{id}/outputs`
+- `GET /providers`
+- `GET /providers/{id}/outputs`
 - `GET /outputs`
 - `POST /outputs/select`
 - `GET /swagger-ui/` (OpenAPI UI)

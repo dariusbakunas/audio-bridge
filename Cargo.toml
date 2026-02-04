@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/bridge",
+    "crates/audio-bridge-types",
     "crates/hub-cli",
     "crates/audio-hub-server",
 ]

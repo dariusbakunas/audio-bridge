@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use audio_bridge_types::PlaybackStatus;
 
 use crate::library::{LibraryItem, Track};
 
@@ -26,31 +27,7 @@ struct LibraryResponse {
     entries: Vec<LibraryEntry>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct StatusResponse {
-    now_playing: Option<String>,
-    paused: bool,
-    bridge_online: bool,
-    elapsed_ms: Option<u64>,
-    duration_ms: Option<u64>,
-    source_codec: Option<String>,
-    source_bit_depth: Option<u16>,
-    container: Option<String>,
-    output_sample_format: Option<String>,
-    resampling: Option<bool>,
-    resample_from_hz: Option<u32>,
-    resample_to_hz: Option<u32>,
-    sample_rate: Option<u32>,
-    channels: Option<u16>,
-    output_sample_rate: Option<u32>,
-    output_device: Option<String>,
-    title: Option<String>,
-    artist: Option<String>,
-    album: Option<String>,
-    format: Option<String>,
-    output_id: Option<String>,
-    bitrate_kbps: Option<u32>,
-}
+type StatusResponse = PlaybackStatus;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OutputsResponse {
@@ -64,8 +41,8 @@ struct OutputInfo {
     kind: String,
     name: String,
     state: String,
-    bridge_id: Option<String>,
-    bridge_name: Option<String>,
+    provider_id: Option<String>,
+    provider_name: Option<String>,
     supported_rates: Option<SupportedRates>,
 }
 
@@ -194,36 +171,14 @@ pub(crate) fn seek(server: &str, ms: u64) -> Result<()> {
     Ok(())
 }
 
-pub(crate) struct RemoteStatus {
-    pub(crate) now_playing: Option<String>,
-    pub(crate) elapsed_ms: Option<u64>,
-    pub(crate) duration_ms: Option<u64>,
-    pub(crate) paused: bool,
-    pub(crate) bridge_online: bool,
-    pub(crate) source_codec: Option<String>,
-    pub(crate) source_bit_depth: Option<u16>,
-    pub(crate) container: Option<String>,
-    pub(crate) output_sample_format: Option<String>,
-    pub(crate) resampling: Option<bool>,
-    pub(crate) resample_from_hz: Option<u32>,
-    pub(crate) resample_to_hz: Option<u32>,
-    pub(crate) sample_rate: Option<u32>,
-    pub(crate) channels: Option<u16>,
-    pub(crate) output_sample_rate: Option<u32>,
-    pub(crate) title: Option<String>,
-    pub(crate) artist: Option<String>,
-    pub(crate) album: Option<String>,
-    pub(crate) format: Option<String>,
-    pub(crate) output_id: Option<String>,
-    pub(crate) bitrate_kbps: Option<u32>,
-}
+pub(crate) type RemoteStatus = PlaybackStatus;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteOutput {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) bridge_id: Option<String>,
-    pub(crate) bridge_name: Option<String>,
+    pub(crate) provider_id: Option<String>,
+    pub(crate) provider_name: Option<String>,
     pub(crate) supported_rates: Option<(u32, u32)>,
 }
 
@@ -265,29 +220,7 @@ pub(crate) fn status_for_output(server: &str, output_id: &str) -> Result<RemoteS
             .context("request /outputs/{id}/status")?,
         "status",
     )?;
-    Ok(RemoteStatus {
-        now_playing: resp.now_playing,
-        elapsed_ms: resp.elapsed_ms,
-        duration_ms: resp.duration_ms,
-        paused: resp.paused,
-        bridge_online: resp.bridge_online,
-        source_codec: resp.source_codec,
-        source_bit_depth: resp.source_bit_depth,
-        container: resp.container,
-        output_sample_format: resp.output_sample_format,
-        resampling: resp.resampling,
-        resample_from_hz: resp.resample_from_hz,
-        resample_to_hz: resp.resample_to_hz,
-        sample_rate: resp.sample_rate,
-        channels: resp.channels,
-        output_sample_rate: resp.output_sample_rate,
-        title: resp.title,
-        artist: resp.artist,
-        album: resp.album,
-        format: resp.format,
-        output_id: resp.output_id,
-        bitrate_kbps: resp.bitrate_kbps,
-    })
+    Ok(resp)
 }
 
 pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
@@ -304,8 +237,8 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
         .map(|o| RemoteOutput {
             id: o.id,
             name: o.name,
-            bridge_id: o.bridge_id,
-            bridge_name: o.bridge_name,
+            provider_id: o.provider_id,
+            provider_name: o.provider_name,
             supported_rates: o.supported_rates.map(|r| (r.min_hz, r.max_hz)),
         })
         .collect();

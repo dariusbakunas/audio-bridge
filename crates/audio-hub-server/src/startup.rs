@@ -97,8 +97,8 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::queue_clear)
             .service(api::queue_next)
             .service(api::status_for_output)
-            .service(api::bridges_list)
-            .service(api::bridge_outputs_list)
+            .service(api::providers_list)
+            .service(api::provider_outputs_list)
             .service(api::outputs_list)
             .service(api::outputs_select)
     })
@@ -237,9 +237,26 @@ fn resolve_active_output(
 ) -> Result<(Option<String>, Option<String>)> {
     let result = match cfg.active_output.as_ref() {
         Some(id) => match parse_output_id(id) {
-            Ok((bridge_id, device_name)) => {
-                let active_id = format!("bridge:{}:{}", bridge_id, device_name);
-                *device_to_set = Some(device_name);
+            Ok((bridge_id, device_id)) => {
+                let http_addr = bridges
+                    .iter()
+                    .find(|b| b.id == bridge_id)
+                    .map(|b| b.http_addr);
+                if let Some(http_addr) = http_addr {
+                    if let Ok(devices) = http_list_devices(http_addr) {
+                        if let Some(device) = devices.iter().find(|d| d.id == device_id) {
+                            let active_id = format!("bridge:{}:{}", bridge_id, device.id);
+                            *device_to_set = Some(device.name.clone());
+                            return Ok((Some(bridge_id), Some(active_id)));
+                        }
+                        if let Some(device) = devices.iter().find(|d| d.name == device_id) {
+                            let active_id = format!("bridge:{}:{}", bridge_id, device.id);
+                            *device_to_set = Some(device.name.clone());
+                            return Ok((Some(bridge_id), Some(active_id)));
+                        }
+                    }
+                }
+                let active_id = format!("bridge:{}:{}", bridge_id, device_id);
                 (Some(bridge_id), Some(active_id))
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
@@ -258,7 +275,7 @@ fn resolve_active_output(
                     match http_list_devices(bridge.http_addr) {
                         Ok(devices) if !devices.is_empty() => {
                             let device = devices[0].clone();
-                            let active_id = format!("bridge:{}:{}", bridge.id, device.name);
+                            let active_id = format!("bridge:{}:{}", bridge.id, device.id);
                             tracing::info!(
                                 bridge_id = %bridge.id,
                                 bridge_name = %bridge.name,

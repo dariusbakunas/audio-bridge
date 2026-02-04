@@ -13,7 +13,7 @@ use crate::decode;
 use crate::device;
 use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
 use crate::pipeline;
-use crate::status::BridgeStatus;
+use crate::status::BridgeStatusState;
 
 #[derive(Debug, Clone)]
 pub(crate) enum PlayerCommand {
@@ -50,7 +50,7 @@ struct SessionHandle {
 
 pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<BridgeStatus>>,
+    status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
 ) -> PlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
@@ -60,7 +60,7 @@ pub(crate) fn spawn_player(
 
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<BridgeStatus>>,
+    status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
     cmd_rx: Receiver<PlayerCommand>,
 ) {
@@ -158,7 +158,7 @@ fn cancel_session(session: &mut Option<SessionHandle>) {
 #[allow(clippy::too_many_arguments)]
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<BridgeStatus>>,
+    status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
@@ -212,7 +212,7 @@ fn start_new_session(
 fn play_one_http(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<BridgeStatus>>,
+    status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     url: String,
     ext_hint: Option<String>,

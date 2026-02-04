@@ -18,7 +18,7 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
 
 pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()> {
     let device_selected = std::sync::Arc::new(std::sync::Mutex::new(config.device.clone()));
-    let status = status::BridgeStatus::shared();
+    let status = status::BridgeStatusState::shared();
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));

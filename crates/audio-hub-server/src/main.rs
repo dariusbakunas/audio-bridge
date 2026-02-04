@@ -6,6 +6,7 @@ mod discovery;
 mod library;
 mod models;
 mod openapi;
+mod output_controller;
 mod startup;
 mod state;
 

@@ -6,6 +6,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
+use std::sync::{Mutex, OnceLock};
 
 /// Pick a CPAL output device.
 ///
@@ -137,6 +138,7 @@ pub fn list_devices(host: &cpal::Host) -> Result<()> {
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
+    pub id: String,
     pub name: String,
     pub min_rate: u32,
     pub max_rate: u32,
@@ -147,6 +149,7 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
     let mut out = Vec::new();
     for d in devices {
         let name = d.description()?.to_string();
+        let cache_key = device_cache_key(&d, &name);
         let mut min_rate = u32::MAX;
         let mut max_rate = 0u32;
         match d.supported_output_configs() {
@@ -158,16 +161,72 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
                 if min_rate == u32::MAX {
                     min_rate = 0;
                 }
-                out.push(DeviceInfo { name, min_rate, max_rate });
             }
-            Err(_) => {
-                out.push(DeviceInfo {
-                    name,
-                    min_rate: 0,
-                    max_rate: 0,
-                });
+            Err(_) => {}
+        }
+
+        if min_rate == 0 || max_rate == 0 || max_rate < min_rate {
+            if let Ok(default_cfg) = d.default_output_config() {
+                let sr = default_cfg.sample_rate();
+                min_rate = sr;
+                max_rate = sr;
             }
         }
+
+        if min_rate == 0 || max_rate == 0 || max_rate < min_rate {
+            if let Some((cached_min, cached_max)) = cached_rates(&cache_key) {
+                min_rate = cached_min;
+                max_rate = cached_max;
+            }
+        }
+
+        if min_rate == 0 || max_rate == 0 || max_rate < min_rate {
+            continue;
+        }
+
+        update_cached_rates(&cache_key, min_rate, max_rate);
+        let id = device_id_for(&d, &name, min_rate, max_rate);
+        out.push(DeviceInfo { id, name, min_rate, max_rate });
     }
     Ok(out)
+}
+
+fn device_id_for(device: &cpal::Device, name: &str, min_rate: u32, max_rate: u32) -> String {
+    if let Ok(id) = device.id() {
+        return id.to_string();
+    }
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut input = String::new();
+    input.push_str(name);
+    input.push('|');
+    input.push_str(&min_rate.to_string());
+    input.push('|');
+    input.push_str(&max_rate.to_string());
+    for b in input.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn device_cache_key(device: &cpal::Device, name: &str) -> String {
+    if let Ok(id) = device.id() {
+        return id.to_string();
+    }
+    name.to_string()
+}
+
+fn rates_cache() -> &'static Mutex<std::collections::HashMap<String, (u32, u32)>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, (u32, u32)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn cached_rates(key: &str) -> Option<(u32, u32)> {
+    rates_cache().lock().ok().and_then(|m| m.get(key).copied())
+}
+
+fn update_cached_rates(key: &str, min_rate: u32, max_rate: u32) {
+    if let Ok(mut m) = rates_cache().lock() {
+        m.insert(key.to_string(), (min_rate, max_rate));
+    }
 }

@@ -1,13 +1,12 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::io::Read;
 
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use crossbeam_channel::Sender;
 
 use crate::device;
 use crate::player::PlayerCommand;
-use crate::status::{BridgeStatus, StatusSnapshot};
+use crate::status::{BridgeStatusState, StatusSnapshot};
 
 #[derive(serde::Serialize)]
 struct HealthResponse {
@@ -19,10 +18,12 @@ struct HealthResponse {
 struct DevicesResponse {
     devices: Vec<DeviceInfo>,
     selected: Option<String>,
+    selected_id: Option<String>,
 }
 
 #[derive(serde::Serialize)]
 struct DeviceInfo {
+    id: String,
     name: String,
     min_rate: u32,
     max_rate: u32,
@@ -30,7 +31,10 @@ struct DeviceInfo {
 
 #[derive(serde::Deserialize)]
 struct DeviceSelectRequest {
-    name: String,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -51,7 +55,7 @@ struct SeekRequest {
 
 pub(crate) fn spawn_http_server(
     bind: SocketAddr,
-    status: Arc<Mutex<BridgeStatus>>,
+    status: Arc<Mutex<BridgeStatusState>>,
     device_selected: Arc<Mutex<Option<String>>>,
     player_tx: Sender<PlayerCommand>,
 ) -> std::thread::JoinHandle<()> {
@@ -83,16 +87,28 @@ pub(crate) fn spawn_http_server(
                             let mut seen = std::collections::HashSet::new();
                             let mut deduped = Vec::new();
                             for dev in devices {
-                                if seen.insert(dev.name.clone()) {
+                                if seen.insert(dev.id.clone()) {
                                     deduped.push(DeviceInfo {
+                                        id: dev.id,
                                         name: dev.name,
                                         min_rate: dev.min_rate,
                                         max_rate: dev.max_rate,
                                     });
                                 }
                             }
+                            deduped.sort_by(|a, b| a.name.cmp(&b.name));
                             let selected = device_selected.lock().ok().and_then(|g| g.clone());
-                            let body = DevicesResponse { devices: deduped, selected };
+                            let selected_id = selected.as_ref().and_then(|name| {
+                                deduped
+                                    .iter()
+                                    .find(|dev| dev.name == *name)
+                                    .map(|dev| dev.id.clone())
+                            });
+                            let body = DevicesResponse {
+                                devices: deduped,
+                                selected,
+                                selected_id,
+                            };
                             json_response(200, &body)
                         }
                         Err(e) => error_response(500, &format!("{e:#}")),
@@ -105,14 +121,36 @@ pub(crate) fn spawn_http_server(
                     } else {
                         match serde_json::from_str::<DeviceSelectRequest>(&body) {
                             Ok(req) => {
-                                if let Ok(mut g) = device_selected.lock() {
-                                    if req.name.trim().is_empty() {
-                                        *g = None;
-                                    } else {
-                                        *g = Some(req.name);
+                                let mut error: Option<(u16, Response<std::io::Cursor<Vec<u8>>>)> = None;
+                                let selected_name = if let Some(id) = req.id {
+                                    let host = cpal::default_host();
+                                    match device::list_device_infos(&host) {
+                                        Ok(devices) => devices
+                                            .into_iter()
+                                            .find(|dev| dev.id == id)
+                                            .map(|dev| dev.name),
+                                        Err(e) => {
+                                            error = Some(error_response(500, &format!("{e:#}")));
+                                            None
+                                        }
                                     }
+                                } else {
+                                    req.name
+                                };
+                                if let Some(resp) = error {
+                                    resp
+                                } else if let Some(selected_name) = selected_name {
+                                    if let Ok(mut g) = device_selected.lock() {
+                                        if selected_name.trim().is_empty() {
+                                            *g = None;
+                                        } else {
+                                            *g = Some(selected_name);
+                                        }
+                                    }
+                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                                } else {
+                                    error_response(400, "unknown device")
                                 }
-                                (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
                             }
                             Err(e) => error_response(400, &format!("invalid json: {e}")),
                         }
