@@ -58,7 +58,7 @@ fn play_one_local(
     playback: &PlaybackConfig,
     path: &std::path::PathBuf,
 ) -> Result<()> {
-    let (src_spec, srcq, _duration_ms) =
+    let (src_spec, srcq, _duration_ms, _source_info) =
         decode::start_streaming_decode(path, playback.buffer_seconds)?;
     let config = device::pick_output_config(device, Some(src_spec.rate))?;
     let mut stream_config: cpal::StreamConfig = config.clone().into();

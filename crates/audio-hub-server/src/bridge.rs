@@ -11,7 +11,12 @@ use crate::state::PlayerStatus;
 
 #[derive(Debug, Clone)]
 pub enum BridgeCommand {
-    Play { path: PathBuf, ext_hint: String },
+    Play {
+        path: PathBuf,
+        ext_hint: String,
+        seek_ms: Option<u64>,
+        start_paused: bool,
+    },
     PauseToggle,
     Stop,
     Seek { ms: u64 },
@@ -40,6 +45,13 @@ pub struct HttpStatusResponse {
     pub paused: bool,
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,
+    pub source_codec: Option<String>,
+    pub source_bit_depth: Option<u16>,
+    pub container: Option<String>,
+    pub output_sample_format: Option<String>,
+    pub resampling: Option<bool>,
+    pub resample_from_hz: Option<u32>,
+    pub resample_to_hz: Option<u32>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u16>,
     pub device: Option<String>,
@@ -150,7 +162,7 @@ pub fn spawn_bridge_worker(
                     BridgeCommand::Seek { ms } => {
                         let _ = http_seek(http_addr, ms);
                     }
-                    BridgeCommand::Play { path, ext_hint } => {
+                    BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
                         let url = build_stream_url(&public_base_url, &path);
                         let title = path
                             .file_name()
@@ -161,8 +173,11 @@ pub fn spawn_bridge_worker(
                             &url,
                             if ext_hint.is_empty() { None } else { Some(ext_hint.as_str()) },
                             title.as_deref(),
-                            None,
+                            seek_ms,
                         );
+                        if start_paused {
+                            let _ = http_pause_toggle(http_addr);
+                        }
 
                         if let Ok(mut s) = status.lock() {
                             s.now_playing = Some(path.clone());
@@ -182,10 +197,10 @@ pub fn spawn_bridge_worker(
             }
             next_poll = Instant::now() + Duration::from_millis(500);
 
-            if let Ok(remote) = http_status(http_addr) {
-                bridge_online.store(true, Ordering::Relaxed);
-                if let Ok(mut s) = status.lock() {
-                    s.paused = remote.paused;
+        if let Ok(remote) = http_status(http_addr) {
+            bridge_online.store(true, Ordering::Relaxed);
+            if let Ok(mut s) = status.lock() {
+                s.paused = remote.paused;
                     s.elapsed_ms = remote.elapsed_ms;
                     s.duration_ms = remote.duration_ms;
                     s.sample_rate = remote.sample_rate;
@@ -202,7 +217,12 @@ pub fn spawn_bridge_worker(
                                         .and_then(|ext| ext.to_str())
                                         .unwrap_or("")
                                         .to_ascii_lowercase();
-                                    let _ = cmd_tx.send(BridgeCommand::Play { path, ext_hint });
+                                        let _ = cmd_tx.send(BridgeCommand::Play {
+                                            path,
+                                            ext_hint,
+                                            seek_ms: None,
+                                            start_paused: false,
+                                        });
                                     if let Ok(mut s2) = status.lock() {
                                         s2.auto_advance_in_flight = true;
                                     }

@@ -76,7 +76,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .wrap(Logger::default().exclude("/status").exclude("/queue").exclude("/stream"))
+            .wrap(Logger::default().exclude("/queue").exclude("/stream").exclude("/outputs"))
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-doc/openapi.json", openapi::ApiDoc::openapi()),
@@ -92,7 +92,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::queue_remove)
             .service(api::queue_clear)
             .service(api::queue_next)
-            .service(api::status)
+            .service(api::status_for_output)
             .service(api::bridges_list)
             .service(api::bridge_outputs_list)
             .service(api::outputs_list)

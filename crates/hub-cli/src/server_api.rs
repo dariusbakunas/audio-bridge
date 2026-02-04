@@ -33,6 +33,13 @@ struct StatusResponse {
     bridge_online: bool,
     elapsed_ms: Option<u64>,
     duration_ms: Option<u64>,
+    source_codec: Option<String>,
+    source_bit_depth: Option<u16>,
+    container: Option<String>,
+    output_sample_format: Option<String>,
+    resampling: Option<bool>,
+    resample_from_hz: Option<u32>,
+    resample_to_hz: Option<u32>,
     sample_rate: Option<u32>,
     channels: Option<u16>,
     output_sample_rate: Option<u32>,
@@ -42,6 +49,7 @@ struct StatusResponse {
     album: Option<String>,
     format: Option<String>,
     output_id: Option<String>,
+    bitrate_kbps: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -192,6 +200,13 @@ pub(crate) struct RemoteStatus {
     pub(crate) duration_ms: Option<u64>,
     pub(crate) paused: bool,
     pub(crate) bridge_online: bool,
+    pub(crate) source_codec: Option<String>,
+    pub(crate) source_bit_depth: Option<u16>,
+    pub(crate) container: Option<String>,
+    pub(crate) output_sample_format: Option<String>,
+    pub(crate) resampling: Option<bool>,
+    pub(crate) resample_from_hz: Option<u32>,
+    pub(crate) resample_to_hz: Option<u32>,
     pub(crate) sample_rate: Option<u32>,
     pub(crate) channels: Option<u16>,
     pub(crate) output_sample_rate: Option<u32>,
@@ -200,6 +215,7 @@ pub(crate) struct RemoteStatus {
     pub(crate) album: Option<String>,
     pub(crate) format: Option<String>,
     pub(crate) output_id: Option<String>,
+    pub(crate) bitrate_kbps: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -228,11 +244,25 @@ pub(crate) struct RemoteQueue {
 }
 
 pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
-    let url = format!("{}/status", server.trim_end_matches('/'));
+    let base = server.trim_end_matches('/');
+    let outputs = outputs(base)?;
+    let Some(active_id) = outputs.active_id else {
+        return Err(anyhow::anyhow!("no active output selected"));
+    };
+    status_for_output(base, &active_id)
+}
+
+pub(crate) fn status_for_output(server: &str, output_id: &str) -> Result<RemoteStatus> {
+    let base = server.trim_end_matches('/');
+    let url = format!(
+        "{}/outputs/{}/status",
+        base,
+        urlencoding::encode(output_id)
+    );
     let resp: StatusResponse = read_json(
         ureq::get(&url)
             .call()
-            .context("request /status")?,
+            .context("request /outputs/{id}/status")?,
         "status",
     )?;
     Ok(RemoteStatus {
@@ -241,6 +271,13 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
         duration_ms: resp.duration_ms,
         paused: resp.paused,
         bridge_online: resp.bridge_online,
+        source_codec: resp.source_codec,
+        source_bit_depth: resp.source_bit_depth,
+        container: resp.container,
+        output_sample_format: resp.output_sample_format,
+        resampling: resp.resampling,
+        resample_from_hz: resp.resample_from_hz,
+        resample_to_hz: resp.resample_to_hz,
         sample_rate: resp.sample_rate,
         channels: resp.channels,
         output_sample_rate: resp.output_sample_rate,
@@ -249,6 +286,7 @@ pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
         album: resp.album,
         format: resp.format,
         output_id: resp.output_id,
+        bitrate_kbps: resp.bitrate_kbps,
     })
 }
 

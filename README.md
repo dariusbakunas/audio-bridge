@@ -143,7 +143,7 @@ listen
 - `POST /queue/remove`
 - `POST /queue/clear`
 - `POST /queue/next`
-- `GET /status`
+- `GET /outputs/{id}/status`
 - `GET /stream` (range-enabled)
 - `GET /bridges`
 - `GET /bridges/{id}/outputs`

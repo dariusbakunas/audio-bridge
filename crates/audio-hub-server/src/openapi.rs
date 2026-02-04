@@ -17,7 +17,7 @@ use crate::models;
         api::queue_remove,
         api::queue_clear,
         api::queue_next,
-        api::status,
+        api::status_for_output,
         api::bridges_list,
         api::bridge_outputs_list,
         api::outputs_list,

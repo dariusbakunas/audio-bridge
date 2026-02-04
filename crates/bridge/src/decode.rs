@@ -32,11 +32,18 @@ use crate::queue::{calc_max_buffered_samples, SharedAudio};
 /// - network-spooled playback
 ///
 /// The queue is closed on EOF or error.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SourceInfo {
+    pub(crate) codec: Option<String>,
+    pub(crate) bit_depth: Option<u16>,
+    pub(crate) container: Option<String>,
+}
+
 pub(crate) fn start_streaming_decode_from_media_source(
     source: Box<dyn MediaSource>,
     hint: Hint,
     buffer_seconds: f32,
-) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>, SourceInfo)> {
     start_streaming_decode_from_media_source_at(source, hint, buffer_seconds, None)
 }
 
@@ -45,7 +52,7 @@ pub(crate) fn start_streaming_decode_from_media_source_at(
     hint: Hint,
     buffer_seconds: f32,
     seek_ms: Option<u64>,
-) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>, SourceInfo)> {
     // Probe once to get spec.
     let mss = MediaSourceStream::new(source, Default::default());
 
@@ -91,6 +98,14 @@ pub(crate) fn start_streaming_decode_from_media_source_at(
 
     let codec_params: CodecParameters = track.codec_params.clone();
     let duration_ms = duration_ms_from_codec_params(&codec_params);
+    let source_info = SourceInfo {
+        codec: codec_name_from_params(&codec_params),
+        bit_depth: codec_params
+            .bits_per_sample
+            .or(codec_params.bits_per_coded_sample)
+            .and_then(|v| u16::try_from(v).ok()),
+        container: None,
+    };
 
     let max_buffered_samples = calc_max_buffered_samples(rate, channels, buffer_seconds);
     let shared = Arc::new(SharedAudio::new(channels, max_buffered_samples));
@@ -104,14 +119,14 @@ pub(crate) fn start_streaming_decode_from_media_source_at(
         shared_for_thread.close();
     });
 
-    Ok((spec, shared, duration_ms))
+    Ok((spec, shared, duration_ms, source_info))
 }
 
 /// Start a background decoder thread that streams interleaved `f32` samples from `path`.
 pub(crate) fn start_streaming_decode(
     path: &PathBuf,
     buffer_seconds: f32,
-) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>, SourceInfo)> {
     let file = File::open(path).with_context(|| format!("open {:?}", path))?;
 
     let mut hint = Hint::new();
@@ -163,4 +178,22 @@ fn duration_ms_from_codec_params(codec_params: &CodecParameters) -> Option<u64> 
         return None;
     }
     Some(frames.saturating_mul(1000) / rate)
+}
+
+fn codec_name_from_params(params: &CodecParameters) -> Option<String> {
+    use symphonia::core::codecs::*;
+    let name = match params.codec {
+        CODEC_TYPE_FLAC => "FLAC",
+        CODEC_TYPE_MP3 => "MP3",
+        CODEC_TYPE_AAC => "AAC",
+        CODEC_TYPE_ALAC => "ALAC",
+        CODEC_TYPE_VORBIS => "VORBIS",
+        CODEC_TYPE_OPUS => "OPUS",
+        CODEC_TYPE_PCM_S16LE | CODEC_TYPE_PCM_S16BE => "PCM_S16",
+        CODEC_TYPE_PCM_S24LE | CODEC_TYPE_PCM_S24BE => "PCM_S24",
+        CODEC_TYPE_PCM_S32LE | CODEC_TYPE_PCM_S32BE => "PCM_S32",
+        CODEC_TYPE_PCM_F32LE | CODEC_TYPE_PCM_F32BE => "PCM_F32",
+        _ => return None,
+    };
+    Some(name.to_string())
 }

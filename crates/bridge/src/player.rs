@@ -238,7 +238,7 @@ fn play_one_http(
     }
 
     let source = HttpRangeSource::new(url.clone(), HttpRangeConfig::default(), Some(cancel.clone()));
-    let (src_spec, srcq, duration_ms) =
+    let (src_spec, srcq, duration_ms, source_info) =
         decode::start_streaming_decode_from_media_source_at(
             Box::new(source),
             hint,
@@ -270,6 +270,12 @@ fn play_one_http(
     }
     let underrun_frames = Arc::new(AtomicU64::new(0));
     let underrun_events = Arc::new(AtomicU64::new(0));
+    let output_sample_format = Some(format!("{:?}", config.sample_format()));
+    let container = ext_hint
+        .clone()
+        .or_else(|| infer_ext_from_url(&url))
+        .map(|s| s.to_ascii_uppercase());
+    let resampling = src_spec.rate != stream_config.sample_rate;
     {
         if let Ok(mut s) = status.lock() {
             s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
@@ -277,6 +283,13 @@ fn play_one_http(
             s.sample_rate = Some(stream_config.sample_rate);
             s.channels = Some(src_spec.channels.count() as u16);
             s.duration_ms = duration_ms;
+            s.source_codec = source_info.codec.clone();
+            s.source_bit_depth = source_info.bit_depth;
+            s.container = container.or_else(|| source_info.container.clone());
+            s.output_sample_format = output_sample_format.clone();
+            s.resampling = Some(resampling);
+            s.resample_from_hz = Some(src_spec.rate);
+            s.resample_to_hz = Some(stream_config.sample_rate);
             s.played_frames = Some(played_frames.clone());
             s.paused_flag = Some(paused_flag.clone());
             s.underrun_frames = Some(underrun_frames.clone());

@@ -257,7 +257,12 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         .lock()
         .unwrap()
         .cmd_tx
-        .send(crate::bridge::BridgeCommand::Play { path: path.clone(), ext_hint })
+        .send(crate::bridge::BridgeCommand::Play {
+            path: path.clone(),
+            ext_hint,
+            seek_ms: None,
+            start_paused: false,
+        })
         .is_ok()
     {
         tracing::info!(output_id = %output_id, "play dispatched");
@@ -465,32 +470,25 @@ pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
 
 #[utoipa::path(
     get,
-    path = "/status",
+    path = "/outputs/{id}/status",
+    params(
+        ("id" = String, Path, description = "Output id")
+    ),
     responses(
-        (status = 200, description = "Playback status", body = StatusResponse)
+        (status = 200, description = "Playback status for output", body = StatusResponse),
+        (status = 400, description = "Unknown or inactive output")
     )
 )]
-#[get("/status")]
-pub async fn status(state: web::Data<AppState>) -> impl Responder {
-    let status = state.status.lock().unwrap();
-    let (title, artist, album, format, sample_rate) = match status.now_playing.as_ref() {
-        Some(path) => {
-            let lib = state.library.read().unwrap();
-            match lib.find_track_by_path(path) {
-                Some(crate::models::LibraryEntry::Track {
-                    file_name,
-                    sample_rate,
-                    artist,
-                    album,
-                    format,
-                    ..
-                }) => (Some(file_name), artist, album, Some(format), sample_rate),
-                _ => (None, None, None, None, None),
-            }
-        }
-        None => (None, None, None, None, None),
-    };
-    let (output_id, http_addr) = {
+#[get("/outputs/{id}/status")]
+pub async fn status_for_output(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let output_id = id.into_inner();
+    if parse_output_id(&output_id).is_err() {
+        return HttpResponse::BadRequest().body("invalid output id");
+    }
+    let (active_output_id, http_addr) = {
         let bridges = state.bridges.lock().unwrap();
         let http_addr = bridges.active_bridge_id.as_ref().and_then(|active_id| {
             bridges
@@ -501,6 +499,34 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         });
         (bridges.active_output_id.clone(), http_addr)
     };
+    if active_output_id.as_deref() != Some(output_id.as_str()) {
+        return HttpResponse::BadRequest().body("output is not active");
+    }
+    if let Err(resp) = ensure_bridge_connected(&state).await {
+        return resp;
+    }
+
+    let status = state.status.lock().unwrap();
+    let (title, artist, album, format, sample_rate, bitrate_kbps) = match status.now_playing.as_ref() {
+        Some(path) => {
+            let lib = state.library.read().unwrap();
+            match lib.find_track_by_path(path) {
+                Some(crate::models::LibraryEntry::Track {
+                    file_name,
+                    sample_rate,
+                    artist,
+                    album,
+                    format,
+                    ..
+                }) => {
+                    let bitrate_kbps = estimate_bitrate_kbps(path, status.duration_ms);
+                    (Some(file_name), artist, album, Some(format), sample_rate, bitrate_kbps)
+                }
+                _ => (None, None, None, None, None, None),
+            }
+        }
+        None => (None, None, None, None, None, None),
+    };
     let bridge_online = state.bridge_online.load(std::sync::atomic::Ordering::Relaxed);
     let mut resp = StatusResponse {
         now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
@@ -508,6 +534,13 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         bridge_online,
         elapsed_ms: status.elapsed_ms,
         duration_ms: status.duration_ms,
+        source_codec: None,
+        source_bit_depth: None,
+        container: None,
+        output_sample_format: None,
+        resampling: None,
+        resample_from_hz: None,
+        resample_to_hz: None,
         sample_rate,
         channels: status.channels,
         output_sample_rate: status.sample_rate,
@@ -516,7 +549,8 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
         artist,
         album,
         format,
-        output_id,
+        output_id: Some(output_id.clone()),
+        bitrate_kbps,
         underrun_frames: None,
         underrun_events: None,
         buffer_size_frames: None,
@@ -528,6 +562,13 @@ pub async fn status(state: web::Data<AppState>) -> impl Responder {
                 resp.paused = remote.paused;
                 resp.elapsed_ms = remote.elapsed_ms;
                 resp.duration_ms = remote.duration_ms;
+                resp.source_codec = remote.source_codec;
+                resp.source_bit_depth = remote.source_bit_depth;
+                resp.container = remote.container;
+                resp.output_sample_format = remote.output_sample_format;
+                resp.resampling = remote.resampling;
+                resp.resample_from_hz = remote.resample_from_hz;
+                resp.resample_to_hz = remote.resample_to_hz;
                 resp.channels = remote.channels;
                 resp.output_sample_rate = remote.sample_rate;
                 resp.output_device = remote.device;
@@ -708,6 +749,15 @@ pub async fn outputs_select(
         }
     }
 
+    let resume_info = {
+        let status = state.status.lock().unwrap();
+        (
+            status.now_playing.clone(),
+            status.elapsed_ms,
+            status.paused,
+        )
+    };
+
     // Stop current playback before switching outputs.
     {
         let cmd_tx = state.player.lock().unwrap().cmd_tx.clone();
@@ -745,6 +795,23 @@ pub async fn outputs_select(
 
     if let Err(resp) = ensure_bridge_connected(&state).await {
         return resp;
+    }
+
+    if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
+        let ext_hint = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let start_paused = resume_info.2;
+        let _ = state.player.lock().unwrap().cmd_tx.send(
+            crate::bridge::BridgeCommand::Play {
+                path,
+                ext_hint,
+                seek_ms: Some(elapsed_ms),
+                start_paused,
+            },
+        );
     }
     HttpResponse::Ok().finish()
 }
@@ -935,6 +1002,23 @@ fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, Str
     Ok(canon)
 }
 
+fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32> {
+    let duration_ms = duration_ms?;
+    if duration_ms == 0 {
+        return None;
+    }
+    let size = std::fs::metadata(path).ok()?.len();
+    if size == 0 {
+        return None;
+    }
+    let bits = size.saturating_mul(8);
+    let kbps = bits
+        .saturating_mul(1000)
+        .saturating_div(duration_ms)
+        .saturating_div(1000);
+    u32::try_from(kbps).ok()
+}
+
 fn parse_single_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
     let header = header.trim();
     if !header.starts_with("bytes=") {
@@ -972,6 +1056,8 @@ fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {
         .send(crate::bridge::BridgeCommand::Play {
             path: path.clone(),
             ext_hint,
+            seek_ms: None,
+            start_paused: false,
         })
         .is_ok()
     {

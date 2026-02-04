@@ -58,11 +58,25 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
         let evt_tx = evt_tx.clone();
         move || {
             let mut delay = Duration::from_millis(250);
+            let mut active_output_id: Option<String> = None;
             loop {
                 std::thread::sleep(delay);
-                match server_api::status(&server) {
+                if active_output_id.is_none() {
+                    if let Ok(outputs) = server_api::outputs(&server) {
+                        active_output_id = outputs.active_id;
+                    }
+                }
+                let status_result = if let Some(ref id) = active_output_id {
+                    server_api::status_for_output(&server, id)
+                } else {
+                    server_api::status(&server)
+                };
+                match status_result {
                     Ok(status) => {
                         delay = Duration::from_millis(250);
+                        if let Some(id) = status.output_id.clone() {
+                            active_output_id = Some(id);
+                        }
                         if evt_tx
                             .send(Event::RemoteStatus {
                                 now_playing: status.now_playing,
@@ -70,6 +84,13 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
                                 duration_ms: status.duration_ms,
                                 paused: status.paused,
                                 bridge_online: status.bridge_online,
+                                source_codec: status.source_codec,
+                                source_bit_depth: status.source_bit_depth,
+                                container: status.container,
+                                output_sample_format: status.output_sample_format,
+                                resampling: status.resampling,
+                                resample_from_hz: status.resample_from_hz,
+                                resample_to_hz: status.resample_to_hz,
                                 sample_rate: status.sample_rate,
                                 channels: status.channels,
                                 output_sample_rate: status.output_sample_rate,
@@ -78,6 +99,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
                                 album: status.album,
                                 format: status.format,
                                 output_id: status.output_id,
+                                bitrate_kbps: status.bitrate_kbps,
                             })
                             .is_err()
                         {
@@ -86,6 +108,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
                     }
                     Err(_) => {
                         delay = (delay * 2).min(Duration::from_secs(2));
+                        active_output_id = None;
                     }
                 }
             }
@@ -174,6 +197,14 @@ pub(crate) struct App {
     pub(crate) remote_paused: Option<bool>,
     pub(crate) remote_bridge_online: bool,
     pub(crate) remote_elapsed_ms: Option<u64>,
+    pub(crate) remote_source_codec: Option<String>,
+    pub(crate) remote_source_bit_depth: Option<u16>,
+    pub(crate) remote_container: Option<String>,
+    pub(crate) remote_output_sample_format: Option<String>,
+    pub(crate) remote_resampling: Option<bool>,
+    pub(crate) remote_resample_from_hz: Option<u32>,
+    pub(crate) remote_resample_to_hz: Option<u32>,
+    pub(crate) remote_bitrate_kbps: Option<u32>,
     pub(crate) remote_channels: Option<u16>,
     pub(crate) remote_output_sample_rate: Option<u32>,
     pub(crate) remote_output_id: Option<String>,
@@ -248,6 +279,14 @@ impl App {
             remote_paused: None,
             remote_bridge_online: false,
             remote_elapsed_ms: None,
+            remote_source_codec: None,
+            remote_source_bit_depth: None,
+            remote_container: None,
+            remote_output_sample_format: None,
+            remote_resampling: None,
+            remote_resample_from_hz: None,
+            remote_resample_to_hz: None,
+            remote_bitrate_kbps: None,
             remote_channels: None,
             remote_output_sample_rate: None,
             remote_output_id: None,
@@ -800,6 +839,13 @@ fn ui_loop(
                     duration_ms,
                     paused,
                     bridge_online,
+                    source_codec,
+                    source_bit_depth,
+                    container,
+                    output_sample_format,
+                    resampling,
+                    resample_from_hz,
+                    resample_to_hz,
                     sample_rate,
                     channels,
                     output_sample_rate,
@@ -808,6 +854,7 @@ fn ui_loop(
                     album,
                     format,
                     output_id,
+                    bitrate_kbps,
                 } => {
                     if let Some(path) = now_playing {
                         let path = PathBuf::from(path);
@@ -827,6 +874,14 @@ fn ui_loop(
                     app.remote_elapsed_ms = elapsed_ms;
                     app.remote_paused = Some(paused);
                     app.remote_bridge_online = bridge_online;
+                    app.remote_source_codec = source_codec;
+                    app.remote_source_bit_depth = source_bit_depth;
+                    app.remote_container = container;
+                    app.remote_output_sample_format = output_sample_format;
+                    app.remote_resampling = resampling;
+                    app.remote_resample_from_hz = resample_from_hz;
+                    app.remote_resample_to_hz = resample_to_hz;
+                    app.remote_bitrate_kbps = bitrate_kbps;
                     if title.is_some() || artist.is_some() || album.is_some() || format.is_some() {
                         let mut meta = app.now_playing_meta.clone().unwrap_or_default();
                         if artist.is_some() {
