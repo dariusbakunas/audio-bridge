@@ -10,6 +10,8 @@ use crate::models;
         api::rescan_library,
         api::play_track,
         api::pause_toggle,
+        api::seek,
+        api::stream_track,
         api::queue_list,
         api::queue_add,
         api::queue_remove,
@@ -39,6 +41,7 @@ use crate::models;
             models::OutputSelectRequest,
             models::BridgeInfo,
             models::BridgesResponse,
+            api::SeekBody,
         )
     ),
     tags(

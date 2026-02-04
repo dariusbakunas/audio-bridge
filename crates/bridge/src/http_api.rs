@@ -1,9 +1,12 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::io::Read;
 
 use tiny_http::{Header, Method, Response, Server, StatusCode};
+use crossbeam_channel::Sender;
 
 use crate::device;
+use crate::player::PlayerCommand;
 use crate::status::{BridgeStatus, StatusSnapshot};
 
 #[derive(serde::Serialize)]
@@ -30,10 +33,27 @@ struct DeviceSelectRequest {
     name: String,
 }
 
+#[derive(serde::Deserialize)]
+struct PlayRequest {
+    url: String,
+    #[serde(default)]
+    ext_hint: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    seek_ms: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+struct SeekRequest {
+    ms: u64,
+}
+
 pub(crate) fn spawn_http_server(
     bind: SocketAddr,
     status: Arc<Mutex<BridgeStatus>>,
     device_selected: Arc<Mutex<Option<String>>>,
+    player_tx: Sender<PlayerCommand>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let server = match Server::http(bind) {
@@ -115,6 +135,71 @@ pub(crate) fn spawn_http_server(
                             buffer_size_frames: None,
                         });
                     json_response(200, &snapshot)
+                }
+                (Method::Post, "/play") => {
+                    let mut body = String::new();
+                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                        error_response(400, &format!("read body failed: {e}"))
+                    } else {
+                        match serde_json::from_str::<PlayRequest>(&body) {
+                            Ok(req) => {
+                                if req.url.trim().is_empty() {
+                                    error_response(400, "url is required")
+                                } else if player_tx
+                                    .send(PlayerCommand::Play {
+                                        url: req.url,
+                                        ext_hint: req.ext_hint,
+                                        title: req.title,
+                                        seek_ms: req.seek_ms,
+                                    })
+                                    .is_err()
+                                {
+                                    error_response(500, "player offline")
+                                } else {
+                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                                }
+                            }
+                            Err(e) => error_response(400, &format!("invalid json: {e}")),
+                        }
+                    }
+                }
+                (Method::Post, "/pause") => {
+                    if player_tx.send(PlayerCommand::PauseToggle).is_err() {
+                        error_response(500, "player offline")
+                    } else {
+                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                    }
+                }
+                (Method::Post, "/resume") => {
+                    if player_tx.send(PlayerCommand::Resume).is_err() {
+                        error_response(500, "player offline")
+                    } else {
+                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                    }
+                }
+                (Method::Post, "/stop") => {
+                    if player_tx.send(PlayerCommand::Stop).is_err() {
+                        error_response(500, "player offline")
+                    } else {
+                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                    }
+                }
+                (Method::Post, "/seek") => {
+                    let mut body = String::new();
+                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                        error_response(400, &format!("read body failed: {e}"))
+                    } else {
+                        match serde_json::from_str::<SeekRequest>(&body) {
+                            Ok(req) => {
+                                if player_tx.send(PlayerCommand::Seek { ms: req.ms }).is_err() {
+                                    error_response(500, "player offline")
+                                } else {
+                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
+                                }
+                            }
+                            Err(e) => error_response(400, &format!("invalid json: {e}")),
+                        }
+                    }
                 }
                 _ => error_response(404, "not found"),
             };

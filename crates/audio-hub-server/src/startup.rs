@@ -20,9 +20,11 @@ use crate::state::{AppState, BridgeState, PlayerStatus, QueueState};
 pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let cfg = load_config(args.config.as_ref())?;
     let bind = resolve_bind(args.bind, &cfg)?;
+    let public_base_url = config::public_base_url_from_config(&cfg, bind)?;
     let media_dir = resolve_media_dir(args.media_dir, &cfg)?;
     tracing::info!(
         bind = %bind,
+        public_base_url = %public_base_url,
         media_dir = %media_dir.display(),
         "starting audio-hub-server"
     );
@@ -66,6 +68,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         bridges_state,
         bridge_online.clone(),
         discovered_bridges.clone(),
+        public_base_url,
     ));
     setup_shutdown(state.player.clone());
     spawn_mdns_discovery(state.clone());
@@ -73,7 +76,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .wrap(Logger::default().exclude("/status").exclude("/queue"))
+            .wrap(Logger::default().exclude("/status").exclude("/queue").exclude("/stream"))
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-doc/openapi.json", openapi::ApiDoc::openapi()),
@@ -82,6 +85,8 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::rescan_library)
             .service(api::play_track)
             .service(api::pause_toggle)
+            .service(api::seek)
+            .service(api::stream_track)
             .service(api::queue_list)
             .service(api::queue_add)
             .service(api::queue_remove)

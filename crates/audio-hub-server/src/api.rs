@@ -1,9 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
+use actix_web::http::{header, StatusCode};
+use actix_web::body::SizedStream;
 use anyhow::Result;
 use serde::Deserialize;
 use utoipa::ToSchema;
+use tokio_util::io::ReaderStream;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::library::scan_library;
 use crate::models::{
@@ -29,6 +33,16 @@ use crate::state::AppState;
 #[derive(Deserialize, ToSchema)]
 pub struct LibraryQuery {
     pub dir: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct StreamQuery {
+    pub path: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SeekBody {
+    pub ms: u64,
 }
 
 #[utoipa::path(
@@ -64,6 +78,83 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
         entries,
     };
     HttpResponse::Ok().json(resp)
+}
+
+#[utoipa::path(
+    get,
+    path = "/stream",
+    params(
+        ("path" = String, Query, description = "Track path under the library root")
+    ),
+    responses(
+        (status = 200, description = "Full file stream"),
+        (status = 206, description = "Partial content"),
+        (status = 404, description = "Not found"),
+        (status = 416, description = "Invalid range")
+    )
+)]
+#[get("/stream")]
+pub async fn stream_track(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    query: web::Query<StreamQuery>,
+) -> impl Responder {
+    let path = PathBuf::from(&query.path);
+    let path = match canonicalize_under_root(&state, &path) {
+        Ok(dir) => dir,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    let meta = match file.metadata().await {
+        Ok(m) => m,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    let total_len = meta.len();
+
+    let range_header = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok());
+    let range = match range_header.and_then(|h| parse_single_range(h, total_len)) {
+        Some(r) => Some(r),
+        None if range_header.is_some() => {
+            return HttpResponse::RangeNotSatisfiable()
+                .insert_header((header::ACCEPT_RANGES, "bytes"))
+                .finish();
+        }
+        None => None,
+    };
+
+    let (start, len, status_code) = if let Some((start, end)) = range {
+        let len = end.saturating_sub(start).saturating_add(1);
+        (start, len, StatusCode::PARTIAL_CONTENT)
+    } else {
+        (0, total_len, StatusCode::OK)
+    };
+
+    if start > 0 {
+        if let Err(_) = file.seek(std::io::SeekFrom::Start(start)).await {
+            return HttpResponse::InternalServerError().finish();
+        }
+    }
+
+    let stream = ReaderStream::new(file.take(len));
+    let body = SizedStream::new(len, stream);
+
+    let mut resp = HttpResponse::build(status_code);
+    resp.insert_header((header::ACCEPT_RANGES, "bytes"));
+    if let Some((start, end)) = range {
+        resp.insert_header((
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{total_len}"),
+        ));
+    }
+    resp.insert_header((header::CONTENT_LENGTH, len.to_string()));
+    resp.body(body)
 }
 
 #[utoipa::path(
@@ -205,6 +296,32 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
             s.paused = !s.paused;
             s.user_paused = s.paused;
         }
+        HttpResponse::Ok().finish()
+    } else {
+        HttpResponse::InternalServerError().body("player offline")
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/seek",
+    request_body = SeekBody,
+    responses(
+        (status = 200, description = "Seek requested"),
+        (status = 500, description = "Player offline")
+    )
+)]
+#[post("/seek")]
+pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl Responder {
+    let ms = body.ms;
+    if state
+        .player
+        .lock()
+        .unwrap()
+        .cmd_tx
+        .send(crate::bridge::BridgeCommand::Seek { ms })
+        .is_ok()
+    {
         HttpResponse::Ok().finish()
     } else {
         HttpResponse::InternalServerError().body("player offline")
@@ -560,14 +677,14 @@ pub async fn outputs_select(
         Ok(x) => x,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let (addr, http_addr) = {
+    let http_addr = {
         let bridges_state = state.bridges.lock().unwrap();
         let discovered = state.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
             return HttpResponse::BadRequest().body("unknown bridge id");
         };
-        (bridge.addr, bridge.http_addr)
+        bridge.http_addr
     };
 
     match crate::bridge::http_list_devices(http_addr) {
@@ -597,7 +714,7 @@ pub async fn outputs_select(
         let _ = cmd_tx.send(crate::bridge::BridgeCommand::Stop);
     }
 
-    if let Err(e) = switch_active_bridge(&state, &bridge_id, addr) {
+    if let Err(e) = switch_active_bridge(&state, &bridge_id, http_addr) {
         tracing::warn!(
             bridge_id = %bridge_id,
             error = %e,
@@ -726,7 +843,7 @@ fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates>
 fn switch_active_bridge(
     state: &AppState,
     bridge_id: &str,
-    addr: std::net::SocketAddr,
+    http_addr: std::net::SocketAddr,
 ) -> Result<()> {
     let mut bridges = state.bridges.lock().unwrap();
     if bridges.active_bridge_id.as_deref() == Some(bridge_id) {
@@ -735,7 +852,7 @@ fn switch_active_bridge(
     tracing::info!(
         from_bridge_id = ?bridges.active_bridge_id,
         to_bridge_id = %bridge_id,
-        addr = %addr,
+        http_addr = %http_addr,
         "switch active bridge"
     );
     bridges.active_bridge_id = Some(bridge_id.to_string());
@@ -745,7 +862,7 @@ fn switch_active_bridge(
         .bridge_online
         .store(false, std::sync::atomic::Ordering::Relaxed);
     {
-    let player = state.player.lock().unwrap();
+        let player = state.player.lock().unwrap();
         let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
     }
     Ok(())
@@ -766,7 +883,7 @@ async fn ensure_bridge_connected(state: &AppState) -> Result<(), HttpResponse> {
         let Some(bridge) = merged.iter().find(|b| b.id == *active_bridge_id) else {
             return Err(HttpResponse::ServiceUnavailable().body("active bridge not found"));
         };
-        (bridge.id.clone(), bridge.addr)
+        (bridge.id.clone(), bridge.http_addr)
     };
 
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
@@ -784,6 +901,7 @@ async fn ensure_bridge_connected(state: &AppState) -> Result<(), HttpResponse> {
         state.queue.clone(),
         state.bridge_online.clone(),
         state.bridges.clone(),
+        state.public_base_url.clone(),
     );
 
     let mut waited = 0u64;
@@ -815,6 +933,29 @@ fn canonicalize_under_root(state: &AppState, path: &Path) -> Result<PathBuf, Str
         return Err(format!("path outside library root: {:?}", path));
     }
     Ok(canon)
+}
+
+fn parse_single_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
+    let header = header.trim();
+    if !header.starts_with("bytes=") {
+        return None;
+    }
+    let range = header.trim_start_matches("bytes=");
+    let first = range.split(',').next()?;
+    let (start_s, end_s) = first.split_once('-')?;
+    if start_s.is_empty() {
+        return None;
+    }
+    let start = start_s.parse::<u64>().ok()?;
+    let end = if end_s.is_empty() {
+        total_len.saturating_sub(1)
+    } else {
+        end_s.parse::<u64>().ok()?
+    };
+    if start >= total_len || end < start {
+        return None;
+    }
+    Some((start, end.min(total_len.saturating_sub(1))))
 }
 
 fn start_path(state: &web::Data<AppState>, path: PathBuf) -> HttpResponse {

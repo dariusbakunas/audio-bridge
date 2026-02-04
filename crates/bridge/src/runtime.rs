@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use cpal::traits::DeviceTrait;
 
 use crate::config::{BridgeListenConfig, BridgePlayConfig, PlaybackConfig};
-use crate::{decode, device, http_api, mdns, net, pipeline, status};
+use crate::{decode, device, http_api, mdns, net, pipeline, status, player};
 
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
@@ -55,10 +55,16 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         "listening (one client; many tracks per connection)"
     );
 
+    let player_handle = player::spawn_player(
+        device_selected.clone(),
+        status.clone(),
+        config.playback.clone(),
+    );
     let _http = http_api::spawn_http_server(
         config.http_bind,
         status.clone(),
         device_selected.clone(),
+        player_handle.cmd_tx,
     );
     if let Ok(mut g) = mdns_handle.lock() {
         *g = mdns::spawn_mdns_advertiser(config.bind, config.http_bind);

@@ -37,6 +37,15 @@ pub(crate) fn start_streaming_decode_from_media_source(
     hint: Hint,
     buffer_seconds: f32,
 ) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
+    start_streaming_decode_from_media_source_at(source, hint, buffer_seconds, None)
+}
+
+pub(crate) fn start_streaming_decode_from_media_source_at(
+    source: Box<dyn MediaSource>,
+    hint: Hint,
+    buffer_seconds: f32,
+    seek_ms: Option<u64>,
+) -> Result<(SignalSpec, Arc<SharedAudio>, Option<u64>)> {
     // Probe once to get spec.
     let mss = MediaSourceStream::new(source, Default::default());
 
@@ -47,7 +56,22 @@ pub(crate) fn start_streaming_decode_from_media_source(
         &MetadataOptions::default(),
     )?;
 
-    let format = probed.format;
+    let mut format = probed.format;
+    if let Some(ms) = seek_ms {
+        if ms > 0 {
+            let secs = ms / 1000;
+            let frac = (ms % 1000) as f64 / 1000.0;
+            let time = symphonia::core::units::Time::new(secs, frac);
+            let _ = format.seek(
+                symphonia::core::formats::SeekMode::Accurate,
+                symphonia::core::formats::SeekTo::Time {
+                    time,
+                    track_id: None,
+                },
+            );
+        }
+    }
+
     let track = format
         .default_track()
         .ok_or_else(|| anyhow!("No default audio track"))?;

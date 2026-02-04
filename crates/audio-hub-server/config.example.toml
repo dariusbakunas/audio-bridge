@@ -1,10 +1,12 @@
 # Example audio-hub-server config
 #
 # bind: HTTP address the server listens on
+# public_base_url: base URL reachable by the bridge (used for /stream URLs)
 # bridges: list of bridge devices to connect to
 # active_output: output id to use by default (bridge:{bridge_id}:{device_name})
 
 bind = "0.0.0.0:8080"
+public_base_url = "http://192.168.1.10:8080"
 media_dir = "/srv/music"
 active_output = "bridge:living-room:Built-in Output"
 

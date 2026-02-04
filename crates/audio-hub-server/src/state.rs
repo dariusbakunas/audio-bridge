@@ -29,6 +29,7 @@ pub struct AppState {
     pub bridges: Arc<Mutex<BridgeState>>,
     pub bridge_online: Arc<AtomicBool>,
     pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+    pub public_base_url: String,
 }
 
 impl AppState {
@@ -40,6 +41,7 @@ impl AppState {
         bridges: Arc<Mutex<BridgeState>>,
         bridge_online: Arc<AtomicBool>,
         discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+        public_base_url: String,
     ) -> Self {
         Self {
             library: RwLock::new(library),
@@ -49,6 +51,7 @@ impl AppState {
             bridges,
             bridge_online,
             discovered_bridges,
+            public_base_url,
         }
     }
 }

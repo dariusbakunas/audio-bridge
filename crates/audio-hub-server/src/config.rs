@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 pub struct ServerConfig {
     pub bind: Option<String>,
     pub media_dir: Option<String>,
+    pub public_base_url: Option<String>,
     pub bridges: Option<Vec<BridgeConfig>>,
     pub active_output: Option<String>,
 }
@@ -88,4 +89,21 @@ pub fn bind_from_config(cfg: &ServerConfig) -> Result<Option<std::net::SocketAdd
         .parse()
         .with_context(|| format!("parse bind {bind}"))?;
     Ok(Some(addr))
+}
+
+pub fn public_base_url_from_config(
+    cfg: &ServerConfig,
+    bind: std::net::SocketAddr,
+) -> Result<String> {
+    if let Some(url) = cfg.public_base_url.as_ref() {
+        return Ok(url.trim_end_matches('/').to_string());
+    }
+
+    if bind.ip().is_unspecified() {
+        return Err(anyhow::anyhow!(
+            "public_base_url is required when bind is 0.0.0.0"
+        ));
+    }
+
+    Ok(format!("http://{}", bind))
 }
