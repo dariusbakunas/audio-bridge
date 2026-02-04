@@ -284,10 +284,44 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | PgUp/PgDn page | Enter play/enter | ←/Backspace parent | Space pause | n next | k queue selected track | K queue all tracks in current folder | p playing | o outputs | l logs | r rescan | q quit",
+            "keys: ↑/↓ select | Enter play/enter | Space pause | n next | ←/→ seek | o outputs | l logs | h help | q quit",
         )),
         footer_chunks[4],
     );
+
+    if app.help_open {
+        let area = centered_rect(70, 70, f.area());
+        f.render_widget(Clear, area);
+        let help = [
+            "Navigation",
+            "  ↑/↓          select",
+            "  PgUp/PgDn    page",
+            "  Enter        play/enter dir",
+            "  Backspace    parent dir",
+            "",
+            "Playback",
+            "  Space        pause/resume",
+            "  n            next",
+            "  ←/→          seek −5s / +5s",
+            "  Shift+←/→    seek −30s / +30s",
+            "",
+            "Queue",
+            "  k            queue selected track",
+            "  K            queue all tracks in dir",
+            "",
+            "Other",
+            "  p            jump to playing",
+            "  r            rescan",
+            "  o            outputs",
+            "  l            logs",
+            "  h or ?       help",
+            "  q            quit",
+            "  Esc          close modal",
+        ]
+        .join("\n");
+        let block = Block::default().title("Help").borders(Borders::ALL);
+        f.render_widget(Paragraph::new(help).block(block), area);
+    }
 
     if app.outputs_open {
         let area = centered_rect(60, 60, f.area());

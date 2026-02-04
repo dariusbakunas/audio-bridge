@@ -186,6 +186,7 @@ pub(crate) struct App {
     pub(crate) logs_open: bool,
     pub(crate) logs: VecDeque<String>,
     pub(crate) logs_scroll: usize,
+    pub(crate) help_open: bool,
     last_status_snapshot: String,
     log_rx: Receiver<String>,
     pub(crate) list_view_height: usize,
@@ -258,6 +259,7 @@ impl App {
             logs_open: false,
             logs: VecDeque::new(),
             logs_scroll: 0,
+            help_open: false,
             last_status_snapshot: String::new(),
             log_rx,
             list_view_height: 0,
@@ -293,6 +295,10 @@ impl App {
                 false
             }
         }
+    }
+
+    fn toggle_help(&mut self) {
+        self.help_open = !self.help_open;
     }
 
     fn seek_relative(&mut self, delta_ms: i64, cmd_tx: &Sender<crate::worker::Command>) {
@@ -871,6 +877,17 @@ fn ui_loop(
                     }
                     continue;
                 }
+                if app.help_open {
+                    match k.code {
+                        KeyCode::Char('q') => {
+                            cmd_tx.send(Command::Quit).ok();
+                            return Ok(());
+                        }
+                        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('?') => app.toggle_help(),
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.outputs_open {
                     match k.code {
                         KeyCode::Esc => app.close_outputs(),
@@ -936,6 +953,9 @@ fn ui_loop(
                     }
                     KeyCode::Char('l') => {
                         app.toggle_logs();
+                    }
+                    KeyCode::Char('h') | KeyCode::Char('?') => {
+                        app.toggle_help();
                     }
                     _ => {}
                 }
