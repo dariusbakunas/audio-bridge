@@ -61,5 +61,13 @@ async fn main() -> Result<()> {
         }))
         .init();
 
+    tracing::info!(
+        version = VERSION,
+        bind = ?args.bind,
+        media_dir = ?args.media_dir,
+        config = ?args.config,
+        "audio-hub-server starting"
+    );
+
     startup::run(args).await
 }

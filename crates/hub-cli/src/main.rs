@@ -129,6 +129,13 @@ fn main() -> Result<()> {
         .with_writer(LogWriterFactory { tx: log_tx.clone() })
         .with_ansi(false)
         .init();
+
+    tracing::info!(
+        version = VERSION,
+        server = %args.server,
+        bridge_http_bind = %args.bridge_http_bind,
+        "hub-cli starting"
+    );
     if !args.no_bridge {
         let cfg = BridgeListenConfig {
             http_bind: args.bridge_http_bind,

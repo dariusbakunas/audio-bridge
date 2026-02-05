@@ -6,6 +6,15 @@ use bridge::cli;
 use bridge::config::{BridgeListenConfig, BridgePlayConfig, PlaybackConfig};
 use bridge::runtime;
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("GIT_SHA"),
+    ", ",
+    env!("BUILD_DATE"),
+    ")"
+);
+
 fn main() -> Result<()> {
     let args = cli::Args::parse();
     tracing_subscriber::fmt()
@@ -18,6 +27,13 @@ fn main() -> Result<()> {
         runtime::list_devices()?;
         return Ok(());
     }
+
+    tracing::info!(
+        version = VERSION,
+        http_bind = %args.http_bind,
+        device = ?args.device,
+        "bridge starting"
+    );
 
     let playback = PlaybackConfig {
         chunk_frames: args.chunk_frames,
