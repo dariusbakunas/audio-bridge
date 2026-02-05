@@ -16,12 +16,18 @@ use crate::config::PlaybackConfig;
 /// - pause/resume state
 /// - a cancel flag (for "next track" interrupts)
 pub struct PlaybackSessionOptions {
+    /// Optional paused flag (when true, output is silence and queue is not drained).
     pub paused: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Optional cancel flag to terminate playback early.
     pub cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Optional counter incremented by output frames produced.
     pub played_frames: Option<Arc<AtomicU64>>,
+    /// Optional counters updated on underrun.
     pub underrun_frames: Option<Arc<AtomicU64>>,
     pub underrun_events: Option<Arc<AtomicU64>>,
+    /// Optional gauge of current buffered frames.
     pub buffered_frames: Option<Arc<AtomicU64>>,
+    /// Optional capacity of the output queue (frames).
     pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
 }
 
@@ -55,6 +61,8 @@ impl PlaybackState {
 /// Wire up the resampler + output stream and block until playback ends or is cancelled.
 ///
 /// This function owns the stage wiring but delegates decoding to `decode::*`.
+///
+/// If the source sample rate differs from the output, a resampler stage is inserted.
 pub fn play_decoded_source(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,

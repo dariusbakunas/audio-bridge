@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use audio_bridge_types::BridgeStatus as BridgeStatusSnapshot;
 
+/// Shared playback status state updated by the player pipeline.
 #[derive(Debug, Default)]
 pub struct PlayerStatusState {
     pub now_playing: Option<String>,
@@ -29,10 +30,12 @@ pub struct PlayerStatusState {
 pub type StatusSnapshot = BridgeStatusSnapshot;
 
 impl PlayerStatusState {
+    /// Create a shared, mutex-protected status store.
     pub fn shared() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self::default()))
     }
 
+    /// Return a snapshot suitable for API responses.
     pub fn snapshot(&self) -> StatusSnapshot {
         let paused = self
             .paused_flag
@@ -69,6 +72,7 @@ impl PlayerStatusState {
         }
     }
 
+    /// Clear track-specific fields when playback ends.
     pub fn clear_playback(&mut self) {
         self.now_playing = None;
         self.sample_rate = None;

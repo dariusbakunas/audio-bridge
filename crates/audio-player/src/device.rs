@@ -15,6 +15,9 @@ use std::sync::{Mutex, OnceLock};
 /// - Otherwise, returns the host default output device.
 ///
 /// Returns an error if no matching device exists or if the host reports no output devices.
+/// Pick the first output device matching `needle` (case-insensitive), or the default device.
+///
+/// Returns an error if no suitable device is found.
 pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Device> {
     let mut devices: Vec<cpal::Device> = host
         .output_devices()
@@ -43,6 +46,9 @@ pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Devi
 /// If `target_rate` is `Some`, prefer the highest supported sample rate that is
 /// **<= target_rate**; if none are <=, choose the lowest supported rate above it.
 /// If `None`, choose the highest supported rate.
+/// Choose the best output config for a target sample rate (or default if unset).
+///
+/// Prefers exact sample-rate matches when possible.
 pub fn pick_output_config(
     device: &cpal::Device,
     target_rate: Option<u32>,
@@ -104,6 +110,9 @@ pub fn pick_output_config(
 ///
 /// If the device reports a range, choose the max. If `Unknown`, return `None`
 /// so CPAL uses the device default.
+/// Prefer a fixed buffer size if the device advertises one.
+///
+/// Returns `None` when the device only supports the default buffer size.
 pub fn pick_buffer_size(
     config: &cpal::SupportedStreamConfig,
 ) -> Option<cpal::BufferSize> {
@@ -128,6 +137,7 @@ pub fn pick_buffer_size(
 /// Print available output devices to stdout.
 ///
 /// This is intended for CLI UX (`--list-devices`) rather than structured output.
+/// Log available output devices for the current host.
 pub fn list_devices(host: &cpal::Host) -> Result<()> {
     let devices = host.output_devices().context("No output devices")?;
     for (i, d) in devices.enumerate() {
@@ -137,6 +147,7 @@ pub fn list_devices(host: &cpal::Host) -> Result<()> {
 }
 
 #[derive(Clone, Debug)]
+/// Lightweight output device metadata for UI/device selection.
 pub struct DeviceInfo {
     pub id: String,
     pub name: String,
@@ -144,6 +155,7 @@ pub struct DeviceInfo {
     pub max_rate: u32,
 }
 
+/// Return device metadata for output selection UIs.
 pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
     let devices = host.output_devices().context("No output devices")?;
     let mut out = Vec::new();

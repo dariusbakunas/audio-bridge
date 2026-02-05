@@ -34,6 +34,8 @@ pub struct PlaybackConfig {
     pub underrun_events: Option<Arc<AtomicU64>>,
 
     /// When set, the callback updates this with the current buffered frames.
+    ///
+    /// This is sampled inside the audio callback and is best-effort only.
     pub buffered_frames: Option<Arc<AtomicU64>>,
 }
 
@@ -48,6 +50,8 @@ pub struct PlaybackConfig {
 /// ## Real-time constraints
 /// The callback never blocks on locks longer than necessary and never waits on a condition variable.
 /// Underruns are filled with zeros (silence).
+///
+/// The returned stream is **not** started; call `stream.play()` to begin playback.
 pub fn build_output_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,

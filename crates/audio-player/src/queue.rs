@@ -96,12 +96,16 @@ impl SharedAudio {
     }
 
     /// Current buffered frames (best-effort snapshot).
+    ///
+    /// This value can change immediately after the call returns.
     pub fn len_frames(&self) -> usize {
         let g = self.inner.lock().unwrap();
         g.queue.len() / self.channels
     }
 
     /// Whether the queue has been closed by its producer.
+    ///
+    /// Closed queues may still contain buffered samples until drained.
     pub fn is_done(&self) -> bool {
         let g = self.inner.lock().unwrap();
         g.done
@@ -254,6 +258,8 @@ impl SharedAudio {
     }
 
     /// Wait briefly for any buffered audio to appear.
+    ///
+    /// Returns `true` if data becomes available before `timeout`.
     pub fn wait_for_any(&self, timeout: Duration) -> bool {
         let mut g = self.inner.lock().unwrap();
         if !g.queue.is_empty() {

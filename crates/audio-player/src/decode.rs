@@ -25,6 +25,17 @@ use symphonia::core::codecs::CodecParameters;
 use symphonia::core::io::MediaSource;
 use crate::queue::{calc_max_buffered_samples, SharedAudio};
 
+/// Metadata captured while probing the source.
+#[derive(Clone, Debug, Default)]
+pub struct SourceInfo {
+    /// Codec name (best-effort).
+    pub codec: Option<String>,
+    /// Source bit depth (best-effort).
+    pub bit_depth: Option<u16>,
+    /// Container/extension hint (best-effort).
+    pub container: Option<String>,
+}
+
 /// Start decoding from an arbitrary Symphonia [`MediaSource`] (seekable or not).
 ///
 /// This is the shared entry point used by both:
@@ -32,13 +43,6 @@ use crate::queue::{calc_max_buffered_samples, SharedAudio};
 /// - network-spooled playback
 ///
 /// The queue is closed on EOF or error.
-#[derive(Clone, Debug, Default)]
-pub struct SourceInfo {
-    pub codec: Option<String>,
-    pub bit_depth: Option<u16>,
-    pub container: Option<String>,
-}
-
 pub fn start_streaming_decode_from_media_source(
     source: Box<dyn MediaSource>,
     hint: Hint,
@@ -47,6 +51,9 @@ pub fn start_streaming_decode_from_media_source(
     start_streaming_decode_from_media_source_at(source, hint, buffer_seconds, None)
 }
 
+/// Start decoding from a [`MediaSource`] at a requested offset (milliseconds).
+///
+/// Returns the stream spec, queue, optional duration, and captured source metadata.
 pub fn start_streaming_decode_from_media_source_at(
     source: Box<dyn MediaSource>,
     hint: Hint,
@@ -123,6 +130,8 @@ pub fn start_streaming_decode_from_media_source_at(
 }
 
 /// Start a background decoder thread that streams interleaved `f32` samples from `path`.
+///
+/// Returns the stream spec, queue, optional duration, and captured source metadata.
 pub fn start_streaming_decode(
     path: &PathBuf,
     buffer_seconds: f32,

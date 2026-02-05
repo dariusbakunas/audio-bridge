@@ -37,6 +37,8 @@ pub struct ResampleConfig {
 /// Reads decoded interleaved `f32` samples from `srcq` (at `src_spec.rate`) and produces
 /// interleaved `f32` samples at `dst_rate` into a new [`SharedAudio`] queue.
 ///
+/// Returns the output queue carrying resampled audio.
+///
 /// ## Threading & shutdown
 /// - Spawns one thread.
 /// - When `srcq` closes and all buffered input is drained, this stage closes its output queue.
