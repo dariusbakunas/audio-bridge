@@ -700,7 +700,7 @@ impl App {
         }
         let line = self.status.clone();
         self.last_status_snapshot = self.status.clone();
-        self.push_log_line(line);
+        tracing::info!("{line}");
     }
 
     fn drain_logs(&mut self) {

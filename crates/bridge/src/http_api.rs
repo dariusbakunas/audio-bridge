@@ -329,4 +329,26 @@ mod tests {
         assert_eq!(status, 404);
         assert_eq!(value["error"], "missing");
     }
+
+    #[test]
+    fn device_select_request_defaults_to_none() {
+        let req: DeviceSelectRequest = serde_json::from_str("{}").unwrap();
+        assert!(req.id.is_none());
+        assert!(req.name.is_none());
+    }
+
+    #[test]
+    fn play_request_accepts_optional_fields() {
+        let req: PlayRequest = serde_json::from_str(r#"{"url":"http://host/track.flac"}"#).unwrap();
+        assert_eq!(req.url, "http://host/track.flac");
+        assert!(req.ext_hint.is_none());
+        assert!(req.title.is_none());
+        assert!(req.seek_ms.is_none());
+    }
+
+    #[test]
+    fn seek_request_parses_ms() {
+        let req: SeekRequest = serde_json::from_str(r#"{"ms":1234}"#).unwrap();
+        assert_eq!(req.ms, 1234);
+    }
 }
