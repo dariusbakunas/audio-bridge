@@ -50,8 +50,8 @@ impl BridgeProvider {
             addr,
             cmd_rx,
             cmd_tx,
-            state.bridge.status.clone(),
-            state.bridge.queue.clone(),
+            state.playback.status.clone(),
+            state.playback.queue.clone(),
             state.bridge.bridge_online.clone(),
             state.bridge.bridges.clone(),
             state.bridge.public_base_url.clone(),
@@ -261,7 +261,7 @@ impl OutputProvider for BridgeProvider {
             };
 
             let resume_info = {
-                let status = state.bridge.status.lock().unwrap();
+                let status = state.playback.status.inner().lock().unwrap();
                 (status.now_playing.clone(), status.elapsed_ms, status.paused)
             };
 
@@ -348,7 +348,7 @@ impl OutputProvider for BridgeProvider {
             }
             Self::ensure_active_connected(state).await?;
 
-            let status = state.bridge.status.lock().unwrap();
+            let status = state.playback.status.inner().lock().unwrap();
             let (title, artist, album, format, sample_rate, bitrate_kbps) =
                 match status.now_playing.as_ref() {
                     Some(path) => {

@@ -53,6 +53,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let (cmd_tx, _cmd_rx) = unbounded();
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
+    let playback_state = Arc::new(crate::state::PlaybackState::new(status, queue));
     let bridge_online = Arc::new(AtomicBool::new(false));
     let bridges_state = Arc::new(Mutex::new(BridgeState {
         bridges,
@@ -66,8 +67,6 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
 
     let bridge_state = Arc::new(BridgeProviderState::new(
         cmd_tx,
-        status,
-        queue,
         bridges_state,
         bridge_online.clone(),
         discovered_bridges.clone(),
@@ -112,7 +111,12 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         device_selected: local_device_selected,
         running: Arc::new(AtomicBool::new(false)),
     });
-    let state = web::Data::new(AppState::new(library, bridge_state, local_state));
+    let state = web::Data::new(AppState::new(
+        library,
+        bridge_state,
+        local_state,
+        playback_state,
+    ));
     setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());

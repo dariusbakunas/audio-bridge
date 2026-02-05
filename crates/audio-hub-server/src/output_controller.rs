@@ -2,6 +2,7 @@ use actix_web::HttpResponse;
 
 use crate::models::{OutputsResponse, ProvidersResponse, QueueItem, QueueMode, QueueResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
+use crate::playback_transport::{ChannelTransport, PlaybackTransport};
 use crate::queue_playback::{dispatch_next_from_queue, NextDispatchResult};
 use crate::state::AppState;
 
@@ -139,17 +140,17 @@ impl OutputController {
     ) -> Result<String, OutputControllerError> {
         match queue_mode {
             QueueMode::Keep => {
-                let mut queue = state.bridge.queue.lock().unwrap();
+                let mut queue = state.playback.queue.lock().unwrap();
                 if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                     queue.items.remove(pos);
                 }
             }
             QueueMode::Replace => {
-                let mut queue = state.bridge.queue.lock().unwrap();
+                let mut queue = state.playback.queue.lock().unwrap();
                 queue.items.clear();
             }
             QueueMode::Append => {
-                let mut queue = state.bridge.queue.lock().unwrap();
+                let mut queue = state.playback.queue.lock().unwrap();
                 if !queue.items.iter().any(|p| p == &path) {
                     queue.items.push(path.clone());
                 }
@@ -161,7 +162,7 @@ impl OutputController {
             .await?;
         self.dispatch_play(state, path.clone(), None, false)?;
 
-        if let Ok(mut queue) = state.bridge.queue.lock() {
+        if let Ok(mut queue) = state.playback.queue.lock() {
             if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                 queue.items.remove(pos);
             }
@@ -171,7 +172,7 @@ impl OutputController {
     }
 
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        let queue = state.bridge.queue.lock().unwrap();
+        let queue = state.playback.queue.lock().unwrap();
         let library = state.library.read().unwrap();
         let items = queue
             .items
@@ -209,7 +210,7 @@ impl OutputController {
         paths: Vec<String>,
     ) -> usize {
         let mut added = 0usize;
-        let mut queue = state.bridge.queue.lock().unwrap();
+        let mut queue = state.playback.queue.lock().unwrap();
         for path_str in paths {
             let path = std::path::PathBuf::from(path_str);
             let path = match self.canonicalize_under_root(state, &path) {
@@ -232,7 +233,7 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        let mut queue = state.bridge.queue.lock().unwrap();
+        let mut queue = state.playback.queue.lock().unwrap();
         if let Some(pos) = queue.items.iter().position(|p| p == &path) {
             queue.items.remove(pos);
             return Ok(true);
@@ -241,16 +242,17 @@ impl OutputController {
     }
 
     pub(crate) fn queue_clear(&self, state: &AppState) {
-        let mut queue = state.bridge.queue.lock().unwrap();
+        let mut queue = state.playback.queue.lock().unwrap();
         queue.items.clear();
     }
 
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
+        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
         match dispatch_next_from_queue(
-            &state.bridge.queue,
-            &state.bridge.status,
-            &state.bridge.player.lock().unwrap().cmd_tx,
+            &state.playback.queue,
+            &state.playback.status,
+            &transport,
             false,
         ) {
             NextDispatchResult::Dispatched => Ok(true),
@@ -264,23 +266,12 @@ impl OutputController {
         state: &AppState,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        if state
-            .bridge
-            .player
-            .lock()
-            .unwrap()
-            .cmd_tx
-            .send(crate::bridge::BridgeCommand::PauseToggle)
-            .is_ok()
-        {
-            if let Ok(mut s) = state.bridge.status.lock() {
-                s.paused = !s.paused;
-                s.user_paused = s.paused;
-            }
-            Ok(())
-        } else {
-            Err(OutputControllerError::PlayerOffline)
-        }
+        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
+        transport
+            .pause_toggle()
+            .map_err(|_| OutputControllerError::PlayerOffline)?;
+        state.playback.status.on_pause_toggle();
+        Ok(())
     }
 
     pub(crate) async fn seek(
@@ -289,19 +280,12 @@ impl OutputController {
         ms: u64,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        if state
-            .bridge
-            .player
-            .lock()
-            .unwrap()
-            .cmd_tx
-            .send(crate::bridge::BridgeCommand::Seek { ms })
-            .is_ok()
-        {
-            Ok(())
-        } else {
-            Err(OutputControllerError::PlayerOffline)
-        }
+        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
+        transport
+            .seek(ms)
+            .map_err(|_| OutputControllerError::PlayerOffline)?;
+        state.playback.status.mark_seek_in_flight();
+        Ok(())
     }
 
     fn dispatch_play(
@@ -316,26 +300,12 @@ impl OutputController {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let cmd = crate::bridge::BridgeCommand::Play {
-            path: path.clone(),
-            ext_hint,
-            seek_ms,
-            start_paused,
-        };
-        if state
-            .bridge
-            .player
-            .lock()
-            .unwrap()
-            .cmd_tx
-            .send(cmd)
+        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
+        if transport
+            .play(path.clone(), ext_hint, seek_ms, start_paused)
             .is_ok()
         {
-            if let Ok(mut s) = state.bridge.status.lock() {
-                s.now_playing = Some(path);
-                s.paused = start_paused;
-                s.user_paused = start_paused;
-            }
+            state.playback.status.on_play(path, start_paused);
             Ok(())
         } else {
             Err(OutputControllerError::PlayerOffline)

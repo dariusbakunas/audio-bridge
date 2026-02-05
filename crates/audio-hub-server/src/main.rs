@@ -8,9 +8,11 @@ mod models;
 mod openapi;
 mod output_controller;
 mod output_providers;
+mod playback_transport;
 mod queue_playback;
 mod local_player;
 mod startup;
+mod status_store;
 mod state;
 
 use anyhow::Result;

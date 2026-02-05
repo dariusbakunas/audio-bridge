@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::queue_playback::dispatch_next_from_queue;
-use crate::state::PlayerStatus;
+use crate::playback_transport::ChannelTransport;
+use crate::queue_playback::maybe_auto_advance;
 use audio_bridge_types::BridgeStatus;
 
 #[derive(Debug, Clone)]
@@ -108,7 +108,7 @@ pub fn spawn_bridge_worker(
     http_addr: SocketAddr,
     cmd_rx: Receiver<BridgeCommand>,
     cmd_tx: Sender<BridgeCommand>,
-    status: Arc<Mutex<PlayerStatus>>,
+    status: crate::status_store::StatusStore,
     queue: Arc<Mutex<crate::state::QueueState>>,
     bridge_online: Arc<AtomicBool>,
     bridges_state: Arc<Mutex<crate::state::BridgeState>>,
@@ -127,37 +127,15 @@ pub fn spawn_bridge_worker(
                     BridgeCommand::Quit => break,
                     BridgeCommand::PauseToggle => {
                         let _ = http_pause_toggle(http_addr);
-                        if let Ok(mut s) = status.lock() {
-                            s.paused = !s.paused;
-                            s.user_paused = s.paused;
-                        }
+                        status.on_pause_toggle();
                     }
                     BridgeCommand::Stop => {
                         let _ = http_stop(http_addr);
-                        if let Ok(mut s) = status.lock() {
-                            s.now_playing = None;
-                            s.paused = false;
-                            s.user_paused = false;
-                            s.elapsed_ms = None;
-                            s.duration_ms = None;
-                            s.sample_rate = None;
-                            s.channels = None;
-                            s.source_codec = None;
-                            s.source_bit_depth = None;
-                            s.container = None;
-                            s.output_sample_format = None;
-                            s.resampling = None;
-                            s.resample_from_hz = None;
-                            s.resample_to_hz = None;
-                            s.auto_advance_in_flight = false;
-                            s.seek_in_flight = false;
-                        }
+                        status.on_stop();
                     }
                     BridgeCommand::Seek { ms } => {
                         let _ = http_seek(http_addr, ms);
-                        if let Ok(mut s) = status.lock() {
-                            s.seek_in_flight = true;
-                        }
+                        status.mark_seek_in_flight();
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
                         let url = build_stream_url(&public_base_url, &path);
@@ -176,23 +154,7 @@ pub fn spawn_bridge_worker(
                             let _ = http_pause_toggle(http_addr);
                         }
 
-                        if let Ok(mut s) = status.lock() {
-                            s.now_playing = Some(path.clone());
-                            s.paused = false;
-                            s.user_paused = false;
-                            s.elapsed_ms = Some(0);
-                            s.sample_rate = None;
-                            s.channels = None;
-                            s.source_codec = None;
-                            s.source_bit_depth = None;
-                            s.container = None;
-                            s.output_sample_format = None;
-                            s.resampling = None;
-                            s.resample_from_hz = None;
-                            s.resample_to_hz = None;
-                            s.auto_advance_in_flight = false;
-                            s.seek_in_flight = false;
-                        }
+                        status.on_play(path, false);
                     }
                 }
             }
@@ -204,48 +166,17 @@ pub fn spawn_bridge_worker(
 
             if let Ok(remote) = http_status(http_addr) {
                 bridge_online.store(true, Ordering::Relaxed);
-                if let Ok(mut s) = status.lock() {
-                    let ended = last_duration_ms.is_some()
-                        && remote.duration_ms.is_none()
-                        && remote.elapsed_ms.is_none()
-                        && !s.user_paused
-                        && !s.seek_in_flight
-                        && s.now_playing.is_some();
-                    s.paused = remote.paused;
-                    s.elapsed_ms = remote.elapsed_ms;
-                    s.duration_ms = remote.duration_ms;
-                    s.sample_rate = remote.sample_rate;
-                    s.channels = remote.channels;
-                    s.output_device = remote.device;
-                    s.source_codec = remote.source_codec;
-                    s.source_bit_depth = remote.source_bit_depth;
-                    s.container = remote.container;
-                    s.output_sample_format = remote.output_sample_format;
-                    s.resampling = remote.resampling;
-                    s.resample_from_hz = remote.resample_from_hz;
-                    s.resample_to_hz = remote.resample_to_hz;
-                    last_duration_ms = s.duration_ms;
-
-                    if ended && !s.auto_advance_in_flight {
-                        drop(s);
-                        let _ = dispatch_next_from_queue(&queue, &status, &cmd_tx, true);
-                        continue;
-                    }
-
-                    if s.seek_in_flight {
-                        if s.elapsed_ms.is_some() && s.duration_ms.is_some() {
-                            s.seek_in_flight = false;
-                        }
-                    }
-
-                    if !s.auto_advance_in_flight && !s.seek_in_flight {
-                        if let (Some(elapsed), Some(duration)) = (s.elapsed_ms, s.duration_ms) {
-                            if elapsed + 50 >= duration && !s.user_paused {
-                                drop(s);
-                                let _ = dispatch_next_from_queue(&queue, &status, &cmd_tx, true);
-                            }
-                        }
-                    }
+                let inputs = status.apply_remote_and_inputs(&remote, last_duration_ms);
+                let transport = ChannelTransport::new(cmd_tx.clone());
+                let dispatched = maybe_auto_advance(
+                    &queue,
+                    &status,
+                    &transport,
+                    inputs,
+                );
+                last_duration_ms = remote.duration_ms;
+                if dispatched {
+                    continue;
                 }
             } else {
                 if bridges_state

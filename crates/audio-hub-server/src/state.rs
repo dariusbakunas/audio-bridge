@@ -8,6 +8,7 @@ use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
+use crate::status_store::StatusStore;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerStatus {
@@ -34,6 +35,7 @@ pub struct AppState {
     pub library: RwLock<LibraryIndex>,
     pub bridge: Arc<BridgeProviderState>,
     pub local: Arc<LocalProviderState>,
+    pub playback: Arc<PlaybackState>,
     pub output_controller: OutputController,
 }
 
@@ -42,11 +44,13 @@ impl AppState {
         library: LibraryIndex,
         bridge: Arc<BridgeProviderState>,
         local: Arc<LocalProviderState>,
+        playback: Arc<PlaybackState>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
             bridge,
             local,
+            playback,
             output_controller: OutputController::default(),
         }
     }
@@ -72,8 +76,6 @@ pub struct BridgeState {
 
 pub struct BridgeProviderState {
     pub player: Arc<Mutex<BridgePlayer>>,
-    pub status: Arc<Mutex<PlayerStatus>>,
-    pub queue: Arc<Mutex<QueueState>>,
     pub bridges: Arc<Mutex<BridgeState>>,
     pub bridge_online: Arc<AtomicBool>,
     pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
@@ -83,8 +85,6 @@ pub struct BridgeProviderState {
 impl BridgeProviderState {
     pub fn new(
         cmd_tx: Sender<BridgeCommand>,
-        status: Arc<Mutex<PlayerStatus>>,
-        queue: Arc<Mutex<QueueState>>,
         bridges: Arc<Mutex<BridgeState>>,
         bridge_online: Arc<AtomicBool>,
         discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
@@ -92,12 +92,24 @@ impl BridgeProviderState {
     ) -> Self {
         Self {
             player: Arc::new(Mutex::new(BridgePlayer { cmd_tx })),
-            status,
-            queue,
             bridges,
             bridge_online,
             discovered_bridges,
             public_base_url,
+        }
+    }
+}
+
+pub struct PlaybackState {
+    pub status: StatusStore,
+    pub queue: Arc<Mutex<QueueState>>,
+}
+
+impl PlaybackState {
+    pub fn new(status: Arc<Mutex<PlayerStatus>>, queue: Arc<Mutex<QueueState>>) -> Self {
+        Self {
+            status: StatusStore::new(status),
+            queue,
         }
     }
 }

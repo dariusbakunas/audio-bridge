@@ -145,7 +145,7 @@ impl OutputProvider for LocalProvider {
         if outputs.iter().any(|o| o.id == active_output_id) {
             return;
         }
-        let status = state.bridge.status.lock().ok();
+        let status = state.playback.status.inner().lock().ok();
         let device_name = status
             .as_ref()
             .and_then(|s| s.output_device.clone())
@@ -239,7 +239,7 @@ impl OutputProvider for LocalProvider {
             }
             ensure_local_player(state).await?;
 
-            let status = state.bridge.status.lock().unwrap();
+            let status = state.playback.status.inner().lock().unwrap();
             let (title, artist, album, format, sample_rate, bitrate_kbps) =
                 match status.now_playing.as_ref() {
                     Some(path) => {
@@ -330,7 +330,7 @@ async fn ensure_local_player(state: &AppState) -> Result<(), HttpResponse> {
     {
         let handle = crate::local_player::spawn_local_player(
             state.local.device_selected.clone(),
-            state.bridge.status.clone(),
+            state.playback.status.clone(),
             audio_player::config::PlaybackConfig::default(),
         );
         state.bridge.player.lock().unwrap().cmd_tx = handle.cmd_tx.clone();

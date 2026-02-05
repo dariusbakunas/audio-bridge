@@ -12,7 +12,7 @@ use audio_player::config::PlaybackConfig;
 use audio_player::{decode, device, pipeline};
 
 use crate::bridge::BridgeCommand;
-use crate::state::PlayerStatus;
+use crate::status_store::StatusStore;
 
 #[derive(Clone)]
 pub(crate) struct LocalPlayerHandle {
@@ -31,7 +31,7 @@ struct SessionHandle {
 
 pub(crate) fn spawn_local_player(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<PlayerStatus>>,
+    status: StatusStore,
     playback: PlaybackConfig,
 ) -> LocalPlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
@@ -41,7 +41,7 @@ pub(crate) fn spawn_local_player(
 
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
-    status: Arc<Mutex<PlayerStatus>>,
+    status: StatusStore,
     playback: PlaybackConfig,
     cmd_rx: Receiver<BridgeCommand>,
 ) {
@@ -60,35 +60,18 @@ fn player_thread_main(
                 cancel_session(&mut session);
                 current = None;
                 paused = false;
-                if let Ok(mut s) = status.lock() {
-                    s.now_playing = None;
-                    s.paused = false;
-                    s.user_paused = false;
-                    s.elapsed_ms = None;
-                    s.duration_ms = None;
-                    s.sample_rate = None;
-                    s.channels = None;
-                    s.source_codec = None;
-                    s.source_bit_depth = None;
-                    s.container = None;
-                    s.output_sample_format = None;
-                    s.resampling = None;
-                    s.resample_from_hz = None;
-                    s.resample_to_hz = None;
-                }
+                status.on_stop();
             }
             BridgeCommand::PauseToggle => {
                 paused = !paused;
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(paused, Ordering::Relaxed);
                 }
-                if let Ok(mut s) = status.lock() {
-                    s.paused = paused;
-                    s.user_paused = paused;
-                }
+                status.on_pause_toggle();
             }
             BridgeCommand::Seek { ms } => {
                 let Some(track) = current.as_ref() else { continue };
+                status.mark_seek_in_flight();
                 start_new_session(
                     &device_selected,
                     &status,
@@ -130,7 +113,7 @@ fn cancel_session(session: &mut Option<SessionHandle>) {
 #[allow(clippy::too_many_arguments)]
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<PlayerStatus>>,
+    status: &StatusStore,
     playback: &PlaybackConfig,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
@@ -179,7 +162,7 @@ fn start_new_session(
 fn play_one_file(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
-    status: &Arc<Mutex<PlayerStatus>>,
+    status: &StatusStore,
     playback: &PlaybackConfig,
     path: PathBuf,
     seek_ms: Option<u64>,
@@ -239,22 +222,22 @@ fn play_one_file(
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_uppercase());
     let resampling = src_spec.rate != stream_config.sample_rate;
-    if let Ok(mut s) = status.lock() {
-        s.now_playing = Some(path.clone());
-        s.output_device = device.description().ok().map(|d| d.to_string());
-        s.sample_rate = Some(stream_config.sample_rate);
-        s.channels = Some(src_spec.channels.count() as u16);
-        s.duration_ms = duration_ms;
-        s.source_codec = source_info.codec.clone();
-        s.source_bit_depth = source_info.bit_depth;
-        s.container = container.or_else(|| source_info.container.clone());
-        s.output_sample_format = output_sample_format.clone();
-        s.resampling = Some(resampling);
-        s.resample_from_hz = Some(src_spec.rate);
-        s.resample_to_hz = Some(stream_config.sample_rate);
-        s.elapsed_ms = seek_ms;
-        s.paused = paused_flag.load(Ordering::Relaxed);
-    }
+    status.on_local_playback_start(
+        path.clone(),
+        device.description().ok().map(|d| d.to_string()),
+        stream_config.sample_rate,
+        src_spec.channels.count() as u16,
+        duration_ms,
+        source_info.codec.clone(),
+        source_info.bit_depth,
+        container.or_else(|| source_info.container.clone()),
+        output_sample_format.clone(),
+        resampling,
+        src_spec.rate,
+        stream_config.sample_rate,
+        seek_ms,
+        paused_flag.load(Ordering::Relaxed),
+    );
 
     let result = pipeline::play_decoded_source(
         &device,
@@ -273,11 +256,7 @@ fn play_one_file(
     );
 
     if session_id.load(Ordering::Relaxed) == my_id {
-        if let Ok(mut s) = status.lock() {
-            s.now_playing = None;
-            s.elapsed_ms = None;
-            s.duration_ms = None;
-        }
+        status.on_local_playback_end();
     }
 
     result
