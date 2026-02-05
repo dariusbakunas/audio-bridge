@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use audio_bridge_types::BridgeStatus;
 
-use crate::queue_playback::AutoAdvanceInputs;
+use crate::queue_service::AutoAdvanceInputs;
 use crate::state::PlayerStatus;
 
 #[derive(Clone)]

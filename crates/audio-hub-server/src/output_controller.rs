@@ -1,9 +1,9 @@
 use actix_web::HttpResponse;
 
-use crate::models::{OutputsResponse, ProvidersResponse, QueueItem, QueueMode, QueueResponse, StatusResponse};
+use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
 use crate::playback_transport::{ChannelTransport, PlaybackTransport};
-use crate::queue_playback::{dispatch_next_from_queue, NextDispatchResult};
+use crate::queue_service::NextDispatchResult;
 use crate::state::AppState;
 
 #[derive(Debug)]
@@ -172,36 +172,7 @@ impl OutputController {
     }
 
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        let queue = state.playback.queue.lock().unwrap();
-        let library = state.library.read().unwrap();
-        let items = queue
-            .items
-            .iter()
-            .map(|path| match library.find_track_by_path(path) {
-                Some(crate::models::LibraryEntry::Track {
-                    path,
-                    file_name,
-                    duration_ms,
-                    sample_rate,
-                    album,
-                    artist,
-                    format,
-                    ..
-                }) => QueueItem::Track {
-                    path,
-                    file_name,
-                    duration_ms,
-                    sample_rate,
-                    album,
-                    artist,
-                    format,
-                },
-                _ => QueueItem::Missing {
-                    path: path.to_string_lossy().to_string(),
-                },
-            })
-            .collect();
-        QueueResponse { items }
+        state.queue_service.list(&state.library.read().unwrap())
     }
 
     pub(crate) fn queue_add_paths(
@@ -209,21 +180,16 @@ impl OutputController {
         state: &AppState,
         paths: Vec<String>,
     ) -> usize {
-        let mut added = 0usize;
-        let mut queue = state.playback.queue.lock().unwrap();
+        let mut resolved = Vec::new();
         for path_str in paths {
             let path = std::path::PathBuf::from(path_str);
             let path = match self.canonicalize_under_root(state, &path) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if queue.items.iter().any(|p| p == &path) {
-                continue;
-            }
-            queue.items.push(path);
-            added += 1;
+            resolved.push(path);
         }
-        added
+        state.queue_service.add_paths(resolved)
     }
 
     pub(crate) fn queue_remove_path(
@@ -233,28 +199,17 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        let mut queue = state.playback.queue.lock().unwrap();
-        if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-            queue.items.remove(pos);
-            return Ok(true);
-        }
-        Ok(false)
+        Ok(state.queue_service.remove_path(&path))
     }
 
     pub(crate) fn queue_clear(&self, state: &AppState) {
-        let mut queue = state.playback.queue.lock().unwrap();
-        queue.items.clear();
+        state.queue_service.clear();
     }
 
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
         let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
-        match dispatch_next_from_queue(
-            &state.playback.queue,
-            &state.playback.status,
-            &transport,
-            false,
-        ) {
+        match state.queue_service.dispatch_next(&transport, false) {
             NextDispatchResult::Dispatched => Ok(true),
             NextDispatchResult::Empty => Ok(false),
             NextDispatchResult::Failed => Err(OutputControllerError::PlayerOffline),

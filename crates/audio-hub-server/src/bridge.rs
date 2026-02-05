@@ -8,7 +8,7 @@ use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::playback_transport::ChannelTransport;
-use crate::queue_playback::maybe_auto_advance;
+use crate::queue_service::QueueService;
 use audio_bridge_types::BridgeStatus;
 
 #[derive(Debug, Clone)]
@@ -168,12 +168,8 @@ pub fn spawn_bridge_worker(
                 bridge_online.store(true, Ordering::Relaxed);
                 let inputs = status.apply_remote_and_inputs(&remote, last_duration_ms);
                 let transport = ChannelTransport::new(cmd_tx.clone());
-                let dispatched = maybe_auto_advance(
-                    &queue,
-                    &status,
-                    &transport,
-                    inputs,
-                );
+                let dispatched = QueueService::new(queue.clone(), status.clone())
+                    .maybe_auto_advance(&transport, inputs);
                 last_duration_ms = remote.duration_ms;
                 if dispatched {
                     continue;

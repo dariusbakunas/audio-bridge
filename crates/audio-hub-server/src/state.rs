@@ -8,6 +8,7 @@ use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
+use crate::queue_service::QueueService;
 use crate::status_store::StatusStore;
 
 #[derive(Debug, Clone, Default)]
@@ -36,6 +37,7 @@ pub struct AppState {
     pub bridge: Arc<BridgeProviderState>,
     pub local: Arc<LocalProviderState>,
     pub playback: Arc<PlaybackState>,
+    pub queue_service: QueueService,
     pub output_controller: OutputController,
 }
 
@@ -46,11 +48,13 @@ impl AppState {
         local: Arc<LocalProviderState>,
         playback: Arc<PlaybackState>,
     ) -> Self {
+        let queue_service = QueueService::new(playback.queue.clone(), playback.status.clone());
         Self {
             library: RwLock::new(library),
             bridge,
             local,
             playback,
+            queue_service,
             output_controller: OutputController::default(),
         }
     }
