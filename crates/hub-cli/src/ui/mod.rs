@@ -13,7 +13,9 @@
 //! - q: quit
 
 mod app;
+mod layout;
 mod render;
 mod view_model;
+mod widgets;
 
 pub(crate) use app::run_tui;

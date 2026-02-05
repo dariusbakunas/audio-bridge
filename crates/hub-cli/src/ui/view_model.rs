@@ -13,12 +13,21 @@ pub(crate) struct UiView {
     pub(crate) now_playing_panel: Option<NowPlayingPanel>,
     pub(crate) entry_labels: Vec<String>,
     pub(crate) queue_labels: Vec<String>,
-    pub(crate) outputs_labels: Vec<String>,
-    pub(crate) outputs_empty: bool,
-    pub(crate) outputs_error: Option<String>,
     pub(crate) status_line: String,
     pub(crate) keys_line: String,
-    pub(crate) help_lines: Vec<String>,
+    pub(crate) active_modal: Option<UiModal>,
+}
+
+pub(crate) enum UiModal {
+    Help { title: String, body: String, layout: ModalLayout },
+    Outputs { title: String, items: Vec<String>, empty: bool, error: Option<String>, layout: ModalLayout },
+    Logs { title: String, empty: bool, layout: ModalLayout },
+    ClearQueue { title: String, body: String, layout: ModalLayout },
+}
+
+pub(crate) struct ModalLayout {
+    pub(crate) width_pct: u16,
+    pub(crate) height_pct: u16,
 }
 
 pub(crate) struct NowPlayingPanel {
@@ -54,6 +63,17 @@ impl UiView {
         let status_line = format!("status: {}", app.status);
         let keys_line = "keys: ↑/↓ select | Enter play/enter | Space pause | s stop | n next | c clear | ←/→ seek | o outputs | l logs | i info | h help | q quit".to_string();
         let help_lines = build_help_lines();
+        let (logs_title, logs_empty) = build_logs_view(app);
+        let active_modal = build_active_modal(
+            app,
+            &help_lines,
+            "Select Output (Enter to apply, Esc to close)",
+            &outputs_labels,
+            outputs_empty,
+            outputs_error.clone(),
+            &logs_title,
+            logs_empty,
+        );
 
         Self {
             remote_status,
@@ -64,12 +84,9 @@ impl UiView {
             now_playing_panel,
             entry_labels,
             queue_labels,
-            outputs_labels,
-            outputs_empty,
-            outputs_error,
             status_line,
             keys_line,
-            help_lines,
+            active_modal,
         }
     }
 }
@@ -354,6 +371,58 @@ fn build_help_lines() -> Vec<String> {
         "  q            quit".to_string(),
         "  Esc          close modal".to_string(),
     ]
+}
+
+fn build_logs_view(app: &App) -> (String, bool) {
+    let title = "Logs (Esc to close, ↑/↓ scroll)".to_string();
+    let total = app.logs.len();
+    if total == 0 {
+        return (title, true);
+    }
+    (title, false)
+}
+
+fn build_active_modal(
+    app: &App,
+    help_lines: &[String],
+    outputs_title: &str,
+    outputs_labels: &[String],
+    outputs_empty: bool,
+    outputs_error: Option<String>,
+    logs_title: &str,
+    logs_empty: bool,
+) -> Option<UiModal> {
+    if app.logs_open {
+        return Some(UiModal::Logs {
+            title: logs_title.to_string(),
+            empty: logs_empty,
+            layout: ModalLayout { width_pct: 90, height_pct: 80 },
+        });
+    }
+    if app.help_open {
+        return Some(UiModal::Help {
+            title: "Help".to_string(),
+            body: help_lines.join("\n"),
+            layout: ModalLayout { width_pct: 70, height_pct: 70 },
+        });
+    }
+    if app.outputs_open {
+        return Some(UiModal::Outputs {
+            title: outputs_title.to_string(),
+            items: outputs_labels.to_vec(),
+            empty: outputs_empty,
+            error: outputs_error,
+            layout: ModalLayout { width_pct: 60, height_pct: 60 },
+        });
+    }
+    if app.confirm_clear_queue {
+        return Some(UiModal::ClearQueue {
+            title: "Clear Queue".to_string(),
+            body: "Clear entire queue?\n\nPress y to confirm, n to cancel".to_string(),
+            layout: ModalLayout { width_pct: 40, height_pct: 25 },
+        });
+    }
+    None
 }
 
 fn build_now_playing_summary(app: &App) -> Vec<String> {
