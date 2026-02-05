@@ -1,9 +1,9 @@
-use actix_web::HttpResponse;
+use async_trait::async_trait;
 
 use audio_player::device;
 
 use crate::models::{OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse, SupportedRates};
-use crate::output_providers::registry::OutputProvider;
+use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
 pub(crate) struct LocalProvider;
@@ -43,6 +43,7 @@ impl LocalProvider {
     }
 }
 
+#[async_trait]
 impl OutputProvider for LocalProvider {
     fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
         if !Self::is_enabled(state) {
@@ -60,16 +61,16 @@ impl OutputProvider for LocalProvider {
         }]
     }
 
-    fn outputs_for_provider(
+    async fn outputs_for_provider(
         &self,
         state: &AppState,
         provider_id: &str,
-    ) -> Result<OutputsResponse, HttpResponse> {
+    ) -> Result<OutputsResponse, ProviderError> {
         if !Self::is_enabled(state) {
-            return Err(HttpResponse::BadRequest().body("local outputs disabled"));
+            return Err(ProviderError::BadRequest("local outputs disabled".to_string()));
         }
         if provider_id != Self::provider_id(state) {
-            return Err(HttpResponse::BadRequest().body("unknown provider id"));
+            return Err(ProviderError::BadRequest("unknown provider id".to_string()));
         }
         let mut outputs = self.list_outputs(state);
         if let Some(active_id) = state.bridge.bridges.lock().unwrap().active_output_id.clone() {
@@ -171,73 +172,61 @@ impl OutputProvider for LocalProvider {
         });
     }
 
-    fn ensure_active_connected<'a>(
-        &'a self,
-        state: &'a AppState,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), HttpResponse>> + Send + 'a>,
-    > {
-        Box::pin(async move { ensure_local_player(state).await })
+    async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError> {
+        ensure_local_player(state).await
     }
 
-    fn select_output<'a>(
-        &'a self,
-        state: &'a AppState,
-        output_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), HttpResponse>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            if !Self::is_enabled(state) {
-                return Err(HttpResponse::ServiceUnavailable().body("local outputs disabled"));
-            }
-            let Some(device_id) = Self::parse_output_id(output_id) else {
-                return Err(HttpResponse::BadRequest().body("invalid output id"));
-            };
-            {
-                let player = state.bridge.player.lock().unwrap();
-                let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
-            }
-            let host = cpal::default_host();
-            let devices = device::list_device_infos(&host)
-                .map_err(|e| HttpResponse::InternalServerError().body(format!("{e:#}")))?;
-            let device_name = devices
-                .iter()
-                .find(|d| d.id == device_id)
-                .map(|d| d.name.clone())
-                .ok_or_else(|| HttpResponse::BadRequest().body("unknown device"))?;
-            if let Ok(mut g) = state.local.device_selected.lock() {
-                *g = Some(device_name);
-            }
-            {
-                let mut bridges = state.bridge.bridges.lock().unwrap();
-                bridges.active_output_id = Some(output_id.to_string());
-                bridges.active_bridge_id = None;
-            }
-            ensure_local_player(state).await?;
-            Ok(())
-        })
+    async fn select_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError> {
+        if !Self::is_enabled(state) {
+            return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
+        }
+        let Some(device_id) = Self::parse_output_id(output_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        {
+            let player = state.bridge.player.lock().unwrap();
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+        }
+        let host = cpal::default_host();
+        let devices = device::list_device_infos(&host)
+            .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
+        let device_name = devices
+            .iter()
+            .find(|d| d.id == device_id)
+            .map(|d| d.name.clone())
+            .ok_or_else(|| ProviderError::BadRequest("unknown device".to_string()))?;
+        if let Ok(mut g) = state.local.device_selected.lock() {
+            *g = Some(device_name);
+        }
+        {
+            let mut bridges = state.bridge.bridges.lock().unwrap();
+            bridges.active_output_id = Some(output_id.to_string());
+            bridges.active_bridge_id = None;
+        }
+        ensure_local_player(state).await?;
+        Ok(())
     }
 
-    fn status_for_output<'a>(
-        &'a self,
-        state: &'a AppState,
-        output_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<StatusResponse, HttpResponse>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            if !Self::is_enabled(state) {
-                return Err(HttpResponse::ServiceUnavailable().body("local outputs disabled"));
-            }
-            if Self::parse_output_id(output_id).is_none() {
-                return Err(HttpResponse::BadRequest().body("invalid output id"));
-            }
-            let active_output_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
-            if active_output_id.as_deref() != Some(output_id) {
-                return Err(HttpResponse::BadRequest().body("output is not active"));
-            }
-            ensure_local_player(state).await?;
+    async fn status_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<StatusResponse, ProviderError> {
+        if !Self::is_enabled(state) {
+            return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
+        }
+        if Self::parse_output_id(output_id).is_none() {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        }
+        let active_output_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        if active_output_id.as_deref() != Some(output_id) {
+            return Err(ProviderError::BadRequest("output is not active".to_string()));
+        }
+        ensure_local_player(state).await?;
 
             let status = state.playback.status.inner().lock().unwrap();
             let (title, artist, album, format, sample_rate, bitrate_kbps) =
@@ -290,8 +279,7 @@ impl OutputProvider for LocalProvider {
                 buffer_size_frames: None,
             };
             drop(status);
-            Ok(resp)
-        })
+        Ok(resp)
     }
 }
 
@@ -319,9 +307,9 @@ fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: Option<u64>) ->
     u32::try_from(kbps).ok()
 }
 
-async fn ensure_local_player(state: &AppState) -> Result<(), HttpResponse> {
+async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
     if !LocalProvider::is_enabled(state) {
-        return Err(HttpResponse::ServiceUnavailable().body("local outputs disabled"));
+        return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
     }
     if !state
         .local

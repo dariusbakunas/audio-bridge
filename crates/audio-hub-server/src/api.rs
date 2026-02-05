@@ -365,7 +365,11 @@ pub async fn provider_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
 ) -> impl Responder {
-    match state.output_controller.outputs_for_provider(&state, id.as_str()) {
+    match state
+        .output_controller
+        .outputs_for_provider(&state, id.as_str())
+        .await
+    {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err(err) => err.into_response(),
     }

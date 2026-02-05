@@ -1,17 +1,36 @@
 use actix_web::HttpResponse;
+use async_trait::async_trait;
 
 use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, StatusResponse};
 use crate::output_providers::bridge_provider::BridgeProvider;
 use crate::output_providers::local_provider::LocalProvider;
 use crate::state::AppState;
 
+#[derive(Debug)]
+pub(crate) enum ProviderError {
+    BadRequest(String),
+    Unavailable(String),
+    Internal(String),
+}
+
+impl ProviderError {
+    pub(crate) fn into_response(self) -> HttpResponse {
+        match self {
+            ProviderError::BadRequest(msg) => HttpResponse::BadRequest().body(msg),
+            ProviderError::Unavailable(msg) => HttpResponse::ServiceUnavailable().body(msg),
+            ProviderError::Internal(msg) => HttpResponse::InternalServerError().body(msg),
+        }
+    }
+}
+
+#[async_trait]
 pub(crate) trait OutputProvider: Send + Sync {
     fn list_providers(&self, state: &AppState) -> Vec<crate::models::ProviderInfo>;
-    fn outputs_for_provider(
+    async fn outputs_for_provider(
         &self,
         state: &AppState,
         provider_id: &str,
-    ) -> Result<OutputsResponse, HttpResponse>;
+    ) -> Result<OutputsResponse, ProviderError>;
     fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo>;
     fn can_handle_output_id(&self, output_id: &str) -> bool;
     fn can_handle_provider_id(&self, state: &AppState, provider_id: &str) -> bool;
@@ -21,26 +40,17 @@ pub(crate) trait OutputProvider: Send + Sync {
         outputs: &mut Vec<OutputInfo>,
         active_output_id: &str,
     );
-    fn ensure_active_connected<'a>(
-        &'a self,
-        state: &'a AppState,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), HttpResponse>> + Send + 'a>,
-    >;
-    fn select_output<'a>(
-        &'a self,
-        state: &'a AppState,
-        output_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), HttpResponse>> + Send + 'a>,
-    >;
-    fn status_for_output<'a>(
-        &'a self,
-        state: &'a AppState,
-        output_id: &'a str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<StatusResponse, HttpResponse>> + Send + 'a>,
-    >;
+    async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError>;
+    async fn select_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError>;
+    async fn status_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<StatusResponse, ProviderError>;
 }
 
 pub(crate) struct OutputRegistry {
@@ -64,17 +74,17 @@ impl OutputRegistry {
         ProvidersResponse { providers }
     }
 
-    pub(crate) fn outputs_for_provider(
+    pub(crate) async fn outputs_for_provider(
         &self,
         state: &AppState,
         provider_id: &str,
-    ) -> Result<OutputsResponse, HttpResponse> {
+    ) -> Result<OutputsResponse, ProviderError> {
         for provider in &self.providers {
             if provider.can_handle_provider_id(state, provider_id) {
-                return provider.outputs_for_provider(state, provider_id);
+                return provider.outputs_for_provider(state, provider_id).await;
             }
         }
-        Err(HttpResponse::BadRequest().body("unknown provider id"))
+        Err(ProviderError::BadRequest("unknown provider id".to_string()))
     }
 
     pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
@@ -100,41 +110,43 @@ impl OutputRegistry {
         &self,
         state: &AppState,
         output_id: &str,
-    ) -> Result<(), HttpResponse> {
+    ) -> Result<(), ProviderError> {
         for provider in &self.providers {
             if provider.can_handle_output_id(output_id) {
                 return provider.select_output(state, output_id).await;
             }
         }
-        Err(HttpResponse::BadRequest().body("invalid output id"))
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
 
     pub(crate) async fn status_for_output(
         &self,
         state: &AppState,
         output_id: &str,
-    ) -> Result<StatusResponse, HttpResponse> {
+    ) -> Result<StatusResponse, ProviderError> {
         for provider in &self.providers {
             if provider.can_handle_output_id(output_id) {
                 return provider.status_for_output(state, output_id).await;
             }
         }
-        Err(HttpResponse::BadRequest().body("invalid output id"))
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
 
     pub(crate) async fn ensure_active_connected(
         &self,
         state: &AppState,
-    ) -> Result<(), HttpResponse> {
+    ) -> Result<(), ProviderError> {
         let active_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
         let Some(active_id) = active_id else {
-            return Err(HttpResponse::ServiceUnavailable().body("no active output selected"));
+            return Err(ProviderError::Unavailable(
+                "no active output selected".to_string(),
+            ));
         };
         for provider in &self.providers {
             if provider.can_handle_output_id(&active_id) {
                 return provider.ensure_active_connected(state).await;
             }
         }
-        Err(HttpResponse::BadRequest().body("invalid output id"))
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
 }

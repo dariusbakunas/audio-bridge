@@ -59,7 +59,7 @@ impl OutputController {
         self.registry
             .select_output(state, output_id)
             .await
-            .map_err(OutputControllerError::Http)
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
     pub(crate) async fn status_for_output(
@@ -70,17 +70,18 @@ impl OutputController {
         self.registry
             .status_for_output(state, output_id)
             .await
-            .map_err(OutputControllerError::Http)
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
-    pub(crate) fn outputs_for_provider(
+    pub(crate) async fn outputs_for_provider(
         &self,
         state: &AppState,
         provider_id: &str,
     ) -> Result<OutputsResponse, OutputControllerError> {
         self.registry
             .outputs_for_provider(state, provider_id)
-            .map_err(OutputControllerError::Http)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
     pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
@@ -98,7 +99,7 @@ impl OutputController {
         self.registry
             .ensure_active_connected(state)
             .await
-            .map_err(OutputControllerError::Http)
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
     pub(crate) async fn resolve_active_output_id(
