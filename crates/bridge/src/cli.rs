@@ -12,6 +12,7 @@ const VERSION: &str = concat!(
     ")"
 );
 
+/// CLI arguments for the bridge binary.
 #[derive(Parser, Debug)]
 #[command(name = "bridge", version = VERSION)]
 pub struct Args {
@@ -43,6 +44,7 @@ pub struct Args {
     pub http_bind: SocketAddr,
 }
 
+/// Bridge subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Play a local file (current behavior)

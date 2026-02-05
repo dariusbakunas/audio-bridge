@@ -13,14 +13,17 @@ use crate::state::AppState;
 pub(crate) struct LocalProvider;
 
 impl LocalProvider {
+    /// Build the provider id for local outputs.
     fn provider_id(state: &AppState) -> String {
         format!("local:{}", state.local.id)
     }
 
+    /// Build an output id for a local device.
     fn output_id(state: &AppState, device_id: &str) -> String {
         format!("local:{}:{}", state.local.id, device_id)
     }
 
+    /// Return true if local outputs are enabled.
     fn is_enabled(state: &AppState) -> bool {
         state.local.enabled
     }

@@ -9,6 +9,7 @@ use crate::queue_service::{NextDispatchResult, QueueService};
 use crate::bridge::BridgePlayer;
 use crate::status_store::StatusStore;
 
+/// Coordinates playback commands and status updates for the active output.
 #[derive(Clone)]
 pub struct PlaybackManager {
     player: Arc<Mutex<BridgePlayer>>,
@@ -17,6 +18,7 @@ pub struct PlaybackManager {
 }
 
 impl PlaybackManager {
+    /// Create a new manager for the active player.
     pub fn new(
         player: Arc<Mutex<BridgePlayer>>,
         status: StatusStore,
@@ -29,14 +31,17 @@ impl PlaybackManager {
         }
     }
 
+    /// Access the shared status store.
     pub fn status(&self) -> &StatusStore {
         &self.status
     }
 
+    /// Access the queue service.
     pub fn queue_service(&self) -> &QueueService {
         &self.queue_service
     }
 
+    /// Start playback for a media path.
     pub fn play(
         &self,
         path: std::path::PathBuf,
@@ -52,6 +57,7 @@ impl PlaybackManager {
         Ok(())
     }
 
+    /// Toggle pause state.
     pub fn pause_toggle(&self) -> Result<(), ()> {
         let transport = self.transport();
         transport.pause_toggle().map_err(|_| ())?;
@@ -59,6 +65,7 @@ impl PlaybackManager {
         Ok(())
     }
 
+    /// Seek to the requested time in milliseconds.
     pub fn seek(&self, ms: u64) -> Result<(), ()> {
         let transport = self.transport();
         transport.seek(ms).map_err(|_| ())?;
@@ -66,6 +73,7 @@ impl PlaybackManager {
         Ok(())
     }
 
+    /// Stop playback and reset status fields.
     pub fn stop(&self) -> Result<(), ()> {
         let transport = self.transport();
         transport.stop().map_err(|_| ())?;
@@ -73,6 +81,7 @@ impl PlaybackManager {
         Ok(())
     }
 
+    /// Dispatch the next queue entry to the active transport.
     pub fn queue_next(&self) -> NextDispatchResult {
         let transport = self.transport();
         self.queue_service.dispatch_next(&transport, false)

@@ -1,3 +1,7 @@
+//! Bridge runtime helpers.
+//!
+//! Provides device enumeration, local playback, and HTTP listener startup.
+
 use anyhow::Result;
 use cpal::traits::DeviceTrait;
 
@@ -5,11 +9,13 @@ use crate::config::{BridgeListenConfig, BridgePlayConfig};
 use crate::{http_api, mdns, player};
 use audio_player::{decode, device, pipeline, config::PlaybackConfig, status::PlayerStatusState};
 
+/// List output devices and print them to stdout.
 pub fn list_devices() -> Result<()> {
     let host = cpal::default_host();
     device::list_devices(&host)
 }
 
+/// Play a local file using the provided playback config.
 pub fn run_play(config: BridgePlayConfig) -> Result<()> {
     let host = cpal::default_host();
     let device = device::pick_device(&host, config.device.as_deref())?;
@@ -17,6 +23,7 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
     play_one_local(&device, &config.playback, &config.path)
 }
 
+/// Run the bridge HTTP API and playback worker.
 pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()> {
     let device_selected = std::sync::Arc::new(std::sync::Mutex::new(config.device.clone()));
     let status = PlayerStatusState::shared();
@@ -54,6 +61,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     Ok(())
 }
 
+/// Decode and play a single local file on the given device.
 fn play_one_local(
     device: &cpal::Device,
     playback: &PlaybackConfig,

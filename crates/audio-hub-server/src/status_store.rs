@@ -10,20 +10,24 @@ use audio_bridge_types::BridgeStatus;
 use crate::queue_service::AutoAdvanceInputs;
 use crate::state::PlayerStatus;
 
+/// Shared playback status tracker and update entry points.
 #[derive(Clone)]
 pub struct StatusStore {
     inner: Arc<Mutex<PlayerStatus>>,
 }
 
 impl StatusStore {
+    /// Create a new store around the shared player status.
     pub fn new(inner: Arc<Mutex<PlayerStatus>>) -> Self {
         Self { inner }
     }
 
+    /// Access the underlying shared status handle.
     pub fn inner(&self) -> &Arc<Mutex<PlayerStatus>> {
         &self.inner
     }
 
+    /// Record a play request for the given media path.
     pub fn on_play(&self, path: PathBuf, start_paused: bool) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = Some(path);
@@ -62,6 +66,7 @@ impl StatusStore {
         }
     }
 
+    /// Clear status when playback stops.
     pub fn on_stop(&self) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = None;
@@ -92,6 +97,7 @@ impl StatusStore {
         }
     }
 
+    /// Apply a local playback start snapshot.
     pub fn on_local_playback_start(
         &self,
         path: PathBuf,
@@ -143,12 +149,14 @@ impl StatusStore {
         }
     }
 
+    /// Set whether auto-advance has been triggered and awaiting completion.
     pub fn set_auto_advance_in_flight(&self, value: bool) {
         if let Ok(mut s) = self.inner.lock() {
             s.auto_advance_in_flight = value;
         }
     }
 
+    /// Merge remote bridge status and return inputs for auto-advance checks.
     pub fn apply_remote_and_inputs(
         &self,
         remote: &BridgeStatus,

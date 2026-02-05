@@ -1,3 +1,7 @@
+//! Bridge crate entry points.
+//!
+//! Provides CLI parsing, configuration, and runtime helpers for the bridge.
+
 pub mod cli;
 pub mod config;
 pub mod runtime;

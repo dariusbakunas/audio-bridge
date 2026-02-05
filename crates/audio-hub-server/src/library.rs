@@ -14,6 +14,7 @@ use symphonia::core::probe::Hint;
 
 use crate::models::LibraryEntry;
 
+/// In-memory index of the media library rooted at a directory.
 #[derive(Clone, Debug)]
 pub struct LibraryIndex {
     root: PathBuf,
@@ -21,14 +22,17 @@ pub struct LibraryIndex {
 }
 
 impl LibraryIndex {
+    /// Return the canonical library root path.
     pub fn root(&self) -> &Path {
         self.root.as_path()
     }
 
+    /// List entries for a directory in the library.
     pub fn list_dir(&self, dir: &Path) -> Option<&[LibraryEntry]> {
         self.entries_by_dir.get(dir).map(|v| v.as_slice())
     }
 
+    /// Find a specific track entry by absolute path.
     pub fn find_track_by_path(&self, path: &Path) -> Option<LibraryEntry> {
         let dir = path.parent()?;
         let entries = self.entries_by_dir.get(dir)?;
@@ -44,6 +48,7 @@ impl LibraryIndex {
     }
 }
 
+/// Scan the media root and build a new library index.
 pub fn scan_library(root: &Path) -> Result<LibraryIndex> {
     let root = root
         .canonicalize()

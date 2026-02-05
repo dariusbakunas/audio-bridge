@@ -436,6 +436,7 @@ impl OutputProvider for BridgeProvider {
     }
 }
 
+/// Build output entries from bridges, tracking per-bridge failures.
 fn build_outputs_from_bridges_with_failures(
     bridges: &[crate::config::BridgeConfigResolved],
 ) -> (Vec<OutputInfo>, Vec<String>) {
@@ -500,6 +501,7 @@ fn build_outputs_from_bridges_with_failures(
     (outputs, failed)
 }
 
+/// Query a single bridge for device outputs.
 fn build_outputs_for_bridge(
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>, anyhow::Error> {
@@ -536,6 +538,7 @@ fn build_outputs_for_bridge(
     Ok(outputs)
 }
 
+/// Normalize a reported min/max rate into a valid range.
 fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates> {
     if min_hz == 0 || max_hz == 0 || max_hz < min_hz || max_hz == u32::MAX {
         return None;
@@ -543,6 +546,7 @@ fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates>
     Some(SupportedRates { min_hz, max_hz })
 }
 
+/// Shorten long device ids for display.
 fn short_device_id(id: &str) -> String {
     const MAX_LEN: usize = 48;
     if id.len() <= MAX_LEN {
@@ -553,6 +557,7 @@ fn short_device_id(id: &str) -> String {
     format!("{head}...{tail}")
 }
 
+/// Add a placeholder output when the active output is missing from discovery.
 fn inject_active_output_for_bridge(
     outputs: &mut Vec<OutputInfo>,
     active_output_id: Option<&str>,
@@ -595,6 +600,7 @@ fn inject_active_output_for_bridge(
     });
 }
 
+/// Estimate bitrate from file size and duration.
 fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32> {
     let duration_ms = duration_ms?;
     if duration_ms == 0 {
@@ -612,6 +618,7 @@ fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32
     u32::try_from(kbps).ok()
 }
 
+/// Switch the active bridge id and stop the current bridge worker.
 fn switch_active_bridge(
     state: &AppState,
     bridge_id: &str,

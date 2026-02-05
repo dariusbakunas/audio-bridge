@@ -10,12 +10,14 @@ use anyhow::Result;
 
 use audio_bridge_types::BridgeStatus;
 
+/// HTTP response payload for the bridge device list.
 #[derive(Debug, serde::Deserialize)]
 pub struct HttpDevicesResponse {
     /// Devices reported by the bridge.
     pub devices: Vec<HttpDeviceInfo>,
 }
 
+/// Device info returned by the bridge HTTP API.
 #[derive(Debug, serde::Deserialize, Clone)]
 pub struct HttpDeviceInfo {
     /// Device identifier reported by the bridge.
@@ -30,6 +32,7 @@ pub struct HttpDeviceInfo {
 
 pub type HttpStatusResponse = BridgeStatus;
 
+/// JSON payload for starting playback on the bridge.
 #[derive(Debug, serde::Serialize)]
 struct HttpPlayRequest<'a> {
     url: &'a str,
@@ -41,11 +44,13 @@ struct HttpPlayRequest<'a> {
     seek_ms: Option<u64>,
 }
 
+/// JSON payload for bridge seek requests.
 #[derive(Debug, serde::Serialize)]
 struct HttpSeekRequest {
     ms: u64,
 }
 
+/// HTTP transport client for bridge control and status.
 #[derive(Clone)]
 pub struct BridgeTransportClient {
     http_addr: SocketAddr,

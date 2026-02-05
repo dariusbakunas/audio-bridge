@@ -18,6 +18,7 @@ use audio_player::{decode, device, pipeline};
 use crate::bridge::BridgeCommand;
 use crate::status_store::StatusStore;
 
+/// Handle for sending playback commands to the local player thread.
 #[derive(Clone)]
 pub(crate) struct LocalPlayerHandle {
     pub(crate) cmd_tx: Sender<BridgeCommand>,
@@ -33,6 +34,7 @@ struct SessionHandle {
     join: std::thread::JoinHandle<()>,
 }
 
+/// Spawn the local playback worker thread.
 pub(crate) fn spawn_local_player(
     device_selected: Arc<Mutex<Option<String>>>,
     status: StatusStore,

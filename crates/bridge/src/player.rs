@@ -1,3 +1,7 @@
+//! Bridge playback worker.
+//!
+//! Receives HTTP playback commands and streams audio via the audio-player pipeline.
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +17,7 @@ use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
 use audio_player::pipeline;
 use crate::status::BridgeStatusState;
 
+/// Commands accepted by the playback worker thread.
 #[derive(Debug, Clone)]
 pub(crate) enum PlayerCommand {
     Play {
@@ -29,6 +34,7 @@ pub(crate) enum PlayerCommand {
     Quit,
 }
 
+/// Handle for sending commands to the playback worker.
 #[derive(Clone)]
 pub(crate) struct PlayerHandle {
     pub(crate) cmd_tx: Sender<PlayerCommand>,
@@ -46,6 +52,7 @@ struct SessionHandle {
     join: std::thread::JoinHandle<()>,
 }
 
+/// Spawn the playback worker thread.
 pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
     status: Arc<Mutex<BridgeStatusState>>,
@@ -56,6 +63,7 @@ pub(crate) fn spawn_player(
     PlayerHandle { cmd_tx }
 }
 
+/// Main loop for the playback worker.
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
     status: Arc<Mutex<BridgeStatusState>>,
@@ -148,6 +156,7 @@ fn player_thread_main(
     }
 }
 
+/// Cancel the current playback session and join its thread.
 fn cancel_session(session: &mut Option<SessionHandle>) {
     if let Some(sess) = session.take() {
         sess.cancel.store(true, Ordering::Relaxed);
@@ -155,6 +164,7 @@ fn cancel_session(session: &mut Option<SessionHandle>) {
     }
 }
 
+/// Cancel the current playback session without blocking.
 fn cancel_session_async(session: &mut Option<SessionHandle>) {
     if let Some(sess) = session.take() {
         sess.cancel.store(true, Ordering::Relaxed);
@@ -165,6 +175,7 @@ fn cancel_session_async(session: &mut Option<SessionHandle>) {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Start a new playback session for the current URL.
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
     status: &Arc<Mutex<BridgeStatusState>>,
@@ -223,6 +234,7 @@ fn start_new_session(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Decode and play a remote HTTP source.
 fn play_one_http(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
@@ -346,6 +358,7 @@ fn play_one_http(
     result
 }
 
+/// Infer a file extension from the URL path if present.
 fn infer_ext_from_url(url: &str) -> Option<String> {
     let tail = url.split('?').next().unwrap_or(url);
     let file = tail.rsplit('/').next().unwrap_or(tail);

@@ -8,12 +8,14 @@ use crossbeam_channel::Sender;
 
 use crate::bridge::BridgeCommand;
 
+/// Errors that can occur when dispatching playback commands.
 #[derive(Debug)]
 pub enum PlaybackTransportError {
     /// Transport is unavailable or disconnected.
     Offline,
 }
 
+/// Transport for playback commands implemented by local or bridge outputs.
 pub trait PlaybackTransport {
     /// Start playback for a path with optional seek and pause.
     fn play(

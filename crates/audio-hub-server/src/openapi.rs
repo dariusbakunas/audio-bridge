@@ -7,6 +7,7 @@ use utoipa::OpenApi;
 use crate::api;
 use crate::models;
 
+/// OpenAPI document describing the hub server endpoints.
 #[derive(OpenApi)]
 #[openapi(
     paths(

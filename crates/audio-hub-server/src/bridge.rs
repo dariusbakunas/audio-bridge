@@ -32,6 +32,7 @@ pub enum BridgeCommand {
     Quit,
 }
 
+/// Handle to send bridge commands to the worker loop.
 #[derive(Clone)]
 pub struct BridgePlayer {
     pub(crate) cmd_tx: Sender<BridgeCommand>,
@@ -109,6 +110,7 @@ pub fn spawn_bridge_worker(
     });
 }
 
+/// Helper that polls bridge status and triggers auto-advance.
 struct BridgeStatusPoller {
     bridge_id: String,
     client: BridgeTransportClient,

@@ -9,6 +9,7 @@ use crate::output_providers::registry::OutputRegistry;
 use crate::queue_service::NextDispatchResult;
 use crate::state::AppState;
 
+/// Errors returned by the output controller facade.
 #[derive(Debug)]
 pub(crate) enum OutputControllerError {
     NoActiveOutput,
@@ -42,6 +43,7 @@ impl OutputControllerError {
     }
 }
 
+/// Facade for output selection, status, and playback orchestration.
 pub(crate) struct OutputController {
     registry: OutputRegistry,
 }
@@ -57,6 +59,7 @@ impl OutputController {
         Self::new(OutputRegistry::default())
     }
 
+    /// Switch the active output to the given id.
     pub(crate) async fn select_output(
         &self,
         state: &AppState,
@@ -68,6 +71,7 @@ impl OutputController {
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
+    /// Fetch status for a specific output id.
     pub(crate) async fn status_for_output(
         &self,
         state: &AppState,
@@ -79,6 +83,7 @@ impl OutputController {
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
+    /// List outputs owned by a provider.
     pub(crate) async fn outputs_for_provider(
         &self,
         state: &AppState,
@@ -100,6 +105,7 @@ impl OutputController {
         self.registry.list_providers(state)
     }
 
+    /// Ensure the active output is reachable before dispatching playback.
     pub(crate) async fn ensure_active_output_connected(
         &self,
         state: &AppState,
@@ -110,6 +116,7 @@ impl OutputController {
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
+    /// Validate and return the active output id, optionally checking a requested id.
     pub(crate) async fn resolve_active_output_id(
         &self,
         state: &AppState,
@@ -140,6 +147,7 @@ impl OutputController {
         Ok(active_id)
     }
 
+    /// Handle a play request including queue mode updates and dispatch.
     pub(crate) async fn play_request(
         &self,
         state: &AppState,
@@ -208,6 +216,7 @@ impl OutputController {
         state.playback_manager.queue_service().clear();
     }
 
+    /// Dispatch the next queued track if available.
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
         match state.playback_manager.queue_next() {
@@ -217,6 +226,7 @@ impl OutputController {
         }
     }
 
+    /// Toggle pause/resume on the active output.
     pub(crate) async fn pause_toggle(
         &self,
         state: &AppState,
@@ -229,6 +239,7 @@ impl OutputController {
         Ok(())
     }
 
+    /// Seek the active output to the requested position.
     pub(crate) async fn seek(
         &self,
         state: &AppState,
@@ -242,6 +253,7 @@ impl OutputController {
         Ok(())
     }
 
+    /// Stop playback on the active output.
     pub(crate) async fn stop(&self, state: &AppState) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
         state
@@ -251,6 +263,7 @@ impl OutputController {
         Ok(())
     }
 
+    /// Dispatch a play request to the active transport.
     fn dispatch_play(
         &self,
         state: &AppState,

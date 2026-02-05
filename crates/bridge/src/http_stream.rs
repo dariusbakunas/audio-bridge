@@ -1,3 +1,7 @@
+//! HTTP range reader used for streaming playback.
+//!
+//! Implements a simple buffered range fetcher over HTTP.
+
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5,9 +9,12 @@ use std::time::Duration;
 
 use symphonia::core::io::MediaSource;
 
+/// Configuration for HTTP range fetching.
 #[derive(Clone, Debug)]
 pub(crate) struct HttpRangeConfig {
+    /// Bytes per fetched block.
     pub(crate) block_size: usize,
+    /// Per-request timeout.
     pub(crate) timeout: Duration,
 }
 
@@ -32,6 +39,7 @@ pub(crate) struct HttpRangeSource {
 }
 
 impl HttpRangeSource {
+    /// Create a new range source for a URL with optional cancel flag.
     pub(crate) fn new(
         url: String,
         config: HttpRangeConfig,
@@ -55,6 +63,7 @@ impl HttpRangeSource {
             .unwrap_or(false)
     }
 
+    /// Ensure the total length is known by issuing a range probe.
     fn ensure_len(&mut self) -> io::Result<u64> {
         if let Some(len) = self.len {
             return Ok(len);
@@ -69,6 +78,7 @@ impl HttpRangeSource {
         Ok(len)
     }
 
+    /// Fetch a byte range from the remote server.
     fn fetch_range(&self, start: u64, end: u64) -> io::Result<(Vec<u8>, Option<u64>)> {
         let range = format!("bytes={start}-{end}");
         let start = std::time::Instant::now();
@@ -125,6 +135,7 @@ impl HttpRangeSource {
         Ok((buf, len))
     }
 
+    /// Fill the in-memory buffer starting at the current position.
     fn refill(&mut self) -> io::Result<()> {
         if self.is_canceled() {
             return Ok(());
@@ -211,12 +222,14 @@ impl MediaSource for HttpRangeSource {
     }
 }
 
+/// Extract the total length from a Content-Range header.
 fn parse_content_range_total(header: &str) -> Option<u64> {
     // Format: "bytes start-end/total"
     let (_, total) = header.split_once('/')?;
     total.parse::<u64>().ok()
 }
 
+/// Add a signed delta to an unsigned base with saturation.
 fn add_signed(base: u64, delta: i64) -> u64 {
     if delta >= 0 {
         base.saturating_add(delta as u64)

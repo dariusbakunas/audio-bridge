@@ -1,3 +1,7 @@
+//! Bridge HTTP API server.
+//!
+//! Exposes device listing, playback control, and status endpoints.
+
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -8,12 +12,14 @@ use audio_player::device;
 use crate::player::PlayerCommand;
 use crate::status::{BridgeStatusState, StatusSnapshot};
 
+/// Health check response payload.
 #[derive(serde::Serialize)]
 struct HealthResponse {
     status: &'static str,
     version: &'static str,
 }
 
+/// Device listing response payload.
 #[derive(serde::Serialize)]
 struct DevicesResponse {
     devices: Vec<DeviceInfo>,
@@ -21,6 +27,7 @@ struct DevicesResponse {
     selected_id: Option<String>,
 }
 
+/// Device metadata sent to clients.
 #[derive(serde::Serialize)]
 struct DeviceInfo {
     id: String,
@@ -29,6 +36,7 @@ struct DeviceInfo {
     max_rate: u32,
 }
 
+/// Request body for selecting a device.
 #[derive(serde::Deserialize)]
 struct DeviceSelectRequest {
     #[serde(default)]
@@ -37,6 +45,7 @@ struct DeviceSelectRequest {
     name: Option<String>,
 }
 
+/// Request body for playback.
 #[derive(serde::Deserialize)]
 struct PlayRequest {
     url: String,
@@ -48,11 +57,13 @@ struct PlayRequest {
     seek_ms: Option<u64>,
 }
 
+/// Request body for seeking.
 #[derive(serde::Deserialize)]
 struct SeekRequest {
     ms: u64,
 }
 
+/// Spawn the HTTP API server on the given bind address.
 pub(crate) fn spawn_http_server(
     bind: SocketAddr,
     status: Arc<Mutex<BridgeStatusState>>,
@@ -260,6 +271,7 @@ pub(crate) fn spawn_http_server(
     })
 }
 
+/// Encode a JSON response with a specific status code.
 fn json_response<T: serde::Serialize>(status: u16, body: &T) -> (u16, Response<std::io::Cursor<Vec<u8>>>) {
     match serde_json::to_vec(body) {
         Ok(json) => (status, Response::from_data(json).with_status_code(StatusCode(status))),
@@ -267,11 +279,13 @@ fn json_response<T: serde::Serialize>(status: u16, body: &T) -> (u16, Response<s
     }
 }
 
+/// Emit a JSON error response.
 fn error_response(status: u16, message: &str) -> (u16, Response<std::io::Cursor<Vec<u8>>>) {
     let body = serde_json::json!({ "error": message });
     (status, Response::from_data(body.to_string()).with_status_code(StatusCode(status)))
 }
 
+/// Filter noisy paths from logging output.
 fn should_log_path(path: &str) -> bool {
     !matches!(path, "/status" | "/health")
 }

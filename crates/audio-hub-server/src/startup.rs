@@ -179,6 +179,7 @@ fn should_log_path(path: &str) -> bool {
     true
 }
 
+/// Actix middleware that filters noisy paths from logging.
 struct FilteredLogger;
 
 impl<S, B> actix_web::dev::Transform<S, ServiceRequest> for FilteredLogger
@@ -197,6 +198,7 @@ where
     }
 }
 
+/// Service wrapper that applies the logging filter.
 struct FilteredLoggerMiddleware<S> {
     service: S,
 }

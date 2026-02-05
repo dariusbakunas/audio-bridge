@@ -1,10 +1,16 @@
+//! mDNS advertisement for bridge discovery.
+//!
+//! Publishes the bridge API address with id/name metadata.
+
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 
+/// Handle for an active mDNS advertisement.
 pub(crate) struct MdnsAdvertiser {
     daemon: ServiceDaemon,
     fullname: String,
 }
 
+/// Start advertising the bridge via mDNS.
 pub(crate) fn spawn_mdns_advertiser(
     http_bind: std::net::SocketAddr,
 ) -> Option<MdnsAdvertiser> {
@@ -64,6 +70,7 @@ pub(crate) fn spawn_mdns_advertiser(
 }
 
 impl MdnsAdvertiser {
+    /// Unregister and shutdown the mDNS daemon.
     pub(crate) fn shutdown(&self) {
         if let Ok(rx) = self.daemon.unregister(&self.fullname) {
             let _ = rx.recv_timeout(std::time::Duration::from_secs(1));
@@ -74,6 +81,7 @@ impl MdnsAdvertiser {
     }
 }
 
+/// Determine a best-effort local IP for advertisement.
 fn local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     if socket.connect("8.8.8.8:80").is_err() && socket.connect("1.1.1.1:80").is_err() {

@@ -27,18 +27,24 @@ use crate::models::{
 };
 use crate::state::AppState;
 
+/// Query parameters for library listing.
 #[derive(Deserialize, ToSchema)]
 pub struct LibraryQuery {
+    /// Optional directory to list under the library root.
     pub dir: Option<String>,
 }
 
+/// Query parameters for stream requests.
 #[derive(Deserialize, ToSchema)]
 pub struct StreamQuery {
+    /// Absolute path to the media file.
     pub path: String,
 }
 
+/// Seek request payload (milliseconds).
 #[derive(Deserialize, ToSchema)]
 pub struct SeekBody {
+    /// Absolute seek position in milliseconds.
     pub ms: u64,
 }
 
