@@ -434,6 +434,28 @@ impl OutputProvider for BridgeProvider {
         }
         Ok(resp)
     }
+
+    /// Stop playback on a specific bridge output id.
+    async fn stop_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError> {
+        let (bridge_id, _device_id) =
+            parse_output_id(output_id).map_err(|e| ProviderError::BadRequest(e))?;
+        let http_addr = {
+            let bridges_state = state.bridge.bridges.lock().unwrap();
+            let discovered = state.bridge.discovered_bridges.lock().unwrap();
+            let merged = merge_bridges(&bridges_state.bridges, &discovered);
+            let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
+                return Err(ProviderError::BadRequest("unknown bridge id".to_string()));
+            };
+            bridge.http_addr
+        };
+        BridgeTransportClient::new(http_addr, String::new())
+            .stop()
+            .map_err(|e| ProviderError::Internal(format!("{e:#}")))
+    }
 }
 
 /// Build output entries from bridges, tracking per-bridge failures.

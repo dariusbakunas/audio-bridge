@@ -37,6 +37,8 @@ pub struct PlaybackConfig {
     ///
     /// This is sampled inside the audio callback and is best-effort only.
     pub buffered_frames: Option<Arc<AtomicU64>>,
+    /// When set, stream errors will flip this cancel flag.
+    pub cancel_on_error: Option<Arc<AtomicBool>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -96,7 +98,13 @@ where
     let underrun_events = cfg.underrun_events.clone();
     let buffered_frames = cfg.buffered_frames.clone();
 
-    let err_fn = |err| tracing::warn!("stream error: {err}");
+    let cancel_on_error = cfg.cancel_on_error.clone();
+    let err_fn = move |err| {
+        tracing::warn!("stream error: {err}");
+        if let Some(flag) = &cancel_on_error {
+            flag.store(true, Ordering::Relaxed);
+        }
+    };
 
     let state_cb = state.clone();
     let stream = device.build_output_stream(

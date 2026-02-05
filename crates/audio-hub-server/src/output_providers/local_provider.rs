@@ -294,6 +294,24 @@ impl OutputProvider for LocalProvider {
             drop(status);
         Ok(resp)
     }
+
+    /// Stop playback on a local output (best-effort).
+    async fn stop_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError> {
+        if !Self::is_enabled(state) {
+            return Ok(());
+        }
+        if Self::parse_output_id(output_id).is_none() {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        }
+        if let Ok(player) = state.local.player.lock() {
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Stop);
+        }
+        Ok(())
+    }
 }
 
 fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates> {

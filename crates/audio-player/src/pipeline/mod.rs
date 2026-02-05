@@ -108,6 +108,7 @@ pub fn play_decoded_source(
             underrun_frames: state.underrun_frames.clone(),
             underrun_events: state.underrun_events.clone(),
             buffered_frames: state.buffered_frames.clone(),
+            cancel_on_error: state.cancel.clone(),
         },
     )?;
     stream.play()?;

@@ -9,6 +9,7 @@ use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, StatusRespon
 use crate::output_providers::bridge_provider::BridgeProvider;
 use crate::output_providers::local_provider::LocalProvider;
 use crate::state::AppState;
+use tracing::warn;
 
 #[derive(Debug)]
 pub(crate) enum ProviderError {
@@ -68,6 +69,12 @@ pub(crate) trait OutputProvider: Send + Sync {
         state: &AppState,
         output_id: &str,
     ) -> Result<StatusResponse, ProviderError>;
+    /// Stop playback on a specific output id (best-effort).
+    async fn stop_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError>;
 }
 
 pub(crate) struct OutputRegistry {
@@ -134,6 +141,23 @@ impl OutputRegistry {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
+        let previous = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        if previous.as_deref() != Some(output_id) {
+            if let Some(prev_id) = previous.as_deref() {
+                for provider in &self.providers {
+                    if provider.can_handle_output_id(prev_id) {
+                        if let Err(err) = provider.stop_output(state, prev_id).await {
+                            warn!(
+                                output_id = %prev_id,
+                                error = ?err,
+                                "failed to stop previous output"
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+        }
         for provider in &self.providers {
             if provider.can_handle_output_id(output_id) {
                 return provider.select_output(state, output_id).await;
@@ -262,6 +286,14 @@ mod tests {
             _output_id: &str,
         ) -> Result<StatusResponse, ProviderError> {
             Err(ProviderError::Unavailable("offline".to_string()))
+        }
+
+        async fn stop_output(
+            &self,
+            _state: &AppState,
+            _output_id: &str,
+        ) -> Result<(), ProviderError> {
+            Ok(())
         }
     }
 
