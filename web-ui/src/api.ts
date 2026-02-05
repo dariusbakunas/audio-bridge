@@ -26,7 +26,16 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     return null as T;
   }
 
-  return JSON.parse(text) as T;
+  const contentType = resp.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return null as T;
+    }
+  }
+
+  return text as T;
 }
 
 export async function postJson<T>(path: string, body?: JsonObject): Promise<T> {

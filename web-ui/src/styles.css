@@ -26,7 +26,7 @@ body {
 
 .app {
   min-height: 100vh;
-  padding: 48px clamp(20px, 5vw, 72px) 80px;
+  padding: 48px clamp(20px, 5vw, 72px) 180px;
   position: relative;
 }
 
@@ -39,9 +39,6 @@ body {
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 32px;
   position: relative;
   z-index: 1;
 }
@@ -348,6 +345,104 @@ p {
   text-align: right;
 }
 
+.player-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 2fr) minmax(220px, 1fr);
+  gap: 24px;
+  padding: 16px clamp(20px, 5vw, 72px);
+  align-items: center;
+  z-index: 4;
+}
+
+.player-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.album-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 107, 53, 0.4), rgba(45, 108, 223, 0.4));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+}
+
+.track-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.player-middle .controls {
+  margin-bottom: 10px;
+}
+
+.player-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.icon-btn.primary {
+  width: 52px;
+  height: 52px;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.player-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.output-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -382,6 +477,15 @@ p {
   }
 
   .queue-meta {
+    align-items: flex-start;
+  }
+
+  .player-bar {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .player-right {
     align-items: flex-start;
   }
 }

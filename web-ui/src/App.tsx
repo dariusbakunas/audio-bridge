@@ -256,14 +256,6 @@ export default function App() {
     }
   }
 
-  async function handleStop() {
-    try {
-      await postJson("/stop");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   async function handleNext() {
     try {
       await postJson("/queue/next");
@@ -315,55 +307,7 @@ export default function App() {
             A focused dashboard for your playback pipeline. Keep an eye on output state, signal
             metadata, and the queue without opening the TUI.
           </p>
-          <div className="controls">
-            <button className="btn" onClick={handlePause}>
-              {status?.paused ? "Resume" : "Pause"}
-            </button>
-            <button className="btn secondary" onClick={handleStop}>
-              Stop
-            </button>
-            <button className="btn secondary" onClick={handleNext}>
-              Next
-            </button>
-            <button className="btn ghost" onClick={handleRescan}>
-              Rescan Library
-            </button>
-          </div>
           {error ? <div className="alert">{error}</div> : null}
-        </div>
-        <div className="hero-right">
-          <div className="card now-playing">
-            <div className="card-header">
-              <span>Now Playing</span>
-              <div className="card-actions">
-                <button className="btn ghost small" onClick={() => setOutputsOpen(true)}>
-                  Outputs
-                </button>
-                <span className={`status-dot ${status?.paused ? "paused" : "live"}`}></span>
-              </div>
-            </div>
-            <h2>{status?.title ?? status?.now_playing ?? "Idle"}</h2>
-            <p className="muted">
-              {status?.artist ?? "Unknown artist"}
-              {status?.album ? ` - ${status.album}` : ""}
-            </p>
-            <div className="progress">
-              <div className="progress-track"></div>
-              <div
-                className="progress-fill"
-                style={{
-                  width:
-                    status?.duration_ms && status?.elapsed_ms
-                      ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
-                      : "0%"
-                }}
-              ></div>
-            </div>
-            <div className="meta-row">
-              <span>{formatMs(status?.elapsed_ms)} / {formatMs(status?.duration_ms)}</span>
-              <span>{status?.format ?? "—"}</span>
-            </div>
-          </div>
         </div>
       </header>
 
@@ -371,7 +315,12 @@ export default function App() {
         <div className="card">
           <div className="card-header">
             <span>Library</span>
-            <span className="pill">{libraryEntries.length} items</span>
+            <div className="card-actions">
+              <span className="pill">{libraryEntries.length} items</span>
+              <button className="btn ghost small" onClick={handleRescan}>
+                Rescan
+              </button>
+            </div>
           </div>
           <div className="library-path">
             <span className="muted small">Path</span>
@@ -533,6 +482,76 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      <div className="player-bar">
+        <div className="player-left">
+          <div className="album-art">Artwork</div>
+          <div>
+            <div className="track-title">{status?.title ?? status?.now_playing ?? "Idle"}</div>
+            <div className="muted small">{status?.artist ?? "Unknown artist"}</div>
+          </div>
+        </div>
+        <div className="player-middle">
+          <div className="player-controls">
+            <button className="icon-btn" aria-label="Previous" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="5" width="2" height="14" rx="1" />
+                <polygon points="21,5 13,12 21,19" />
+                <polygon points="13,5 5,12 13,19" />
+              </svg>
+            </button>
+            <button className="icon-btn primary" onClick={handlePause} aria-label="Play or pause">
+              {status?.paused ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="7,5 19,12 7,19" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="icon-btn"
+              onClick={handleNext}
+              aria-label="Next"
+              disabled={queue.length === 0}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="19" y="5" width="2" height="14" rx="1" />
+                <polygon points="3,5 11,12 3,19" />
+                <polygon points="11,5 19,12 11,19" />
+              </svg>
+            </button>
+          </div>
+          <div className="progress">
+            <div className="progress-track"></div>
+            <div
+              className="progress-fill"
+              style={{
+                width:
+                  status?.duration_ms && status?.elapsed_ms
+                    ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
+                    : "0%"
+              }}
+            ></div>
+          </div>
+          <div className="meta-row">
+            <span>{formatMs(status?.elapsed_ms)} / {formatMs(status?.duration_ms)}</span>
+            <span>{status?.format ?? "—"}</span>
+          </div>
+        </div>
+        <div className="player-right">
+          <div className="output-chip">
+            <span className="muted small">Output</span>
+            <span>{activeOutput?.name ?? "No output"}</span>
+          </div>
+          <button className="btn ghost small" onClick={() => setOutputsOpen(true)}>
+            Select output
+          </button>
+        </div>
+      </div>
 
       {outputsOpen ? (
         <div className="modal" onClick={() => setOutputsOpen(false)}>
