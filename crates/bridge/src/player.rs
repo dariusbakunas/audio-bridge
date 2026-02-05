@@ -424,6 +424,14 @@ mod tests {
     }
 
     #[test]
+    fn infer_ext_from_url_handles_multiple_dots() {
+        assert_eq!(
+            infer_ext_from_url("http://example/archive.track.flac"),
+            Some("flac".to_string())
+        );
+    }
+
+    #[test]
     fn played_frames_from_seek_clamps_to_duration() {
         let frames = played_frames_from_seek(5_000, Some(2_000), 48_000).unwrap();
         assert_eq!(frames, 96_000);

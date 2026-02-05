@@ -278,6 +278,11 @@ mod tests {
     }
 
     #[test]
+    fn parse_content_range_total_requires_slash() {
+        assert_eq!(parse_content_range_total("bytes 0-99"), None);
+    }
+
+    #[test]
     fn add_signed_handles_positive_and_negative() {
         assert_eq!(add_signed(10, 5), 15);
         assert_eq!(add_signed(10, -3), 7);

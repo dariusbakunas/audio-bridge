@@ -129,6 +129,14 @@ mod tests {
     }
 
     #[test]
+    fn normalize_device_name_preserves_inner_spaces() {
+        assert_eq!(
+            normalize_device_name(Some("USB  DAC".to_string())),
+            Some("USB  DAC".to_string())
+        );
+    }
+
+    #[test]
     fn default_http_bind_uses_expected_port() {
         let addr: std::net::SocketAddr = "0.0.0.0:5556".parse().expect("default http bind");
         assert_eq!(addr.port(), 5556);
