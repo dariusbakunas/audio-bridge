@@ -197,3 +197,60 @@ pub struct ProvidersResponse {
     /// Available output providers.
     pub providers: Vec<ProviderInfo>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn library_entry_roundtrip() {
+        let entry = LibraryEntry::Track {
+            path: "/music/a.flac".to_string(),
+            file_name: "a.flac".to_string(),
+            ext_hint: "flac".to_string(),
+            duration_ms: Some(1000),
+            sample_rate: Some(48_000),
+            album: Some("Album".to_string()),
+            artist: Some("Artist".to_string()),
+            format: "FLAC".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let de: LibraryEntry = serde_json::from_str(&json).unwrap();
+        match de {
+            LibraryEntry::Track { path, file_name, .. } => {
+                assert_eq!(path, "/music/a.flac");
+                assert_eq!(file_name, "a.flac");
+            }
+            _ => panic!("expected track"),
+        }
+    }
+
+    #[test]
+    fn queue_mode_roundtrip() {
+        let json = serde_json::to_string(&QueueMode::Append).unwrap();
+        assert_eq!(json, "\"append\"");
+        let de: QueueMode = serde_json::from_str(&json).unwrap();
+        assert!(matches!(de, QueueMode::Append));
+    }
+
+    #[test]
+    fn output_info_roundtrip() {
+        let info = OutputInfo {
+            id: "bridge:one:device".to_string(),
+            kind: "bridge".to_string(),
+            name: "Device".to_string(),
+            state: "online".to_string(),
+            provider_id: Some("bridge:one".to_string()),
+            provider_name: Some("Bridge".to_string()),
+            supported_rates: Some(SupportedRates { min_hz: 44_100, max_hz: 192_000 }),
+            capabilities: OutputCapabilities {
+                device_select: true,
+                volume: false,
+            },
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let de: OutputInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.id, "bridge:one:device");
+        assert_eq!(de.supported_rates.unwrap().max_hz, 192_000);
+    }
+}

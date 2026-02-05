@@ -215,3 +215,84 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
 
     meta
 }
+
+#[cfg(test)]
+mod meta_tests {
+    use super::*;
+
+    #[test]
+    fn probe_track_meta_sets_format_from_ext() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-library-meta-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let track = root.join("song.flac");
+        let _ = std::fs::write(&track, b"test");
+
+        let meta = probe_track_meta(&track, "flac");
+        assert_eq!(meta.format, Some("FLAC".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_supported_extension_accepts_known() {
+        assert!(is_supported_extension("flac"));
+        assert!(is_supported_extension("mp3"));
+        assert!(is_supported_extension("opus"));
+        assert!(!is_supported_extension("txt"));
+    }
+
+    #[test]
+    fn scan_library_lists_dirs_and_tracks() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-library-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dir = root.join("Artists");
+        let _ = std::fs::create_dir_all(&dir);
+        let track = root.join("song.flac");
+        let _ = std::fs::write(&track, b"test");
+
+        let index = scan_library(&root).expect("scan library");
+        let entries = index.list_dir(index.root()).expect("entries");
+        let names = entries
+            .iter()
+            .map(|entry| match entry {
+                LibraryEntry::Dir { name, .. } => name.clone(),
+                LibraryEntry::Track { file_name, .. } => file_name.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"Artists".to_string()));
+        assert!(names.contains(&"song.flac".to_string()));
+    }
+
+    #[test]
+    fn find_track_by_path_locates_track() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-library-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let track = root.join("song.flac");
+        let _ = std::fs::write(&track, b"test");
+
+        let index = scan_library(&root).expect("scan library");
+        let found = index.find_track_by_path(&track.canonicalize().unwrap());
+        assert!(matches!(found, Some(LibraryEntry::Track { .. })));
+    }
+}

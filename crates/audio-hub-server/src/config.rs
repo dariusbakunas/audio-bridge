@@ -122,3 +122,60 @@ pub fn public_base_url_from_config(
 
     Ok(format!("http://{}", bind))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_base_url_uses_config_when_present() {
+        let cfg = ServerConfig {
+            bind: None,
+            media_dir: None,
+            public_base_url: Some("http://example.com/".to_string()),
+            bridges: None,
+            active_output: None,
+            local_outputs: None,
+            local_id: None,
+            local_name: None,
+            local_device: None,
+        };
+        let bind: std::net::SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let url = public_base_url_from_config(&cfg, bind).unwrap();
+        assert_eq!(url, "http://example.com");
+    }
+
+    #[test]
+    fn public_base_url_requires_explicit_when_unspecified_bind() {
+        let cfg = ServerConfig {
+            bind: None,
+            media_dir: None,
+            public_base_url: None,
+            bridges: None,
+            active_output: None,
+            local_outputs: None,
+            local_id: None,
+            local_name: None,
+            local_device: None,
+        };
+        let bind: std::net::SocketAddr = "0.0.0.0:8080".parse().unwrap();
+        assert!(public_base_url_from_config(&cfg, bind).is_err());
+    }
+
+    #[test]
+    fn bind_from_config_parses_when_present() {
+        let cfg = ServerConfig {
+            bind: Some("127.0.0.1:9000".to_string()),
+            media_dir: None,
+            public_base_url: None,
+            bridges: None,
+            active_output: None,
+            local_outputs: None,
+            local_id: None,
+            local_name: None,
+            local_device: None,
+        };
+        let addr = bind_from_config(&cfg).unwrap().unwrap();
+        assert_eq!(addr, "127.0.0.1:9000".parse().unwrap());
+    }
+}

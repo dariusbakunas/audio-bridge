@@ -473,3 +473,34 @@ fn parse_single_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
     }
     Some((start, end.min(total_len.saturating_sub(1))))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_range_accepts_open_end() {
+        let range = parse_single_range("bytes=10-", 100).unwrap();
+        assert_eq!(range, (10, 99));
+    }
+
+    #[test]
+    fn parse_single_range_rejects_invalid() {
+        assert!(parse_single_range("items=1-2", 100).is_none());
+        assert!(parse_single_range("bytes=-10", 100).is_none());
+        assert!(parse_single_range("bytes=200-300", 100).is_none());
+        assert!(parse_single_range("bytes=50-40", 100).is_none());
+    }
+
+    #[test]
+    fn parse_single_range_clamps_end_to_length() {
+        let range = parse_single_range("bytes=90-200", 100).unwrap();
+        assert_eq!(range, (90, 99));
+    }
+
+    #[test]
+    fn parse_single_range_accepts_exact_end() {
+        let range = parse_single_range("bytes=0-0", 100).unwrap();
+        assert_eq!(range, (0, 0));
+    }
+}

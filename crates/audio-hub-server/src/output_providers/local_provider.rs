@@ -344,3 +344,59 @@ async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_output_id_accepts_valid() {
+        let id = LocalProvider::parse_output_id("local:host:device").unwrap();
+        assert_eq!(id, "device");
+    }
+
+    #[test]
+    fn parse_output_id_rejects_invalid() {
+        assert!(LocalProvider::parse_output_id("bridge:host:device").is_none());
+        assert!(LocalProvider::parse_output_id("local::device").is_none());
+        assert!(LocalProvider::parse_output_id("local:host").is_none());
+    }
+
+    #[test]
+    fn short_device_id_truncates_long_ids() {
+        let long = "b".repeat(80);
+        let shortened = LocalProvider::short_device_id(&long);
+        assert!(shortened.len() < long.len());
+        assert!(shortened.contains("..."));
+    }
+
+    #[test]
+    fn normalize_supported_rates_rejects_invalid() {
+        assert!(normalize_supported_rates(0, 48_000).is_none());
+        assert!(normalize_supported_rates(48_000, 0).is_none());
+        assert!(normalize_supported_rates(48_000, 44_100).is_none());
+        assert!(normalize_supported_rates(1, u32::MAX).is_none());
+    }
+
+    #[test]
+    fn normalize_supported_rates_accepts_valid() {
+        let rates = normalize_supported_rates(44_100, 96_000).unwrap();
+        assert_eq!(rates.min_hz, 44_100);
+        assert_eq!(rates.max_hz, 96_000);
+    }
+
+    #[test]
+    fn estimate_bitrate_kbps_returns_none_for_zero_duration() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-local-bitrate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let file = root.join("track.flac");
+        let _ = std::fs::write(&file, vec![0u8; 1000]);
+        assert!(estimate_bitrate_kbps(&file, Some(0)).is_none());
+    }
+}

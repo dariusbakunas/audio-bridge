@@ -618,6 +618,48 @@ fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32
     u32::try_from(kbps).ok()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_supported_rates_rejects_invalid() {
+        assert!(normalize_supported_rates(0, 48_000).is_none());
+        assert!(normalize_supported_rates(48_000, 0).is_none());
+        assert!(normalize_supported_rates(48_000, 44_100).is_none());
+        assert!(normalize_supported_rates(1, u32::MAX).is_none());
+    }
+
+    #[test]
+    fn normalize_supported_rates_accepts_valid() {
+        let rates = normalize_supported_rates(44_100, 96_000).unwrap();
+        assert_eq!(rates.min_hz, 44_100);
+        assert_eq!(rates.max_hz, 96_000);
+    }
+
+    #[test]
+    fn short_device_id_truncates_long_ids() {
+        let long = "a".repeat(80);
+        let shortened = short_device_id(&long);
+        assert!(shortened.len() < long.len());
+        assert!(shortened.contains("..."));
+    }
+
+    #[test]
+    fn estimate_bitrate_kbps_returns_none_for_zero_duration() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-bridge-bitrate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let file = root.join("track.flac");
+        let _ = std::fs::write(&file, vec![0u8; 1000]);
+        assert!(estimate_bitrate_kbps(&file, Some(0)).is_none());
+    }
+}
 /// Switch the active bridge id and stop the current bridge worker.
 fn switch_active_bridge(
     state: &AppState,

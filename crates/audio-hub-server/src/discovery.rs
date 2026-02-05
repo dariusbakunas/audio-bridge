@@ -142,3 +142,14 @@ fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
         .call();
     resp.map(|r| r.status().is_success()).unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ping_bridge_returns_false_on_unreachable() {
+        let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        assert!(!ping_bridge(addr));
+    }
+}
