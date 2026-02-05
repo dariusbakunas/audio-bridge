@@ -244,6 +244,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_config_has_expected_values() {
+        let cfg = HttpRangeConfig::default();
+        assert_eq!(cfg.block_size, 512 * 1024);
+        assert_eq!(cfg.timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn new_source_initializes_empty_buffer() {
+        let cfg = HttpRangeConfig::default();
+        let source = HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None);
+        assert_eq!(source.pos, 0);
+        assert!(source.len.is_none());
+        assert!(source.buf.is_empty());
+        assert_eq!(source.buf_start, 0);
+    }
+
+    #[test]
     fn parse_content_range_total_reads_total() {
         let total = parse_content_range_total("bytes 0-99/12345");
         assert_eq!(total, Some(12345));

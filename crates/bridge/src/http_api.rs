@@ -289,3 +289,44 @@ fn error_response(status: u16, message: &str) -> (u16, Response<std::io::Cursor<
 fn should_log_path(path: &str) -> bool {
     !matches!(path, "/status" | "/health")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn should_log_path_filters_health_and_status() {
+        assert!(!should_log_path("/status"));
+        assert!(!should_log_path("/health"));
+        assert!(should_log_path("/devices"));
+    }
+
+    #[test]
+    fn json_response_encodes_body() {
+        #[derive(serde::Serialize)]
+        struct Payload {
+            name: &'static str,
+        }
+        let (status, resp) = json_response(200, &Payload { name: "bridge" });
+        let mut buf = String::new();
+        let mut reader = resp.into_reader();
+        reader.read_to_string(&mut buf).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&buf).unwrap();
+
+        assert_eq!(status, 200);
+        assert_eq!(value["name"], "bridge");
+    }
+
+    #[test]
+    fn error_response_encodes_message() {
+        let (status, resp) = error_response(404, "missing");
+        let mut buf = String::new();
+        let mut reader = resp.into_reader();
+        reader.read_to_string(&mut buf).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&buf).unwrap();
+
+        assert_eq!(status, 404);
+        assert_eq!(value["error"], "missing");
+    }
+}

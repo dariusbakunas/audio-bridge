@@ -22,17 +22,10 @@ pub(crate) fn spawn_mdns_advertiser(
         }
     };
     let service_type = "_audio-bridge._tcp.local.";
-    let host_base = std::env::var("HOSTNAME")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
-    let host = if host_base.ends_with(".local.") {
-        host_base.clone()
-    } else {
-        format!("{host_base}.local.")
-    };
-    let id = std::env::var("BRIDGE_ID").unwrap_or_else(|_| host_base.clone());
-    let name = std::env::var("BRIDGE_NAME").unwrap_or_else(|_| host_base.clone());
+    let host_base = resolve_host_base();
+    let host = format_host(&host_base);
+    let id = resolve_bridge_id(&host_base);
+    let name = resolve_bridge_name(&host_base);
     let instance = format!("{id}");
     let properties: std::collections::HashMap<String, String> = [
         ("id".to_string(), id.clone()),
@@ -81,6 +74,29 @@ impl MdnsAdvertiser {
     }
 }
 
+fn resolve_host_base() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string())
+}
+
+fn format_host(host_base: &str) -> String {
+    if host_base.ends_with(".local.") {
+        host_base.to_string()
+    } else {
+        format!("{host_base}.local.")
+    }
+}
+
+fn resolve_bridge_id(host_base: &str) -> String {
+    std::env::var("BRIDGE_ID").unwrap_or_else(|_| host_base.to_string())
+}
+
+fn resolve_bridge_name(host_base: &str) -> String {
+    std::env::var("BRIDGE_NAME").unwrap_or_else(|_| host_base.to_string())
+}
+
 /// Determine a best-effort local IP for advertisement.
 fn local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -88,4 +104,15 @@ fn local_ip() -> Option<std::net::IpAddr> {
         return None;
     }
     socket.local_addr().ok().map(|addr| addr.ip())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_host_appends_local_suffix() {
+        assert_eq!(format_host("bridge"), "bridge.local.");
+        assert_eq!(format_host("bridge.local."), "bridge.local.");
+    }
 }

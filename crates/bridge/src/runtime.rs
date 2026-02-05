@@ -18,14 +18,17 @@ pub fn list_devices() -> Result<()> {
 /// Play a local file using the provided playback config.
 pub fn run_play(config: BridgePlayConfig) -> Result<()> {
     let host = cpal::default_host();
-    let device = device::pick_device(&host, config.device.as_deref())?;
+    let device_name = normalize_device_name(config.device);
+    let device = device::pick_device(&host, device_name.as_deref())?;
     tracing::info!(device = %device.description()?, "output device");
     play_one_local(&device, &config.playback, &config.path)
 }
 
 /// Run the bridge HTTP API and playback worker.
 pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()> {
-    let device_selected = std::sync::Arc::new(std::sync::Mutex::new(config.device.clone()));
+    let device_selected = std::sync::Arc::new(std::sync::Mutex::new(
+        normalize_device_name(config.device.clone()),
+    ));
     let status = PlayerStatusState::shared();
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
@@ -59,6 +62,17 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     }
     let _ = _http.join();
     Ok(())
+}
+
+fn normalize_device_name(device: Option<String>) -> Option<String> {
+    device.and_then(|name| {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 /// Decode and play a single local file on the given device.
@@ -97,4 +111,20 @@ fn play_one_local(
             buffer_capacity_frames: None,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_device_name_trims_and_drops_empty() {
+        assert_eq!(normalize_device_name(None), None);
+        assert_eq!(normalize_device_name(Some("".to_string())), None);
+        assert_eq!(normalize_device_name(Some("  ".to_string())), None);
+        assert_eq!(
+            normalize_device_name(Some("  USB DAC ".to_string())),
+            Some("USB DAC".to_string())
+        );
+    }
 }
