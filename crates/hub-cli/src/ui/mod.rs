@@ -14,5 +14,6 @@
 
 mod app;
 mod render;
+mod view_model;
 
 pub(crate) use app::run_tui;
