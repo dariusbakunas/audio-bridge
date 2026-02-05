@@ -1,6 +1,7 @@
 # audio-hub
 
 [![CI](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/dariusbakunas/audio-bridge/badge.svg?branch=main)](https://coveralls.io/github/dariusbakunas/audio-bridge?branch=main)
 
 Stream audio files from your laptop/desktop to a small network “receiver” (perfect for a Raspberry Pi connected to a USB DAC).
 
