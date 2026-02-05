@@ -32,6 +32,9 @@ pub struct PlaybackConfig {
     /// When set, the callback increments these when it has to output silence.
     pub underrun_frames: Option<Arc<AtomicU64>>,
     pub underrun_events: Option<Arc<AtomicU64>>,
+
+    /// When set, the callback updates this with the current buffered frames.
+    pub buffered_frames: Option<Arc<AtomicU64>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -87,6 +90,7 @@ where
     let played_frames = cfg.played_frames.clone();
     let underrun_frames = cfg.underrun_frames.clone();
     let underrun_events = cfg.underrun_events.clone();
+    let buffered_frames = cfg.buffered_frames.clone();
 
     let err_fn = |err| tracing::warn!("stream error: {err}");
 
@@ -96,6 +100,9 @@ where
         move |data: &mut [T], _| {
             if let Some(p) = &paused_flag {
                 if p.load(Ordering::Relaxed) {
+                    if let Some(counter) = &buffered_frames {
+                        counter.store(dstq_cb.len_frames() as u64, Ordering::Relaxed);
+                    }
                     data.fill(<T as cpal::Sample>::from_sample::<f32>(0.0));
                     return;
                 }
@@ -148,6 +155,10 @@ where
                 if filled_frames > 0 {
                     counter.fetch_add(filled_frames as u64, Ordering::Relaxed);
                 }
+            }
+
+            if let Some(counter) = &buffered_frames {
+                counter.store(dstq_cb.len_frames() as u64, Ordering::Relaxed);
             }
         },
         err_fn,

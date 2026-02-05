@@ -39,6 +39,9 @@ impl StatusStore {
                     resampling: None,
                     resample_from_hz: None,
                     resample_to_hz: None,
+                    buffer_size_frames: None,
+                    buffered_frames: None,
+                    buffer_capacity_frames: None,
                     elapsed_ms: Some(0),
                     paused: Some(start_paused),
                 },
@@ -71,6 +74,9 @@ impl StatusStore {
             s.resampling = None;
             s.resample_from_hz = None;
             s.resample_to_hz = None;
+            s.buffer_size_frames = None;
+            s.buffered_frames = None;
+            s.buffer_capacity_frames = None;
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
         }
@@ -115,6 +121,9 @@ impl StatusStore {
                     resampling: Some(resampling),
                     resample_from_hz: Some(resample_from_hz),
                     resample_to_hz: Some(resample_to_hz),
+                    buffer_size_frames: None,
+                    buffered_frames: None,
+                    buffer_capacity_frames: None,
                     elapsed_ms,
                     paused: Some(paused),
                 },
@@ -156,6 +165,9 @@ impl StatusStore {
                     resampling: remote.resampling,
                     resample_from_hz: remote.resample_from_hz,
                     resample_to_hz: remote.resample_to_hz,
+                    buffer_size_frames: remote.buffer_size_frames,
+                    buffered_frames: remote.buffered_frames,
+                    buffer_capacity_frames: remote.buffer_capacity_frames,
                     elapsed_ms: remote.elapsed_ms,
                     paused: Some(remote.paused),
                 },
@@ -206,6 +218,9 @@ struct PlaybackFields {
     resampling: Option<bool>,
     resample_from_hz: Option<u32>,
     resample_to_hz: Option<u32>,
+    buffer_size_frames: Option<u32>,
+    buffered_frames: Option<u64>,
+    buffer_capacity_frames: Option<u64>,
     elapsed_ms: Option<u64>,
     paused: Option<bool>,
 }
@@ -222,6 +237,9 @@ fn apply_playback_fields(s: &mut PlayerStatus, fields: PlaybackFields) {
     s.resampling = fields.resampling;
     s.resample_from_hz = fields.resample_from_hz;
     s.resample_to_hz = fields.resample_to_hz;
+    s.buffer_size_frames = fields.buffer_size_frames;
+    s.buffered_frames = fields.buffered_frames;
+    s.buffer_capacity_frames = fields.buffer_capacity_frames;
     s.elapsed_ms = fields.elapsed_ms;
     if let Some(paused) = fields.paused {
         s.paused = paused;

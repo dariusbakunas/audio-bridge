@@ -20,6 +20,8 @@ pub struct BridgeStatus {
     pub underrun_frames: Option<u64>,
     pub underrun_events: Option<u64>,
     pub buffer_size_frames: Option<u32>,
+    pub buffered_frames: Option<u64>,
+    pub buffer_capacity_frames: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -50,4 +52,6 @@ pub struct PlaybackStatus {
     pub underrun_frames: Option<u64>,
     pub underrun_events: Option<u64>,
     pub buffer_size_frames: Option<u32>,
+    pub buffered_frames: Option<u64>,
+    pub buffer_capacity_frames: Option<u64>,
 }

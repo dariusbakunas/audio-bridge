@@ -391,7 +391,9 @@ impl OutputProvider for BridgeProvider {
             bitrate_kbps,
             underrun_frames: None,
             underrun_events: None,
-            buffer_size_frames: None,
+            buffer_size_frames: status.buffer_size_frames,
+            buffered_frames: status.buffered_frames,
+            buffer_capacity_frames: status.buffer_capacity_frames,
         };
         drop(status);
         if let Some(http_addr) = http_addr {
@@ -413,6 +415,8 @@ impl OutputProvider for BridgeProvider {
                     resp.underrun_frames = remote.underrun_frames;
                     resp.underrun_events = remote.underrun_events;
                     resp.buffer_size_frames = remote.buffer_size_frames;
+                    resp.buffered_frames = remote.buffered_frames;
+                    resp.buffer_capacity_frames = remote.buffer_capacity_frames;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "bridge status poll failed");

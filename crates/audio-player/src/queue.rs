@@ -90,6 +90,11 @@ impl SharedAudio {
         self.channels
     }
 
+    /// Maximum buffered frames (capacity) for this queue.
+    pub fn max_frames(&self) -> usize {
+        self.max_buffered_samples / self.channels
+    }
+
     /// Current buffered frames (best-effort snapshot).
     pub fn len_frames(&self) -> usize {
         let g = self.inner.lock().unwrap();

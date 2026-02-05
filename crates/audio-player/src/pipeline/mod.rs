@@ -21,6 +21,8 @@ pub struct PlaybackSessionOptions {
     pub played_frames: Option<Arc<AtomicU64>>,
     pub underrun_frames: Option<Arc<AtomicU64>>,
     pub underrun_events: Option<Arc<AtomicU64>>,
+    pub buffered_frames: Option<Arc<AtomicU64>>,
+    pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
 }
 
 struct PlaybackState {
@@ -29,6 +31,8 @@ struct PlaybackState {
     played_frames: Option<Arc<AtomicU64>>,
     underrun_frames: Option<Arc<AtomicU64>>,
     underrun_events: Option<Arc<AtomicU64>>,
+    buffered_frames: Option<Arc<AtomicU64>>,
+    buffer_capacity_frames: Option<Arc<AtomicU64>>,
 }
 
 impl PlaybackState {
@@ -39,6 +43,8 @@ impl PlaybackState {
             played_frames: opts.played_frames,
             underrun_frames: opts.underrun_frames,
             underrun_events: opts.underrun_events,
+            buffered_frames: opts.buffered_frames,
+            buffer_capacity_frames: opts.buffer_capacity_frames,
         }
     }
 
@@ -78,6 +84,9 @@ pub fn play_decoded_source(
         tracing::info!(rate_hz = dst_rate, "resampling");
         out
     };
+    if let Some(cap) = &state.buffer_capacity_frames {
+        cap.store(dstq.max_frames() as u64, Ordering::Relaxed);
+    }
 
     let stream = playback::build_output_stream(
         device,
@@ -90,6 +99,7 @@ pub fn play_decoded_source(
             played_frames: state.played_frames.clone(),
             underrun_frames: state.underrun_frames.clone(),
             underrun_events: state.underrun_events.clone(),
+            buffered_frames: state.buffered_frames.clone(),
         },
     )?;
     stream.play()?;

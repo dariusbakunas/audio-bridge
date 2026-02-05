@@ -185,6 +185,8 @@ pub(crate) struct App {
     pub(crate) remote_bitrate_kbps: Option<u32>,
     pub(crate) remote_channels: Option<u16>,
     pub(crate) remote_output_sample_rate: Option<u32>,
+    pub(crate) remote_buffered_frames: Option<u64>,
+    pub(crate) remote_buffer_capacity_frames: Option<u64>,
     pub(crate) remote_output_id: Option<String>,
     pub(crate) outputs_open: bool,
     pub(crate) outputs: Vec<crate::server_api::RemoteOutput>,
@@ -269,6 +271,8 @@ impl App {
             remote_bitrate_kbps: None,
             remote_channels: None,
             remote_output_sample_rate: None,
+            remote_buffered_frames: None,
+            remote_buffer_capacity_frames: None,
             remote_output_id: None,
             outputs_open: false,
             outputs: Vec::new(),
@@ -849,6 +853,8 @@ fn ui_loop(
                     let format = status.format.clone();
                     let output_id = status.output_id.clone();
                     let bitrate_kbps = status.bitrate_kbps;
+                    let buffered_frames = status.buffered_frames;
+                    let buffer_capacity_frames = status.buffer_capacity_frames;
                     if let Some(path) = now_playing {
                         let path = PathBuf::from(path);
                         app.now_playing_path = Some(path.clone());
@@ -860,6 +866,8 @@ fn ui_loop(
                         app.now_playing_meta = None;
                         app.remote_channels = None;
                         app.remote_output_sample_rate = None;
+                        app.remote_buffered_frames = None;
+                        app.remote_buffer_capacity_frames = None;
                     }
                     if duration_ms.is_some() {
                         app.remote_duration_ms = duration_ms;
@@ -898,6 +906,8 @@ fn ui_loop(
                     }
                     app.remote_channels = channels;
                     app.remote_output_sample_rate = output_sample_rate;
+                    app.remote_buffered_frames = buffered_frames;
+                    app.remote_buffer_capacity_frames = buffer_capacity_frames;
                     app.remote_output_id = output_id;
                 }
                 Event::Error(e) => app.status = format!("Error: {e}"),

@@ -178,6 +178,8 @@ pub(crate) fn spawn_http_server(
                             underrun_frames: None,
                             underrun_events: None,
                             buffer_size_frames: None,
+                            buffered_frames: None,
+                            buffer_capacity_frames: None,
                         });
                     json_response(200, &snapshot)
                 }

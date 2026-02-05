@@ -286,6 +286,8 @@ fn play_one_http(
     }
     let underrun_frames = Arc::new(AtomicU64::new(0));
     let underrun_events = Arc::new(AtomicU64::new(0));
+    let buffered_frames = Arc::new(AtomicU64::new(0));
+    let buffer_capacity_frames = Arc::new(AtomicU64::new(0));
     let output_sample_format = Some(format!("{:?}", config.sample_format()));
     let container = ext_hint
         .clone()
@@ -314,6 +316,8 @@ fn play_one_http(
                 cpal::BufferSize::Fixed(frames) => Some(frames),
                 cpal::BufferSize::Default => None,
             };
+            s.buffered_frames = Some(buffered_frames.clone());
+            s.buffer_capacity_frames = Some(buffer_capacity_frames.clone());
         }
     }
 
@@ -330,6 +334,8 @@ fn play_one_http(
             played_frames: Some(played_frames),
             underrun_frames: Some(underrun_frames),
             underrun_events: Some(underrun_events),
+            buffered_frames: Some(buffered_frames),
+            buffer_capacity_frames: Some(buffer_capacity_frames),
         },
     );
 

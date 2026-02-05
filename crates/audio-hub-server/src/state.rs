@@ -27,6 +27,9 @@ pub struct PlayerStatus {
     pub resampling: Option<bool>,
     pub resample_from_hz: Option<u32>,
     pub resample_to_hz: Option<u32>,
+    pub buffer_size_frames: Option<u32>,
+    pub buffered_frames: Option<u64>,
+    pub buffer_capacity_frames: Option<u64>,
     pub auto_advance_in_flight: bool,
     pub seek_in_flight: bool,
 }

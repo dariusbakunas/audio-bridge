@@ -252,6 +252,8 @@ fn play_one_file(
             played_frames: Some(played_frames),
             underrun_frames: Some(underrun_frames),
             underrun_events: Some(underrun_events),
+            buffered_frames: None,
+            buffer_capacity_frames: None,
         },
     );
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph},
 };
 
@@ -55,19 +55,42 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         }
     };
 
+    let buffer_info = match (
+        app.remote_buffered_frames,
+        app.remote_buffer_capacity_frames,
+        app.remote_output_sample_rate,
+    ) {
+        (Some(buffered), Some(capacity), Some(rate)) if capacity > 0 && rate > 0 => {
+            let buffer_secs = buffered as f64 / rate as f64;
+            let capacity_secs = capacity as f64 / rate as f64;
+            if capacity_secs > 0.0 {
+                let ratio = (buffer_secs / capacity_secs).clamp(0.0, 1.0);
+                Some((ratio, format!("{buffer_secs:.1}s")))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
     let remote_gauge = match (app.remote_elapsed_ms, app.remote_duration_ms, app.remote_paused) {
         (Some(elapsed_ms), Some(total_ms), Some(p)) if total_ms > 0 => {
             let ratio = (elapsed_ms as f64 / total_ms as f64).clamp(0.0, 1.0);
             let state = if p { "paused" } else { "playing" };
             let elapsed = format_duration_ms(elapsed_ms);
             let remaining = format_duration_ms(total_ms.saturating_sub(elapsed_ms));
+            let buffer_label = buffer_info
+                .as_ref()
+                .map(|(_, secs)| format!(" • buf {secs}"))
+                .unwrap_or_default();
             Some((
                 ratio,
-                format!("{elapsed} elapsed • {remaining} left [{state}]"),
+                format!(" {elapsed} elapsed • {remaining} left [{state}]{buffer_label}"),
             ))
         }
         _ => None,
     };
+    let buffer_ratio = buffer_info.map(|(ratio, _)| ratio);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -275,14 +298,43 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     if let Some((ratio, label)) = remote_gauge {
         let gauge_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(10), Constraint::Length(40)])
+            .constraints([Constraint::Min(10), Constraint::Length(50)])
             .split(footer_chunks[2]);
-
-        let gauge = Gauge::default()
-            .ratio(ratio)
-            .style(Style::default().fg(Color::Black).bg(Color::White))
-            .gauge_style(Style::default().fg(Color::White).bg(Color::Black));
-        f.render_widget(gauge, gauge_chunks[0]);
+        let width = gauge_chunks[0].width as usize;
+        if width > 0 {
+            let played_cells = (ratio * width as f64).round() as usize;
+            let buffer_cells = buffer_ratio
+                .map(|r| (r * width as f64).round() as usize)
+                .unwrap_or(0)
+                .max(played_cells)
+                .min(width);
+            let mut spans = Vec::new();
+            if played_cells > 0 {
+                spans.push(Span::styled(
+                    " ".repeat(played_cells),
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ));
+            }
+            if buffer_cells > played_cells {
+                spans.push(Span::styled(
+                    " ".repeat(buffer_cells - played_cells),
+                    Style::default().bg(Color::DarkGray).fg(Color::Black),
+                ));
+            }
+            if width > buffer_cells {
+                spans.push(Span::styled(
+                    " ".repeat(width - buffer_cells),
+                    Style::default().bg(Color::Black).fg(Color::Black),
+                ));
+            }
+            f.render_widget(Paragraph::new(Line::from(spans)), gauge_chunks[0]);
+        } else {
+            let gauge = Gauge::default()
+                .ratio(ratio)
+                .style(Style::default().fg(Color::Black).bg(Color::White))
+                .gauge_style(Style::default().fg(Color::White).bg(Color::Black));
+            f.render_widget(gauge, gauge_chunks[0]);
+        }
         f.render_widget(
             Paragraph::new(Line::from(label)).alignment(Alignment::Right),
             gauge_chunks[1],

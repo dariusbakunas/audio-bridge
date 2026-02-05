@@ -276,7 +276,9 @@ impl OutputProvider for LocalProvider {
                 bitrate_kbps,
                 underrun_frames: None,
                 underrun_events: None,
-                buffer_size_frames: None,
+                buffer_size_frames: status.buffer_size_frames,
+                buffered_frames: status.buffered_frames,
+                buffer_capacity_frames: status.buffer_capacity_frames,
             };
             drop(status);
         Ok(resp)

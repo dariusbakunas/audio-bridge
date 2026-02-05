@@ -22,6 +22,8 @@ pub struct PlayerStatusState {
     pub underrun_frames: Option<Arc<AtomicU64>>,
     pub underrun_events: Option<Arc<AtomicU64>>,
     pub buffer_size_frames: Option<u32>,
+    pub buffered_frames: Option<Arc<AtomicU64>>,
+    pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
 }
 
 pub type StatusSnapshot = BridgeStatusSnapshot;
@@ -62,6 +64,8 @@ impl PlayerStatusState {
             underrun_frames: self.underrun_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
             underrun_events: self.underrun_events.as_ref().map(|v| v.load(Ordering::Relaxed)),
             buffer_size_frames: self.buffer_size_frames,
+            buffered_frames: self.buffered_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
+            buffer_capacity_frames: self.buffer_capacity_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
         }
     }
 
@@ -82,5 +86,7 @@ impl PlayerStatusState {
         self.underrun_frames = None;
         self.underrun_events = None;
         self.buffer_size_frames = None;
+        self.buffered_frames = None;
+        self.buffer_capacity_frames = None;
     }
 }

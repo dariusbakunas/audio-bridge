@@ -85,6 +85,8 @@ fn play_one_local(
             played_frames: None,
             underrun_frames: None,
             underrun_events: None,
+            buffered_frames: None,
+            buffer_capacity_frames: None,
         },
     )
 }
