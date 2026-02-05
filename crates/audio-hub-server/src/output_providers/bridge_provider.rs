@@ -573,7 +573,7 @@ fn inject_active_output_for_bridge(
     if bridge_id != bridge.id {
         return;
     }
-    let status = match BridgeTransportClient::new(bridge.http_addr, String::new()).status() {
+    let status = match fetch_bridge_status(bridge.http_addr) {
         Ok(status) => status,
         Err(_) => return,
     };
@@ -598,6 +598,10 @@ fn inject_active_output_for_bridge(
             volume: false,
         },
     });
+}
+
+fn fetch_bridge_status(http_addr: std::net::SocketAddr) -> Result<crate::bridge_transport::HttpStatusResponse, anyhow::Error> {
+    BridgeTransportClient::new(http_addr, String::new()).status()
 }
 
 /// Estimate bitrate from file size and duration.
@@ -658,6 +662,33 @@ mod tests {
         let file = root.join("track.flac");
         let _ = std::fs::write(&file, vec![0u8; 1000]);
         assert!(estimate_bitrate_kbps(&file, Some(0)).is_none());
+    }
+
+    #[test]
+    fn inject_active_output_for_bridge_skips_when_present() {
+        let bridge = crate::config::BridgeConfigResolved {
+            id: "bridge-1".to_string(),
+            name: "Bridge".to_string(),
+            http_addr: "127.0.0.1:5556".parse().unwrap(),
+        };
+        let active_id = "bridge:bridge-1:device-1";
+        let mut outputs = vec![OutputInfo {
+            id: active_id.to_string(),
+            kind: "bridge".to_string(),
+            name: "Device".to_string(),
+            state: "online".to_string(),
+            provider_id: Some("bridge:bridge-1".to_string()),
+            provider_name: Some("Bridge".to_string()),
+            supported_rates: None,
+            capabilities: OutputCapabilities {
+                device_select: true,
+                volume: false,
+            },
+        }];
+
+        inject_active_output_for_bridge(&mut outputs, Some(active_id), &bridge);
+
+        assert_eq!(outputs.len(), 1);
     }
 }
 /// Switch the active bridge id and stop the current bridge worker.

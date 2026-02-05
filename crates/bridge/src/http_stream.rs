@@ -242,6 +242,7 @@ fn add_signed(base: u64, delta: i64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Seek, SeekFrom};
 
     #[test]
     fn default_config_has_expected_values() {
@@ -280,6 +281,52 @@ mod tests {
     #[test]
     fn parse_content_range_total_requires_slash() {
         assert_eq!(parse_content_range_total("bytes 0-99"), None);
+    }
+
+    #[test]
+    fn read_reads_from_buffer_and_advances() {
+        let cfg = HttpRangeConfig::default();
+        let mut source = HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None);
+        source.len = Some(4);
+        source.buf_start = 0;
+        source.buf = vec![1, 2, 3, 4];
+        source.pos = 1;
+
+        let mut out = [0u8; 2];
+        let read = source.read(&mut out).unwrap();
+        assert_eq!(read, 2);
+        assert_eq!(out, [2, 3]);
+        assert_eq!(source.pos, 3);
+    }
+
+    #[test]
+    fn read_returns_zero_when_canceled() {
+        let cfg = HttpRangeConfig::default();
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut source =
+            HttpRangeSource::new("http://example/track.flac".to_string(), cfg, Some(cancel));
+        let mut out = [0u8; 4];
+        let read = source.read(&mut out).unwrap();
+        assert_eq!(read, 0);
+    }
+
+    #[test]
+    fn seek_start_sets_position() {
+        let cfg = HttpRangeConfig::default();
+        let mut source = HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None);
+        let pos = source.seek(SeekFrom::Start(5)).unwrap();
+        assert_eq!(pos, 5);
+        assert_eq!(source.pos, 5);
+    }
+
+    #[test]
+    fn seek_current_allows_negative() {
+        let cfg = HttpRangeConfig::default();
+        let mut source = HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None);
+        source.pos = 5;
+        let pos = source.seek(SeekFrom::Current(-3)).unwrap();
+        assert_eq!(pos, 2);
+        assert_eq!(source.pos, 2);
     }
 
     #[test]

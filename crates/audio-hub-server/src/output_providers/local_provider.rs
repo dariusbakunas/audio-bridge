@@ -348,6 +348,8 @@ async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn parse_output_id_accepts_valid() {
@@ -398,5 +400,104 @@ mod tests {
         let file = root.join("track.flac");
         let _ = std::fs::write(&file, vec![0u8; 1000]);
         assert!(estimate_bitrate_kbps(&file, Some(0)).is_none());
+    }
+
+    fn make_state(active_output_id: Option<String>, enabled: bool) -> AppState {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-local-state-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let library = crate::library::scan_library(&root).expect("scan library");
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: None,
+            active_output_id,
+        }));
+        let bridge_state = Arc::new(crate::state::BridgeProviderState::new(
+            cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(crate::state::LocalProviderState {
+            enabled,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+        let status = crate::status_store::StatusStore::new(Arc::new(Mutex::new(
+            crate::state::PlayerStatus::default(),
+        )));
+        let queue = Arc::new(Mutex::new(crate::state::QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status,
+            queue_service,
+        );
+        let device_selection = crate::state::DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        AppState::new(
+            library,
+            bridge_state,
+            local_state,
+            playback_manager,
+            device_selection,
+        )
+    }
+
+    #[test]
+    fn inject_active_output_if_missing_adds_placeholder() {
+        let active_id = "local:local:device-1".to_string();
+        let state = make_state(Some(active_id.clone()), true);
+        if let Ok(mut status) = state.playback_manager.status().inner().lock() {
+            status.output_device = Some("USB DAC".to_string());
+            status.sample_rate = Some(96_000);
+        }
+        let provider = LocalProvider;
+        let mut outputs = Vec::new();
+
+        provider.inject_active_output_if_missing(&state, &mut outputs, &active_id);
+
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].id, active_id);
+        assert!(outputs[0].name.contains("USB DAC"));
+        assert_eq!(outputs[0].supported_rates.as_ref().unwrap().max_hz, 96_000);
+    }
+
+    #[test]
+    fn inject_active_output_if_missing_skips_when_present() {
+        let active_id = "local:local:device-1".to_string();
+        let state = make_state(Some(active_id.clone()), true);
+        let provider = LocalProvider;
+        let mut outputs = vec![OutputInfo {
+            id: active_id.clone(),
+            kind: "local".to_string(),
+            name: "Device".to_string(),
+            state: "online".to_string(),
+            provider_id: Some("local:local".to_string()),
+            provider_name: Some("Local Host".to_string()),
+            supported_rates: None,
+            capabilities: OutputCapabilities {
+                device_select: true,
+                volume: false,
+            },
+        }];
+
+        provider.inject_active_output_if_missing(&state, &mut outputs, &active_id);
+
+        assert_eq!(outputs.len(), 1);
     }
 }

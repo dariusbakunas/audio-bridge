@@ -1129,6 +1129,23 @@ mod tests {
         )
     }
 
+    fn app_with_entries_and_logs(entries: Vec<LibraryItem>) -> (App, Sender<String>) {
+        let (scan_tx, _scan_req_rx) = unbounded::<ScanReq>();
+        let (_scan_done_tx, scan_rx) = unbounded::<ScanResp>();
+        let (log_tx, log_rx) = unbounded::<String>();
+        (
+            App::new(
+                "http://127.0.0.1:8080".to_string(),
+                PathBuf::from("/music"),
+                entries,
+                scan_tx,
+                scan_rx,
+                log_rx,
+            ),
+            log_tx,
+        )
+    }
+
     #[test]
     fn meta_cache_seeded_from_entries() {
         let entries = vec![
@@ -1303,6 +1320,40 @@ mod tests {
         app.select_index(3);
         app.page_up();
         assert_eq!(app.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn drain_logs_moves_lines_into_buffer() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let (mut app, log_tx) = app_with_entries_and_logs(entries);
+        log_tx.send("line1".to_string()).unwrap();
+        log_tx.send("line2".to_string()).unwrap();
+
+        app.drain_logs();
+
+        assert_eq!(app.logs.len(), 2);
+        assert_eq!(app.logs[0], "line1");
+        assert_eq!(app.logs[1], "line2");
+    }
+
+    #[test]
+    fn push_log_line_caps_buffer_size() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        for i in 0..600 {
+            app.push_log_line(format!("line-{i}"));
+        }
+        assert!(app.logs.len() <= 500);
+        assert_eq!(app.logs.back().unwrap(), "line-599");
+    }
+
+    #[test]
+    fn toggle_now_playing_flips_flag() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        assert!(!app.now_playing_open);
+        app.toggle_now_playing();
+        assert!(app.now_playing_open);
     }
 
     // auto-advance moved to server; client no longer manipulates queue on playback end.
