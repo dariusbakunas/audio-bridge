@@ -96,6 +96,11 @@ p {
   box-shadow: none;
 }
 
+.btn.small {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
 .alert {
   margin-top: 8px;
   background: rgba(255, 107, 53, 0.15);
@@ -129,6 +134,12 @@ p {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--muted);
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .status-dot {
@@ -182,6 +193,59 @@ p {
   flex-direction: column;
   gap: 12px;
   margin-top: 12px;
+}
+
+.library-path {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.library-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(18, 18, 18, 0.04);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.library-row.track {
+  cursor: default;
+}
+
+.library-title {
+  font-weight: 600;
+}
+
+.library-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .output-row {
@@ -270,6 +334,11 @@ p {
   color: var(--muted);
 }
 
+.mono {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+}
+
 .muted.small {
   font-size: 0.8rem;
 }
@@ -277,6 +346,28 @@ p {
 .updated {
   margin-top: 12px;
   text-align: right;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 18, 18, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 5;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--card);
+  border-radius: 24px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
 }
 
 @media (max-width: 720px) {

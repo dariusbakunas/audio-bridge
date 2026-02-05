@@ -37,6 +37,30 @@ interface QueueResponse {
   items: QueueItem[];
 }
 
+interface LibraryEntryDir {
+  kind: "dir";
+  path: string;
+  name: string;
+}
+
+interface LibraryEntryTrack {
+  kind: "track";
+  path: string;
+  file_name: string;
+  duration_ms?: number | null;
+  sample_rate?: number | null;
+  album?: string | null;
+  artist?: string | null;
+  format: string;
+}
+
+type LibraryEntry = LibraryEntryDir | LibraryEntryTrack;
+
+interface LibraryResponse {
+  dir: string;
+  entries: LibraryEntry[];
+}
+
 interface StatusResponse {
   now_playing?: string | null;
   paused?: boolean | null;
@@ -83,11 +107,35 @@ function formatRateRange(output: OutputInfo): string {
   return `${formatHz(output.supported_rates.min_hz)} - ${formatHz(output.supported_rates.max_hz)}`;
 }
 
+function parentDir(path: string): string | null {
+  const trimmed = path.replace(/\/+$/, "");
+  if (!trimmed) return null;
+  if (trimmed === "/") return null;
+  const idx = trimmed.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return trimmed.slice(0, idx);
+}
+
+function sortLibraryEntries(entries: LibraryEntry[]): LibraryEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.kind !== b.kind) {
+      return a.kind === "dir" ? -1 : 1;
+    }
+    const aName = a.kind === "dir" ? a.name : a.file_name;
+    const bName = b.kind === "dir" ? b.name : b.file_name;
+    return aName.localeCompare(bName);
+  });
+}
+
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [libraryDir, setLibraryDir] = useState<string | null>(null);
+  const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
+  const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -165,6 +213,41 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!outputsOpen) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOutputsOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [outputsOpen]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadLibrary(dir?: string | null) {
+      setLibraryLoading(true);
+      try {
+        const query = dir ? `?dir=${encodeURIComponent(dir)}` : "";
+        const response = await fetchJson<LibraryResponse>(`/library${query}`);
+        if (!mounted) return;
+        setLibraryDir(response.dir);
+        setLibraryEntries(sortLibraryEntries(response.entries));
+        setError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setError((err as Error).message);
+      } finally {
+        if (mounted) setLibraryLoading(false);
+      }
+    }
+    loadLibrary(libraryDir);
+    return () => {
+      mounted = false;
+    };
+  }, [libraryDir]);
+
   async function handlePause() {
     try {
       await postJson("/pause");
@@ -206,6 +289,22 @@ export default function App() {
     }
   }
 
+  async function handlePlay(path: string) {
+    try {
+      await postJson("/play", { path, queue_mode: "keep" });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function handleQueue(path: string) {
+    try {
+      await postJson("/queue", { paths: [path] });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
     <div className="app">
       <header className="hero">
@@ -236,7 +335,12 @@ export default function App() {
           <div className="card now-playing">
             <div className="card-header">
               <span>Now Playing</span>
-              <span className={`status-dot ${status?.paused ? "paused" : "live"}`}></span>
+              <div className="card-actions">
+                <button className="btn ghost small" onClick={() => setOutputsOpen(true)}>
+                  Outputs
+                </button>
+                <span className={`status-dot ${status?.paused ? "paused" : "live"}`}></span>
+              </div>
             </div>
             <h2>{status?.title ?? status?.now_playing ?? "Idle"}</h2>
             <p className="muted">
@@ -266,27 +370,76 @@ export default function App() {
       <section className="grid">
         <div className="card">
           <div className="card-header">
-            <span>Outputs</span>
-            <span className="pill">{outputs.length} devices</span>
+            <span>Library</span>
+            <span className="pill">{libraryEntries.length} items</span>
           </div>
-          <div className="output-list">
-            {outputs.map((output) => (
-              <button
-                key={output.id}
-                className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
-                onClick={() => handleSelectOutput(output.id)}
-              >
-                <div>
-                  <div className="output-title">{output.name}</div>
-                  <div className="muted small">
-                    {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
+          <div className="library-path">
+            <span className="muted small">Path</span>
+            <span className="mono">{libraryDir ?? "Loading..."}</span>
+          </div>
+          <div className="library-actions">
+            <button
+              className="btn ghost"
+              disabled={!libraryDir || !parentDir(libraryDir)}
+              onClick={() => {
+                if (libraryDir) {
+                  const parent = parentDir(libraryDir);
+                  if (parent) setLibraryDir(parent);
+                }
+              }}
+            >
+              Up one level
+            </button>
+            <button
+              className="btn ghost"
+              onClick={() => setLibraryDir(null)}
+              disabled={!libraryDir}
+            >
+              Back to root
+            </button>
+          </div>
+          <div className="library-list">
+            {libraryLoading ? <p className="muted">Loading library...</p> : null}
+            {!libraryLoading &&
+              libraryEntries.map((entry) => {
+                if (entry.kind === "dir") {
+                  return (
+                    <button
+                      key={entry.path}
+                      className="library-row"
+                      onClick={() => setLibraryDir(entry.path)}
+                    >
+                      <div>
+                        <div className="library-title">{entry.name}</div>
+                        <div className="muted small">Folder</div>
+                      </div>
+                      <span className="chip">Open</span>
+                    </button>
+                  );
+                }
+                return (
+                  <div key={entry.path} className="library-row track">
+                    <div>
+                      <div className="library-title">{entry.file_name}</div>
+                      <div className="muted small">
+                        {entry.artist ?? "Unknown artist"}
+                        {entry.album ? ` - ${entry.album}` : ""}
+                      </div>
+                    </div>
+                    <div className="library-actions-inline">
+                      <span className="muted small">{formatMs(entry.duration_ms)}</span>
+                      <button className="btn ghost" onClick={() => handleQueue(entry.path)}>
+                        Queue
+                      </button>
+                      <button className="btn" onClick={() => handlePlay(entry.path)}>
+                        Play
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
-              </button>
-            ))}
-            {outputs.length === 0 ? (
-              <p className="muted">No outputs reported. Check provider discovery.</p>
+                );
+              })}
+            {!libraryLoading && libraryEntries.length === 0 ? (
+              <p className="muted">No entries found in this folder.</p>
             ) : null}
           </div>
         </div>
@@ -380,6 +533,42 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      {outputsOpen ? (
+        <div className="modal" onClick={() => setOutputsOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="card-header">
+              <span>Outputs</span>
+              <div className="card-actions">
+                <span className="pill">{outputs.length} devices</span>
+                <button className="btn ghost small" onClick={() => setOutputsOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="output-list">
+              {outputs.map((output) => (
+                <button
+                  key={output.id}
+                  className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
+                  onClick={() => handleSelectOutput(output.id)}
+                >
+                  <div>
+                    <div className="output-title">{output.name}</div>
+                    <div className="muted small">
+                      {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
+                    </div>
+                  </div>
+                  <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
+                </button>
+              ))}
+              {outputs.length === 0 ? (
+                <p className="muted">No outputs reported. Check provider discovery.</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
