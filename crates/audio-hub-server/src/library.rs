@@ -1,3 +1,7 @@
+//! Library scanning and indexing.
+//!
+//! Walks the media root, extracts metadata, and builds lookup maps.
+
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};

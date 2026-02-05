@@ -1,3 +1,7 @@
+//! Shared application state.
+//!
+//! Holds the in-memory library, playback state, and provider registries.
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::AtomicBool;

@@ -7,10 +7,8 @@ repository = "https://github.com/dariusbakunas/audio-bridge.git"
 
 [dependencies]
 anyhow = { workspace = true }
-audioadapter-buffers = { workspace = true }
 clap = { workspace = true }
 cpal = { workspace = true }
-rubato = { workspace = true }
 symphonia = { workspace = true }
 crossbeam-channel = { workspace = true }
 ctrlc = { workspace = true }

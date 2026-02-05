@@ -1,3 +1,7 @@
+//! Actix server startup + app wiring.
+//!
+//! Builds the shared state, routes, middleware, and OpenAPI endpoints.
+
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};

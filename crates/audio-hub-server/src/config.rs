@@ -1,3 +1,7 @@
+//! Configuration loading and parsing.
+//!
+//! Defines the server config schema and resolves defaults.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};

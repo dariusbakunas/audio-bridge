@@ -1,3 +1,7 @@
+//! API models and OpenAPI schemas.
+//!
+//! Defines request/response structures for the hub server API.
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use audio_bridge_types::PlaybackStatus;

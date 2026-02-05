@@ -1,3 +1,7 @@
+//! HTTP client for bridge control + status polling.
+//!
+//! Wraps the bridge HTTP API with timeouts and JSON parsing.
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;

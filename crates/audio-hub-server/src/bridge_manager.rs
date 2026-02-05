@@ -1,3 +1,7 @@
+//! Bridge id parsing + merge helpers.
+//!
+//! Provides helpers for validating provider/output ids and merging discovery results.
+
 pub(crate) fn parse_output_id(id: &str) -> Result<(String, String), String> {
     let mut parts = id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");

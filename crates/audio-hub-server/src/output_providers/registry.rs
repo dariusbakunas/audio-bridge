@@ -1,3 +1,7 @@
+//! Output provider registry and adapter glue.
+//!
+//! Routes requests to the active provider and normalizes provider errors.
+
 use actix_web::HttpResponse;
 use async_trait::async_trait;
 

@@ -1,3 +1,7 @@
+//! Shared playback status store and update helpers.
+//!
+//! Centralizes state updates from local playback and bridge status polling.
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 

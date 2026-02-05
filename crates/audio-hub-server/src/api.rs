@@ -1,3 +1,7 @@
+//! HTTP API handlers.
+//!
+//! Defines the Actix routes for library, playback, queue, and output control.
+
 use std::path::PathBuf;
 
 use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};

@@ -1,3 +1,7 @@
+//! mDNS discovery for bridge instances.
+//!
+//! Runs a background task that updates the bridge registry from mDNS events.
+
 use actix_web::web;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 

@@ -1,3 +1,7 @@
+//! Bridge output provider implementation.
+//!
+//! Maps output provider operations to bridge discovery + HTTP transport calls.
+
 use std::path::PathBuf;
 use async_trait::async_trait;
 

@@ -1,3 +1,7 @@
+//! Queue management + auto-advance logic.
+//!
+//! Owns queue mutations and decides when to dispatch the next track.
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 

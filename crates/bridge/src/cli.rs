@@ -1,8 +1,3 @@
-//! Command-line interface definitions.
-//!
-//! This module contains the `clap`-powered CLI surface area (args + defaults).
-//! It intentionally has no audio logic so the rest of the crate can stay reusable.
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 

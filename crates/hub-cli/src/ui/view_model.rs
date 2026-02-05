@@ -1,3 +1,8 @@
+//! UI view-models for the TUI.
+//!
+//! This module converts `App` state into render-ready strings, labels,
+//! and modal payloads so `render.rs` stays layout-focused.
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 

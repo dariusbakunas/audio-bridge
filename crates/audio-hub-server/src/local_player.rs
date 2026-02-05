@@ -1,3 +1,7 @@
+//! Local playback worker.
+//!
+//! Uses `audio-player` to decode and play files on the host machine.
+
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

@@ -1,3 +1,7 @@
+//! HTTP control + streaming server for the audio hub.
+//!
+//! Scans the media library, manages output providers, and serves playback control APIs.
+
 mod api;
 mod bridge;
 mod bridge_manager;

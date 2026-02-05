@@ -12,6 +12,48 @@ This repo is a Rust workspace with two main apps:
 
 Each binary supports `--version`, which includes the crate version, git SHA, and build date.
 
+## Architecture
+
+- `audio-player`: shared decode/resample/queue/playback building blocks
+- `bridge`: thin HTTP-controlled receiver that uses `audio-player`
+- `audio-hub-server`: scans the library, manages outputs, and streams audio to the bridge
+- `hub-cli`: TUI client that talks to the server and renders UI from a view-model layer
+
+### Playback flow
+
+1. `hub-cli` sends play/seek/queue commands to `audio-hub-server`.
+2. `audio-hub-server` resolves the selected output and exposes `/stream` for the current track.
+3. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
+4. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
+
+```mermaid
+sequenceDiagram
+    participant CLI as hub-cli
+    participant HUB as audio-hub-server
+    participant BR as bridge
+    participant AP as audio-player
+
+    CLI->>HUB: POST /play (path)
+    HUB-->>CLI: 200 OK
+    BR->>HUB: GET /stream?path=...
+    HUB-->>BR: 206 Partial Content (audio)
+    BR->>AP: decode + resample + playback
+    AP-->>BR: status/metrics
+    BR->>HUB: GET /status (poll)
+    HUB-->>CLI: GET /outputs/{id}/status
+```
+
+### Outputs + providers
+
+- Providers expose outputs (devices). The hub keeps one active output at a time.
+- `bridge` outputs are discovered via mDNS and polled over HTTP.
+- Local outputs (optional) reuse the same control path as bridge outputs.
+
+### Status + UI
+
+- The bridge reports playback + signal data; the hub caches it and proxies via `/outputs/{id}/status`.
+- `hub-cli` renders a view-model so UI formatting stays separated from app state.
+
 ## What this is for
 
 If you have a quiet little box on your network (RPi + USB DAC) and you want:
@@ -21,20 +63,6 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 - “Pause/Resume/Next from the sender UI”
 
 …this project is for you.
-
-## Workspace layout
-
-```text
-. 
-├─ crates/ 
-│ ├─ bridge/ # audio receiver (bridge)
-│ ├─ hub-cli/ # HUB client, TUI app 
-│ ├─ audio-hub-server/ # HTTP control server, audio library scanner, audio source
-├─ Cross.toml 
-├─ dist-workspace.toml
-└─ Cargo.toml
-
-```
 
 ## Supported formats
 
@@ -75,10 +103,23 @@ Then point the TUI at the server:
 Use a TOML config to define the media path, outputs, and default output:
 
 ```toml
+# Example audio-hub-server config
+#
+# bind: HTTP address the server listens on
+# public_base_url: base URL reachable by the bridge (used for /stream URLs)
+# bridges: list of bridge devices to connect to
+# active_output: output id to use by default (bridge:{bridge_id}:{device_id})
+# local_outputs: enable local outputs on the hub host
+# local_id/name/device: optional overrides for local outputs
+
 bind = "0.0.0.0:8080"
 public_base_url = "http://192.168.1.10:8080"
 media_dir = "/srv/music"
 active_output = "bridge:living-room:Built-in Output"
+# local_outputs = true
+# local_id = "local"
+# local_name = "Local Host"
+# local_device = ""
 
 [[bridges]]
 id = "living-room"

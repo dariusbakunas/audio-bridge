@@ -1,3 +1,7 @@
+//! Bridge worker + command dispatch loop.
+//!
+//! Owns the control channel for a single bridge and polls its status.
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

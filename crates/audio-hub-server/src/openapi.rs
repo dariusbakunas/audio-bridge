@@ -1,3 +1,7 @@
+//! OpenAPI schema definition.
+//!
+//! Aggregates the API paths and model schemas for Swagger UI.
+
 use utoipa::OpenApi;
 
 use crate::api;

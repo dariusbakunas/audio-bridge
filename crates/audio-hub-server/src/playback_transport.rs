@@ -1,3 +1,7 @@
+//! Playback transport abstraction for dispatching playback commands.
+//!
+//! Implementations translate playback operations into local or bridge commands.
+
 use std::path::PathBuf;
 
 use crossbeam_channel::Sender;

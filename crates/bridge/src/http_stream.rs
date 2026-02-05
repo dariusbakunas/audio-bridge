@@ -1,5 +1,3 @@
-//! HTTP range-backed MediaSource for Symphonia.
-
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

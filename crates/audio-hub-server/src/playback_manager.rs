@@ -1,3 +1,7 @@
+//! Playback coordination for the active output.
+//!
+//! Wraps the active player handle, status store, and queue service for dispatch.
+
 use std::sync::{Arc, Mutex};
 
 use crate::playback_transport::{ChannelTransport, PlaybackTransport};

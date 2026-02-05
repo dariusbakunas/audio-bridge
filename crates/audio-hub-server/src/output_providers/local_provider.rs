@@ -1,3 +1,7 @@
+//! Local output provider implementation.
+//!
+//! Exposes local audio devices via the shared `audio-player` device helpers.
+
 use async_trait::async_trait;
 
 use audio_player::device;

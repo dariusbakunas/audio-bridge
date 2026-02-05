@@ -1,3 +1,7 @@
+//! Output routing and control facade.
+//!
+//! Centralizes output selection, status, and playback commands across providers.
+
 use actix_web::HttpResponse;
 
 use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
