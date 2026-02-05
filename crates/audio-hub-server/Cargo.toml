@@ -7,6 +7,8 @@ repository = "https://github.com/dariusbakunas/audio-bridge.git"
 
 [dependencies]
 actix-web = "4.11.0"
+actix-files = "0.6.6"
+actix-cors = "0.7.1"
 anyhow = { workspace = true }
 clap = { workspace = true }
 crossbeam-channel = { workspace = true }

@@ -137,3 +137,8 @@ Cargo.lock
 # End of https://www.toptal.com/developers/gitignore/api/intellij+all,rust,osx
 
 samples/
+
+# Web UI
+web-ui/node_modules/
+web-ui/dist/
+web-ui/.vite/

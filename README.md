@@ -121,6 +121,30 @@ Then point the TUI at the server:
  cargo run --release -p hub-cli -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
 ```
 
+## Web UI (experimental)
+
+The hub server can serve a lightweight web dashboard if `web-ui/dist` is present next to the repo (or next to the binary).
+
+Build the UI:
+
+```bash
+cd web-ui
+npm install
+npm run build
+```
+
+Then start `audio-hub-server` as usual and open `http://<SERVER_IP>:8080/`.
+
+For local development:
+
+```bash
+cd web-ui
+npm install
+npm run dev
+```
+
+By default the Vite dev server proxies API requests to `http://localhost:8080`. If your hub server is on a different host/port, set `VITE_API_BASE` when running `npm run dev`.
+
 ## Server config
 
 Use a TOML config to define the media path, outputs, and default output:

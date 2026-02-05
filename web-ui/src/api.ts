@@ -1,0 +1,37 @@
+type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+type JsonObject = { [key: string]: JsonValue };
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+
+export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {})
+    }
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `${resp.status} ${resp.statusText}`);
+  }
+
+  if (resp.status === 204) {
+    return null as T;
+  }
+
+  const text = await resp.text();
+  if (!text.trim()) {
+    return null as T;
+  }
+
+  return JSON.parse(text) as T;
+}
+
+export async function postJson<T>(path: string, body?: JsonObject): Promise<T> {
+  return fetchJson<T>(path, {
+    method: "POST",
+    body: body ? JSON.stringify(body) : undefined
+  });
+}

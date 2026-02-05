@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use actix_cors::Cors;
+use actix_files::{Files, NamedFile};
 use actix_web::{App, HttpServer, web};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse};
 use actix_web::Error;
@@ -31,12 +33,18 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let bind = resolve_bind(args.bind, &cfg)?;
     let public_base_url = config::public_base_url_from_config(&cfg, bind)?;
     let media_dir = resolve_media_dir(args.media_dir, &cfg)?;
+    let web_ui_dist = locate_web_ui_dist();
     tracing::info!(
         bind = %bind,
         public_base_url = %public_base_url,
         media_dir = %media_dir.display(),
         "starting audio-hub-server"
     );
+    if let Some(dist) = web_ui_dist.as_ref() {
+        tracing::info!(path = %dist.display(), "web ui static assets enabled");
+    } else {
+        tracing::info!("web ui static assets disabled (web-ui/dist not found)");
+    }
     let library = scan_library(&media_dir)?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
@@ -136,8 +144,16 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
     HttpServer::new(move || {
-        App::new()
+        let cors = Cors::default()
+            .allowed_origin("http://localhost:5173")
+            .allowed_origin("http://127.0.0.1:5173")
+            .allowed_methods(vec!["GET", "POST", "HEAD"])
+            .allowed_headers(vec![actix_web::http::header::CONTENT_TYPE])
+            .max_age(3600);
+
+        let mut app = App::new()
             .app_data(state.clone())
+            .wrap(cors)
             .wrap(FilteredLogger)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -160,7 +176,31 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::outputs_list)
-            .service(api::outputs_select)
+            .service(api::outputs_select);
+
+        if let Some(dist) = web_ui_dist.clone() {
+            let assets_dir = dist.join("assets");
+            if assets_dir.exists() {
+                app = app.service(Files::new("/assets", assets_dir));
+            }
+
+            let index_path = dist.join("index.html");
+            if index_path.exists() {
+                let index_root = index_path.clone();
+                let index_html = index_path.clone();
+                app = app
+                    .service(
+                        web::resource("/")
+                            .route(web::get().to(move || serve_index(index_root.clone()))),
+                    )
+                    .service(
+                        web::resource("/index.html")
+                            .route(web::get().to(move || serve_index(index_html.clone()))),
+                    );
+            }
+        }
+
+        app
     })
     .bind(bind)?
     .run()
@@ -294,6 +334,23 @@ fn resolve_media_dir(
         Some(dir) => dir,
         None => config::media_dir_from_config(cfg)?,
     })
+}
+
+fn locate_web_ui_dist() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(dir) = std::env::current_dir() {
+        candidates.push(dir.join("web-ui").join("dist"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("web-ui").join("dist"));
+        }
+    }
+    candidates.into_iter().find(|path| path.exists())
+}
+
+async fn serve_index(index_path: PathBuf) -> actix_web::Result<NamedFile> {
+    Ok(NamedFile::open(index_path)?)
 }
 
 /// Resolve active output id from config and available bridges.
