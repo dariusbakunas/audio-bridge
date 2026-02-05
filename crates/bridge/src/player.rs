@@ -278,14 +278,7 @@ fn play_one_http(
 
     let played_frames = Arc::new(AtomicU64::new(0));
     if let Some(ms) = seek_ms {
-        let mut target_ms = ms;
-        if let Some(total) = duration_ms {
-            if target_ms > total {
-                target_ms = total;
-            }
-        }
-        if stream_config.sample_rate > 0 {
-            let frames = target_ms.saturating_mul(stream_config.sample_rate as u64) / 1000;
+        if let Some(frames) = played_frames_from_seek(ms, duration_ms, stream_config.sample_rate) {
             played_frames.store(frames, Ordering::Relaxed);
         }
     }
@@ -366,6 +359,18 @@ fn effective_playback_for_seek(
     playback_eff
 }
 
+fn played_frames_from_seek(
+    seek_ms: u64,
+    duration_ms: Option<u64>,
+    sample_rate_hz: u32,
+) -> Option<u64> {
+    if sample_rate_hz == 0 {
+        return None;
+    }
+    let target_ms = duration_ms.map_or(seek_ms, |total| seek_ms.min(total));
+    Some(target_ms.saturating_mul(sample_rate_hz as u64) / 1000)
+}
+
 /// Infer a file extension from the URL path if present.
 fn infer_ext_from_url(url: &str) -> Option<String> {
     let tail = url.split('?').next().unwrap_or(url);
@@ -416,5 +421,22 @@ mod tests {
             Some("flac".to_string())
         );
         assert_eq!(infer_ext_from_url("http://example/a"), None);
+    }
+
+    #[test]
+    fn played_frames_from_seek_clamps_to_duration() {
+        let frames = played_frames_from_seek(5_000, Some(2_000), 48_000).unwrap();
+        assert_eq!(frames, 96_000);
+    }
+
+    #[test]
+    fn played_frames_from_seek_uses_seek_when_duration_missing() {
+        let frames = played_frames_from_seek(1_500, None, 44_100).unwrap();
+        assert_eq!(frames, 66_150);
+    }
+
+    #[test]
+    fn played_frames_from_seek_returns_none_for_zero_rate() {
+        assert!(played_frames_from_seek(1_000, Some(2_000), 0).is_none());
     }
 }

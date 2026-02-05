@@ -261,6 +261,11 @@ mod tests {
     }
 
     #[test]
+    fn add_signed_saturates_on_overflow() {
+        assert_eq!(add_signed(u64::MAX, 10), u64::MAX);
+    }
+
+    #[test]
     fn parse_content_range_total_reads_total() {
         let total = parse_content_range_total("bytes 0-99/12345");
         assert_eq!(total, Some(12345));
