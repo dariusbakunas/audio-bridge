@@ -2,6 +2,7 @@
 //!
 //! Provides helpers for validating provider/output ids and merging discovery results.
 
+/// Parse a bridge output id into `(bridge_id, device_id)`.
 pub(crate) fn parse_output_id(id: &str) -> Result<(String, String), String> {
     let mut parts = id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");
@@ -13,6 +14,7 @@ pub(crate) fn parse_output_id(id: &str) -> Result<(String, String), String> {
     Ok((bridge_id.to_string(), device_id.to_string()))
 }
 
+/// Parse a bridge provider id into `bridge_id`.
 pub(crate) fn parse_provider_id(id: &str) -> Result<String, String> {
     let mut parts = id.splitn(2, ':');
     let kind = parts.next().unwrap_or("");
@@ -23,6 +25,7 @@ pub(crate) fn parse_provider_id(id: &str) -> Result<String, String> {
     Ok(bridge_id.to_string())
 }
 
+/// Merge configured and discovered bridges, preferring configured entries.
 pub(crate) fn merge_bridges(
     configured: &[crate::config::BridgeConfigResolved],
     discovered: &std::collections::HashMap<String, crate::state::DiscoveredBridge>,

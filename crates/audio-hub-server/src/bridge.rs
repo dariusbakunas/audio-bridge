@@ -15,15 +15,20 @@ use crate::queue_service::QueueService;
 
 #[derive(Debug, Clone)]
 pub enum BridgeCommand {
+    /// Start playback for a path, optionally seeking and pausing.
     Play {
         path: PathBuf,
         ext_hint: String,
         seek_ms: Option<u64>,
         start_paused: bool,
     },
+    /// Toggle pause/resume.
     PauseToggle,
+    /// Stop playback immediately.
     Stop,
+    /// Seek to an absolute position (milliseconds).
     Seek { ms: u64 },
+    /// Quit the bridge worker loop.
     Quit,
 }
 
@@ -32,6 +37,7 @@ pub struct BridgePlayer {
     pub(crate) cmd_tx: Sender<BridgeCommand>,
 }
 
+/// Spawn the background bridge worker loop.
 pub fn spawn_bridge_worker(
     bridge_id: String,
     http_addr: SocketAddr,
@@ -114,6 +120,7 @@ struct BridgeStatusPoller {
 }
 
 impl BridgeStatusPoller {
+    /// Create a status poller bound to a single bridge.
     fn new(
         bridge_id: String,
         client: BridgeTransportClient,
@@ -134,6 +141,7 @@ impl BridgeStatusPoller {
         }
     }
 
+    /// Poll bridge status once and perform auto-advance if needed.
     fn poll_once(&mut self, last_duration_ms: &mut Option<u64>) {
         match self.client.status() {
             Ok(remote) => {

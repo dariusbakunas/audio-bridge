@@ -35,14 +35,17 @@ pub(crate) struct QueueService {
 }
 
 impl QueueService {
+    /// Create a queue service backed by the shared queue + status store.
     pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore) -> Self {
         Self { queue, status }
     }
 
+    /// Return the shared queue state (for inspection/testing).
     pub(crate) fn queue(&self) -> &Arc<Mutex<QueueState>> {
         &self.queue
     }
 
+    /// Build an API response for the current queue.
     pub(crate) fn list(&self, library: &crate::library::LibraryIndex) -> QueueResponse {
         let queue = self.queue.lock().unwrap();
         let items = queue
@@ -75,6 +78,7 @@ impl QueueService {
         QueueResponse { items }
     }
 
+    /// Add paths to the queue, skipping duplicates.
     pub(crate) fn add_paths(&self, paths: Vec<PathBuf>) -> usize {
         let mut added = 0usize;
         let mut queue = self.queue.lock().unwrap();
@@ -88,6 +92,7 @@ impl QueueService {
         added
     }
 
+    /// Remove a single path from the queue.
     pub(crate) fn remove_path(&self, path: &PathBuf) -> bool {
         let mut queue = self.queue.lock().unwrap();
         if let Some(pos) = queue.items.iter().position(|p| p == path) {
@@ -97,11 +102,13 @@ impl QueueService {
         false
     }
 
+    /// Clear the queue.
     pub(crate) fn clear(&self) {
         let mut queue = self.queue.lock().unwrap();
         queue.items.clear();
     }
 
+    /// Dispatch the next track (if any) via the provided transport.
     pub(crate) fn dispatch_next(
         &self,
         transport: &dyn PlaybackTransport,
@@ -139,6 +146,7 @@ impl QueueService {
         }
     }
 
+    /// Decide whether to auto-advance and dispatch if needed.
     pub(crate) fn maybe_auto_advance(
         &self,
         transport: &dyn PlaybackTransport,

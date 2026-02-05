@@ -14,36 +14,64 @@ use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
 
+/// Snapshot of current playback state used for API responses and UI.
 #[derive(Debug, Clone, Default)]
 pub struct PlayerStatus {
+    /// Currently playing path (absolute).
     pub now_playing: Option<PathBuf>,
+    /// True when playback is paused.
     pub paused: bool,
+    /// Tracks explicit user pause (distinct from auto-pauses).
     pub user_paused: bool,
+    /// Duration in milliseconds (best-effort).
     pub duration_ms: Option<u64>,
+    /// Elapsed time in milliseconds (best-effort).
     pub elapsed_ms: Option<u64>,
+    /// Source sample rate.
     pub sample_rate: Option<u32>,
+    /// Source channel count.
     pub channels: Option<u16>,
+    /// Output device name (if known).
     pub output_device: Option<String>,
+    /// Codec name (best-effort).
     pub source_codec: Option<String>,
+    /// Source bit depth (best-effort).
     pub source_bit_depth: Option<u16>,
+    /// Container/extension hint (best-effort).
     pub container: Option<String>,
+    /// Output sample format (e.g. I16/I32/F32).
     pub output_sample_format: Option<String>,
+    /// Whether resampling is active.
     pub resampling: Option<bool>,
+    /// Source rate (Hz) when resampling.
     pub resample_from_hz: Option<u32>,
+    /// Output rate (Hz) when resampling.
     pub resample_to_hz: Option<u32>,
+    /// Output device buffer size (frames).
     pub buffer_size_frames: Option<u32>,
+    /// Current buffered frames (best-effort).
     pub buffered_frames: Option<u64>,
+    /// Queue capacity in frames (best-effort).
     pub buffer_capacity_frames: Option<u64>,
+    /// Auto-advance is in flight (prevents double-advance).
     pub auto_advance_in_flight: bool,
+    /// Seek is in flight (prevents false end-of-track).
     pub seek_in_flight: bool,
 }
 
+/// Shared application state for Actix handlers and background workers.
 pub struct AppState {
+    /// Library index and root.
     pub library: RwLock<LibraryIndex>,
+    /// Bridge provider state (active bridge, discovery, transport).
     pub bridge: Arc<BridgeProviderState>,
+    /// Local provider state (optional local playback).
     pub local: Arc<LocalProviderState>,
+    /// Playback manager (queue + transport).
     pub playback_manager: PlaybackManager,
+    /// Device selections (local + per-bridge).
     pub device_selection: DeviceSelectionState,
+    /// Output controller facade.
     pub output_controller: OutputController,
 }
 
@@ -66,33 +94,49 @@ impl AppState {
     }
 }
 
+/// Discovered bridge entry from mDNS.
 #[derive(Clone, Debug)]
 pub struct DiscoveredBridge {
+    /// Bridge config with resolved fields.
     pub bridge: crate::config::BridgeConfigResolved,
+    /// Last-seen timestamp used for expiry.
     pub last_seen: std::time::Instant,
 }
 
+/// Queue state backing the server queue service.
 #[derive(Debug, Default)]
 pub struct QueueState {
+    /// Ordered list of queued paths.
     pub items: Vec<PathBuf>,
 }
 
+/// Bridge-specific runtime state.
 #[derive(Debug)]
 pub struct BridgeState {
+    /// Known bridges from config + discovery.
     pub bridges: Vec<BridgeConfigResolved>,
+    /// Active bridge id (if selected).
     pub active_bridge_id: Option<String>,
+    /// Active output id (if selected).
     pub active_output_id: Option<String>,
 }
 
+/// Shared state for the bridge output provider.
 pub struct BridgeProviderState {
+    /// Command channel for the active bridge player.
     pub player: Arc<Mutex<BridgePlayer>>,
+    /// Active bridge/output selection.
     pub bridges: Arc<Mutex<BridgeState>>,
+    /// Online flag for active bridge.
     pub bridge_online: Arc<AtomicBool>,
+    /// Discovered bridges keyed by id.
     pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+    /// Public base URL for stream endpoints.
     pub public_base_url: String,
 }
 
 impl BridgeProviderState {
+    /// Construct bridge provider state from runtime pieces.
     pub fn new(
         cmd_tx: Sender<BridgeCommand>,
         bridges: Arc<Mutex<BridgeState>>,
@@ -110,17 +154,25 @@ impl BridgeProviderState {
     }
 }
 
-
+/// Shared state for local output provider.
 pub struct LocalProviderState {
+    /// Whether local outputs are enabled.
     pub enabled: bool,
+    /// Provider id.
     pub id: String,
+    /// Provider display name.
     pub name: String,
+    /// Command channel for local playback.
     pub player: Arc<Mutex<BridgePlayer>>,
+    /// Local playback running flag.
     pub running: Arc<AtomicBool>,
 }
 
+/// Selected output devices for local and bridge providers.
 #[derive(Clone)]
 pub struct DeviceSelectionState {
+    /// Selected local device name (if any).
     pub local: Arc<Mutex<Option<String>>>,
+    /// Selected device id by bridge id.
     pub bridge: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }

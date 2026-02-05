@@ -12,14 +12,19 @@ use audio_bridge_types::BridgeStatus;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct HttpDevicesResponse {
+    /// Devices reported by the bridge.
     pub devices: Vec<HttpDeviceInfo>,
 }
 
 #[derive(Debug, serde::Deserialize, Clone)]
 pub struct HttpDeviceInfo {
+    /// Device identifier reported by the bridge.
     pub id: String,
+    /// Human-friendly device name.
     pub name: String,
+    /// Minimum supported sample rate (Hz).
     pub min_rate: u32,
+    /// Maximum supported sample rate (Hz).
     pub max_rate: u32,
 }
 
@@ -48,6 +53,7 @@ pub struct BridgeTransportClient {
 }
 
 impl BridgeTransportClient {
+    /// Create a new client for a bridge HTTP address.
     pub fn new(http_addr: SocketAddr, public_base_url: String) -> Self {
         Self {
             http_addr,
@@ -55,6 +61,7 @@ impl BridgeTransportClient {
         }
     }
 
+    /// Fetch the list of devices from the bridge.
     pub fn list_devices(&self) -> Result<Vec<HttpDeviceInfo>> {
         let url = format!("http://{}/devices", self.http_addr);
         let mut resp = ureq::get(&url)
@@ -70,6 +77,7 @@ impl BridgeTransportClient {
         Ok(resp.devices)
     }
 
+    /// Select an output device by name on the bridge.
     pub fn set_device(&self, name: &str) -> Result<()> {
         let url = format!("http://{}/devices/select", self.http_addr);
         let payload = serde_json::json!({ "name": name });
@@ -82,6 +90,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Fetch the current bridge status snapshot.
     pub fn status(&self) -> Result<HttpStatusResponse> {
         let url = format!("http://{}/status", self.http_addr);
         let mut resp = ureq::get(&url)
@@ -97,6 +106,7 @@ impl BridgeTransportClient {
         Ok(resp)
     }
 
+    /// Ask the bridge to play the specified path via the hub stream URL.
     pub fn play_path(
         &self,
         path: &PathBuf,
@@ -125,6 +135,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Toggle pause/resume on the bridge.
     pub fn pause_toggle(&self) -> Result<()> {
         let endpoint = format!("http://{}/pause", self.http_addr);
         ureq::post(&endpoint)
@@ -136,6 +147,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Stop playback on the bridge.
     pub fn stop(&self) -> Result<()> {
         let endpoint = format!("http://{}/stop", self.http_addr);
         ureq::post(&endpoint)
@@ -147,6 +159,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Seek to the specified position in milliseconds.
     pub fn seek(&self, ms: u64) -> Result<()> {
         let endpoint = format!("http://{}/seek", self.http_addr);
         let payload = HttpSeekRequest { ms };
@@ -159,6 +172,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Build a fully-qualified stream URL for the given path.
     fn build_stream_url(&self, path: &PathBuf) -> String {
         let path_str = path.to_string_lossy();
         let encoded = urlencoding::encode(&path_str);

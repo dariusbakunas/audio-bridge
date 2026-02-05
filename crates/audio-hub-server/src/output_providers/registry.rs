@@ -12,12 +12,16 @@ use crate::state::AppState;
 
 #[derive(Debug)]
 pub(crate) enum ProviderError {
+    /// The request is invalid or references an unknown id.
     BadRequest(String),
+    /// The provider is offline or unavailable.
     Unavailable(String),
+    /// An unexpected internal error.
     Internal(String),
 }
 
 impl ProviderError {
+    /// Convert a provider error into an HTTP response.
     pub(crate) fn into_response(self) -> HttpResponse {
         match self {
             ProviderError::BadRequest(msg) => HttpResponse::BadRequest().body(msg),
@@ -29,27 +33,36 @@ impl ProviderError {
 
 #[async_trait]
 pub(crate) trait OutputProvider: Send + Sync {
+    /// List providers exposed by this implementation.
     fn list_providers(&self, state: &AppState) -> Vec<crate::models::ProviderInfo>;
+    /// List outputs for a specific provider id.
     async fn outputs_for_provider(
         &self,
         state: &AppState,
         provider_id: &str,
     ) -> Result<OutputsResponse, ProviderError>;
+    /// List all outputs exposed by this provider.
     fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo>;
+    /// Return true if this provider can handle the output id.
     fn can_handle_output_id(&self, output_id: &str) -> bool;
+    /// Return true if this provider can handle the provider id.
     fn can_handle_provider_id(&self, state: &AppState, provider_id: &str) -> bool;
+    /// Ensure the active output is present even if missing from discovery.
     fn inject_active_output_if_missing(
         &self,
         state: &AppState,
         outputs: &mut Vec<OutputInfo>,
         active_output_id: &str,
     );
+    /// Ensure the active output is connected.
     async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError>;
+    /// Select the active output for this provider.
     async fn select_output(
         &self,
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError>;
+    /// Return status for the requested output id.
     async fn status_for_output(
         &self,
         state: &AppState,
@@ -62,14 +75,17 @@ pub(crate) struct OutputRegistry {
 }
 
 impl OutputRegistry {
+    /// Create a registry from an explicit provider list.
     pub(crate) fn new(providers: Vec<Box<dyn OutputProvider>>) -> Self {
         Self { providers }
     }
 
+    /// Create a registry with the default providers.
     pub(crate) fn default() -> Self {
         Self::new(vec![Box::new(BridgeProvider), Box::new(LocalProvider)])
     }
 
+    /// List providers across all implementations.
     pub(crate) fn list_providers(&self, state: &AppState) -> ProvidersResponse {
         let mut providers = Vec::new();
         for provider in &self.providers {
@@ -78,6 +94,7 @@ impl OutputRegistry {
         ProvidersResponse { providers }
     }
 
+    /// List outputs for a specific provider id.
     pub(crate) async fn outputs_for_provider(
         &self,
         state: &AppState,
@@ -91,6 +108,7 @@ impl OutputRegistry {
         Err(ProviderError::BadRequest("unknown provider id".to_string()))
     }
 
+    /// List all outputs across providers and ensure active output is present.
     pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
         let mut outputs = Vec::new();
         for provider in &self.providers {
@@ -110,6 +128,7 @@ impl OutputRegistry {
         OutputsResponse { active_id, outputs }
     }
 
+    /// Select the active output across providers.
     pub(crate) async fn select_output(
         &self,
         state: &AppState,
@@ -123,6 +142,7 @@ impl OutputRegistry {
         Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
 
+    /// Return status for the requested output id.
     pub(crate) async fn status_for_output(
         &self,
         state: &AppState,
@@ -136,6 +156,7 @@ impl OutputRegistry {
         Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
 
+    /// Ensure the active output is connected and reachable.
     pub(crate) async fn ensure_active_connected(
         &self,
         state: &AppState,

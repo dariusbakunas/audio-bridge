@@ -43,6 +43,28 @@ sequenceDiagram
     HUB-->>CLI: GET /outputs/{id}/status
 ```
 
+### audio-player pipeline (conceptual)
+
+```mermaid
+flowchart LR
+    A[Audio file / HTTP stream] --> B[Decoder]
+    B --> C[Interleaved sample queue]
+    C --> D{Resample needed?}
+    D -- no --> F[Output queue]
+    D -- yes --> E[Resampler]
+    E --> F[Output queue]
+    F --> G[CPAL output callback]
+    G --> H[Audio device]
+
+    C -. bounded buffer .- F
+    G -. consumes in small chunks .- F
+```
+
+Notes:
+- Decoder produces interleaved `f32` samples.
+- Resampler is inserted only when source and output rates differ.
+- Queues are bounded to balance latency and underrun resistance.
+
 ### Outputs + providers
 
 - Providers expose outputs (devices). The hub keeps one active output at a time.

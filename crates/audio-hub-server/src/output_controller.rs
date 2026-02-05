@@ -19,6 +19,7 @@ pub(crate) enum OutputControllerError {
 }
 
 impl OutputControllerError {
+    /// Convert a controller error into an HTTP response.
     pub(crate) fn into_response(self) -> HttpResponse {
         match self {
             OutputControllerError::NoActiveOutput => {
@@ -46,10 +47,12 @@ pub(crate) struct OutputController {
 }
 
 impl OutputController {
+    /// Build a controller around the provided registry.
     pub(crate) fn new(registry: OutputRegistry) -> Self {
         Self { registry }
     }
 
+    /// Construct a controller with the default provider registry.
     pub(crate) fn default() -> Self {
         Self::new(OutputRegistry::default())
     }
@@ -87,10 +90,12 @@ impl OutputController {
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
+    /// Return the list of known outputs (all providers).
     pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
         self.registry.list_outputs(state)
     }
 
+    /// Return the list of providers.
     pub(crate) fn list_providers(&self, state: &AppState) -> ProvidersResponse {
         self.registry.list_providers(state)
     }
@@ -164,10 +169,12 @@ impl OutputController {
         Ok(output_id)
     }
 
+    /// Return the current queue as API response items.
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
         state.playback_manager.queue_service().list(&state.library.read().unwrap())
     }
 
+    /// Add paths to the queue and return the number added.
     pub(crate) fn queue_add_paths(
         &self,
         state: &AppState,
@@ -185,6 +192,7 @@ impl OutputController {
         state.playback_manager.queue_service().add_paths(resolved)
     }
 
+    /// Remove a path from the queue.
     pub(crate) fn queue_remove_path(
         &self,
         state: &AppState,
@@ -195,6 +203,7 @@ impl OutputController {
         Ok(state.playback_manager.queue_service().remove_path(&path))
     }
 
+    /// Clear the queue.
     pub(crate) fn queue_clear(&self, state: &AppState) {
         state.playback_manager.queue_service().clear();
     }
@@ -260,6 +269,7 @@ impl OutputController {
             .map_err(|_| OutputControllerError::PlayerOffline)
     }
 
+    /// Canonicalize a path and ensure it is under the library root.
     pub(crate) fn canonicalize_under_root(
         &self,
         state: &AppState,

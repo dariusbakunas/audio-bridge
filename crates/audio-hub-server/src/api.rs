@@ -53,6 +53,7 @@ pub struct SeekBody {
     )
 )]
 #[get("/library")]
+/// List library entries for the requested directory.
 pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQuery>) -> impl Responder {
     let dir = query
         .dir
@@ -91,6 +92,7 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
     )
 )]
 #[get("/stream")]
+/// Stream a track with HTTP range support.
 pub async fn stream_track(
     state: web::Data<AppState>,
     req: HttpRequest,
@@ -163,6 +165,7 @@ pub async fn stream_track(
     )
 )]
 #[post("/library/rescan")]
+/// Trigger a full library rescan.
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     tracing::info!(root = %root.display(), "rescan requested");
@@ -186,6 +189,7 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/play")]
+/// Start playback for the requested track.
 pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>) -> impl Responder {
     let path = PathBuf::from(&body.path);
     let path = match state.output_controller.canonicalize_under_root(&state, &path) {
@@ -216,6 +220,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
     )
 )]
 #[post("/pause")]
+/// Toggle pause/resume.
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
     match state.output_controller.pause_toggle(&state).await {
@@ -233,6 +238,7 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/stop")]
+/// Stop playback.
 pub async fn stop(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("stop request");
     match state.output_controller.stop(&state).await {
@@ -251,6 +257,7 @@ pub async fn stop(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/seek")]
+/// Seek to an absolute position (milliseconds).
 pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl Responder {
     let ms = body.ms;
     match state.output_controller.seek(&state, ms).await {
@@ -267,6 +274,7 @@ pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl
     )
 )]
 #[get("/queue")]
+/// Return the current queue.
 pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(state.output_controller.queue_list(&state))
 }
@@ -280,6 +288,7 @@ pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/queue")]
+/// Add paths to the queue.
 pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddRequest>) -> impl Responder {
     let added = state
         .output_controller
@@ -297,6 +306,7 @@ pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddReque
     )
 )]
 #[post("/queue/remove")]
+/// Remove a path from the queue.
 pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemoveRequest>) -> impl Responder {
     match state
         .output_controller
@@ -315,6 +325,7 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
     )
 )]
 #[post("/queue/clear")]
+/// Clear the queue.
 pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
     state.output_controller.queue_clear(&state);
     HttpResponse::Ok().finish()
@@ -329,6 +340,7 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/queue/next")]
+/// Skip to the next queued track.
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
     match state.output_controller.queue_next(&state).await {
         Ok(true) => HttpResponse::Ok().finish(),
@@ -349,6 +361,7 @@ pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[get("/outputs/{id}/status")]
+/// Return playback status for a specific output.
 pub async fn status_for_output(
     state: web::Data<AppState>,
     id: web::Path<String>,
@@ -368,6 +381,7 @@ pub async fn status_for_output(
     )
 )]
 #[get("/providers")]
+/// List all available output providers.
 pub async fn providers_list(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(state.output_controller.list_providers(&state))
 }
@@ -382,6 +396,7 @@ pub async fn providers_list(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[get("/providers/{id}/outputs")]
+/// List outputs for the requested provider.
 pub async fn provider_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
@@ -404,6 +419,7 @@ pub async fn provider_outputs_list(
     )
 )]
 #[get("/outputs")]
+/// List all outputs across providers.
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(state.output_controller.list_outputs(&state))
 }
@@ -418,6 +434,7 @@ pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     )
 )]
 #[post("/outputs/select")]
+/// Select the active output.
 pub async fn outputs_select(
     state: web::Data<AppState>,
     body: web::Json<OutputSelectRequest>,

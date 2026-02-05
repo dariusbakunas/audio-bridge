@@ -65,6 +65,7 @@ impl OutputProvider for LocalProvider {
         }]
     }
 
+    /// List outputs exposed by the local provider.
     async fn outputs_for_provider(
         &self,
         state: &AppState,
@@ -176,10 +177,12 @@ impl OutputProvider for LocalProvider {
         });
     }
 
+    /// Ensure the local player is running before serving requests.
     async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError> {
         ensure_local_player(state).await
     }
 
+    /// Select a local output device and resume playback if needed.
     async fn select_output(
         &self,
         state: &AppState,
@@ -215,6 +218,7 @@ impl OutputProvider for LocalProvider {
         Ok(())
     }
 
+    /// Return playback status for the active local output.
     async fn status_for_output(
         &self,
         state: &AppState,
@@ -313,6 +317,7 @@ fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: Option<u64>) ->
     u32::try_from(kbps).ok()
 }
 
+/// Ensure the local playback worker has been spawned.
 async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
     if !LocalProvider::is_enabled(state) {
         return Err(ProviderError::Unavailable("local outputs disabled".to_string()));

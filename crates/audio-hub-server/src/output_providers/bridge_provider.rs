@@ -21,6 +21,7 @@ use crate::state::AppState;
 pub(crate) struct BridgeProvider;
 
 impl BridgeProvider {
+    /// Ensure the currently active bridge is reachable before serving requests.
     async fn ensure_active_connected(state: &AppState) -> Result<(), ProviderError> {
         if state
             .bridge
@@ -149,6 +150,7 @@ impl OutputProvider for BridgeProvider {
             .collect()
     }
 
+    /// List outputs exposed by a specific bridge provider.
     async fn outputs_for_provider(
         &self,
         state: &AppState,
@@ -211,10 +213,12 @@ impl OutputProvider for BridgeProvider {
         }
     }
 
+    /// Ensure the provider has a reachable, active bridge.
     async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError> {
         Self::ensure_active_connected(state).await
     }
 
+    /// Select the active output for this provider and apply device selection on the bridge.
     async fn select_output(
         &self,
         state: &AppState,
@@ -320,6 +324,7 @@ impl OutputProvider for BridgeProvider {
         Ok(())
     }
 
+    /// Return playback status for the active bridge output.
     async fn status_for_output(
         &self,
         state: &AppState,

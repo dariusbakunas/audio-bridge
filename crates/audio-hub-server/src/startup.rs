@@ -25,6 +25,7 @@ use crate::library::scan_library;
 use crate::openapi;
 use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderState, PlayerStatus, QueueState};
 
+/// Build server state and start the Actix HTTP server.
 pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let cfg = load_config(args.config.as_ref())?;
     let bind = resolve_bind(args.bind, &cfg)?;
@@ -167,6 +168,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     Ok(())
 }
 
+/// Return true when the request path should be logged.
 fn should_log_path(path: &str) -> bool {
     if path == "/queue" || path == "/stream" {
         return false;
@@ -243,6 +245,7 @@ where
     }
 }
 
+/// Load server config from disk or return defaults.
 fn load_config(path: Option<&PathBuf>) -> Result<config::ServerConfig> {
     match path {
         Some(path) => config::ServerConfig::load(path),
@@ -267,6 +270,7 @@ fn load_config(path: Option<&PathBuf>) -> Result<config::ServerConfig> {
     }
 }
 
+/// Resolve the final bind address from args + config.
 fn resolve_bind(
     bind: Option<std::net::SocketAddr>,
     cfg: &config::ServerConfig,
@@ -278,6 +282,7 @@ fn resolve_bind(
     })
 }
 
+/// Resolve the media directory from args + config.
 fn resolve_media_dir(
     dir: Option<PathBuf>,
     cfg: &config::ServerConfig,
@@ -288,6 +293,7 @@ fn resolve_media_dir(
     })
 }
 
+/// Resolve active output id from config and available bridges.
 fn resolve_active_output(
     cfg: &config::ServerConfig,
     bridges: &[crate::config::BridgeConfigResolved],
@@ -385,6 +391,7 @@ fn resolve_active_output(
     Ok(result)
 }
 
+/// Install Ctrl+C handler to stop playback cleanly.
 fn setup_shutdown(player: std::sync::Arc<std::sync::Mutex<crate::bridge::BridgePlayer>>) {
     let _ = ctrlc::set_handler(move || {
         if let Ok(player) = player.lock() {
