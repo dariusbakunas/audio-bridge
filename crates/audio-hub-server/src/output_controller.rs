@@ -7,7 +7,7 @@ use actix_web::HttpResponse;
 use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
 use crate::queue_service::NextDispatchResult;
-use crate::state::AppState;
+use crate::state::{AppState, QueueState};
 
 /// Errors returned by the output controller facade.
 #[derive(Debug)]
@@ -46,6 +46,20 @@ impl OutputControllerError {
 /// Facade for output selection, status, and playback orchestration.
 pub(crate) struct OutputController {
     registry: OutputRegistry,
+}
+
+fn apply_queue_mode(queue: &mut QueueState, path: &std::path::Path, mode: QueueMode) {
+    match mode {
+        QueueMode::Keep => {}
+        QueueMode::Replace => {
+            queue.items.clear();
+        }
+        QueueMode::Append => {
+            if !queue.items.iter().any(|p| p == path) {
+                queue.items.push(path.to_path_buf());
+            }
+        }
+    }
 }
 
 impl OutputController {
@@ -155,18 +169,9 @@ impl OutputController {
         queue_mode: QueueMode,
         requested_output: Option<&str>,
     ) -> Result<String, OutputControllerError> {
-        match queue_mode {
-            QueueMode::Keep => {}
-            QueueMode::Replace => {
-                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
-                queue.items.clear();
-            }
-            QueueMode::Append => {
-                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
-                if !queue.items.iter().any(|p| p == &path) {
-                    queue.items.push(path.clone());
-                }
-            }
+        {
+            let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
+            apply_queue_mode(&mut queue, &path, queue_mode);
         }
 
         let output_id = self
@@ -306,5 +311,210 @@ impl OutputController {
             ));
         }
         Ok(canon)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use async_trait::async_trait;
+    use crate::models::OutputInfo;
+    use crate::output_providers::registry::{OutputProvider, ProviderError};
+    use crate::status_store::StatusStore;
+
+    struct MockProvider {
+        active_output_id: String,
+        should_connect: bool,
+    }
+
+    #[async_trait]
+    impl OutputProvider for MockProvider {
+        fn list_providers(&self, _state: &AppState) -> Vec<crate::models::ProviderInfo> {
+            Vec::new()
+        }
+
+        async fn outputs_for_provider(
+            &self,
+            _state: &AppState,
+            _provider_id: &str,
+        ) -> Result<OutputsResponse, ProviderError> {
+            Ok(OutputsResponse {
+                active_id: None,
+                outputs: Vec::new(),
+            })
+        }
+
+        fn list_outputs(&self, _state: &AppState) -> Vec<OutputInfo> {
+            Vec::new()
+        }
+
+        fn can_handle_output_id(&self, output_id: &str) -> bool {
+            output_id == self.active_output_id
+        }
+
+        fn can_handle_provider_id(&self, _state: &AppState, _provider_id: &str) -> bool {
+            false
+        }
+
+        fn inject_active_output_if_missing(
+            &self,
+            _state: &AppState,
+            _outputs: &mut Vec<OutputInfo>,
+            _active_output_id: &str,
+        ) {
+        }
+
+        async fn ensure_active_connected(&self, _state: &AppState) -> Result<(), ProviderError> {
+            if self.should_connect {
+                Ok(())
+            } else {
+                Err(ProviderError::Unavailable("offline".to_string()))
+            }
+        }
+
+        async fn select_output(
+            &self,
+            _state: &AppState,
+            _output_id: &str,
+        ) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        async fn status_for_output(
+            &self,
+            _state: &AppState,
+            _output_id: &str,
+        ) -> Result<StatusResponse, ProviderError> {
+            Err(ProviderError::Unavailable("offline".to_string()))
+        }
+    }
+
+    fn make_state(active_output_id: Option<String>) -> AppState {
+        let tmp = std::env::temp_dir()
+            .join(format!(
+                "audio-hub-server-test-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let library = crate::library::scan_library(&tmp).expect("scan library");
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: None,
+            active_output_id,
+        }));
+        let bridge_state = Arc::new(crate::state::BridgeProviderState::new(
+            cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(crate::state::LocalProviderState {
+            enabled: false,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status,
+            queue_service,
+        );
+        let device_selection = crate::state::DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        AppState::new(
+            library,
+            bridge_state,
+            local_state,
+            playback_manager,
+            device_selection,
+        )
+    }
+
+    #[test]
+    fn apply_queue_mode_keep_preserves_items() {
+        let mut queue = QueueState {
+            items: vec![std::path::PathBuf::from("/music/a.flac")],
+        };
+        apply_queue_mode(&mut queue, std::path::Path::new("/music/b.flac"), QueueMode::Keep);
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
+    }
+
+    #[test]
+    fn apply_queue_mode_replace_clears_queue() {
+        let mut queue = QueueState {
+            items: vec![std::path::PathBuf::from("/music/a.flac")],
+        };
+        apply_queue_mode(&mut queue, std::path::Path::new("/music/b.flac"), QueueMode::Replace);
+        assert!(queue.items.is_empty());
+    }
+
+    #[test]
+    fn apply_queue_mode_append_adds_once() {
+        let mut queue = QueueState { items: Vec::new() };
+        let path = std::path::Path::new("/music/a.flac");
+        apply_queue_mode(&mut queue, path, QueueMode::Append);
+        apply_queue_mode(&mut queue, path, QueueMode::Append);
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
+    }
+
+    #[test]
+    fn resolve_active_output_id_rejects_missing_active() {
+        let state = make_state(None);
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+        let result = actix_web::rt::System::new().block_on(async {
+            controller.resolve_active_output_id(&state, None).await
+        });
+        assert!(matches!(result, Err(OutputControllerError::NoActiveOutput)));
+    }
+
+    #[test]
+    fn resolve_active_output_id_rejects_mismatched_request() {
+        let state = make_state(Some("bridge:test:device".to_string()));
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+        let result = actix_web::rt::System::new().block_on(async {
+            controller
+                .resolve_active_output_id(&state, Some("bridge:other:device"))
+                .await
+        });
+        assert!(matches!(
+            result,
+            Err(OutputControllerError::UnsupportedOutput { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_active_output_id_rejects_offline_output() {
+        let active = "bridge:test:device".to_string();
+        let state = make_state(Some(active.clone()));
+        let provider = MockProvider {
+            active_output_id: active,
+            should_connect: false,
+        };
+        let controller = OutputController::new(OutputRegistry::new(vec![Box::new(provider)]));
+        let result = actix_web::rt::System::new().block_on(async {
+            controller.resolve_active_output_id(&state, None).await
+        });
+        assert!(matches!(
+            result,
+            Err(OutputControllerError::OutputOffline { .. })
+        ));
     }
 }

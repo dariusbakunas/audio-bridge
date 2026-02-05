@@ -28,6 +28,24 @@ pub(crate) struct AutoAdvanceInputs {
     pub now_playing: bool,
 }
 
+fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
+    let ended = inputs.last_duration_ms.is_some()
+        && inputs.remote_duration_ms.is_none()
+        && inputs.remote_elapsed_ms.is_none()
+        && !inputs.user_paused
+        && !inputs.seek_in_flight
+        && inputs.now_playing;
+    if ended && !inputs.auto_advance_in_flight {
+        return true;
+    }
+    if !inputs.auto_advance_in_flight && !inputs.seek_in_flight {
+        if let (Some(elapsed), Some(duration)) = (inputs.elapsed_ms, inputs.duration_ms) {
+            return elapsed + 50 >= duration && !inputs.user_paused;
+        }
+    }
+    false
+}
+
 #[derive(Clone)]
 pub(crate) struct QueueService {
     queue: Arc<Mutex<QueueState>>,
@@ -152,23 +170,7 @@ impl QueueService {
         transport: &dyn PlaybackTransport,
         inputs: AutoAdvanceInputs,
     ) -> bool {
-        let ended = inputs.last_duration_ms.is_some()
-            && inputs.remote_duration_ms.is_none()
-            && inputs.remote_elapsed_ms.is_none()
-            && !inputs.user_paused
-            && !inputs.seek_in_flight
-            && inputs.now_playing;
-        let should_dispatch = if ended && !inputs.auto_advance_in_flight {
-            true
-        } else if !inputs.auto_advance_in_flight && !inputs.seek_in_flight {
-            if let (Some(elapsed), Some(duration)) = (inputs.elapsed_ms, inputs.duration_ms) {
-                elapsed + 50 >= duration && !inputs.user_paused
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        let should_dispatch = should_auto_advance(&inputs);
 
         if !should_dispatch {
             return false;
@@ -178,5 +180,179 @@ impl QueueService {
             self.dispatch_next(transport, true),
             NextDispatchResult::Dispatched
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct TestTransport {
+        plays: Arc<Mutex<Vec<(PathBuf, String, Option<u64>, bool)>>>,
+        should_succeed: bool,
+    }
+
+    impl TestTransport {
+        fn new(should_succeed: bool) -> Self {
+            Self {
+                plays: Arc::new(Mutex::new(Vec::new())),
+                should_succeed,
+            }
+        }
+    }
+
+    impl PlaybackTransport for TestTransport {
+        fn play(
+            &self,
+            path: PathBuf,
+            ext_hint: String,
+            seek_ms: Option<u64>,
+            start_paused: bool,
+        ) -> Result<(), crate::playback_transport::PlaybackTransportError> {
+            self.plays
+                .lock()
+                .unwrap()
+                .push((path, ext_hint, seek_ms, start_paused));
+            if self.should_succeed {
+                Ok(())
+            } else {
+                Err(crate::playback_transport::PlaybackTransportError::Offline)
+            }
+        }
+
+        fn pause_toggle(&self) -> Result<(), crate::playback_transport::PlaybackTransportError> {
+            Ok(())
+        }
+
+        fn stop(&self) -> Result<(), crate::playback_transport::PlaybackTransportError> {
+            Ok(())
+        }
+
+        fn seek(&self, _ms: u64) -> Result<(), crate::playback_transport::PlaybackTransportError> {
+            Ok(())
+        }
+    }
+
+    fn make_service() -> QueueService {
+        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        QueueService::new(queue, status)
+    }
+
+    fn make_inputs() -> AutoAdvanceInputs {
+        AutoAdvanceInputs {
+            last_duration_ms: None,
+            remote_duration_ms: None,
+            remote_elapsed_ms: None,
+            elapsed_ms: None,
+            duration_ms: None,
+            user_paused: false,
+            seek_in_flight: false,
+            auto_advance_in_flight: false,
+            now_playing: true,
+        }
+    }
+
+    #[test]
+    fn add_paths_skips_duplicates() {
+        let service = make_service();
+        let path = PathBuf::from("/music/a.flac");
+        let added = service.add_paths(vec![path.clone(), path.clone()]);
+        assert_eq!(added, 1);
+        assert_eq!(service.queue.lock().unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn remove_path_returns_true_when_found() {
+        let service = make_service();
+        let path = PathBuf::from("/music/a.flac");
+        service.add_paths(vec![path.clone()]);
+        assert!(service.remove_path(&path));
+        assert!(service.queue.lock().unwrap().items.is_empty());
+    }
+
+    #[test]
+    fn dispatch_next_returns_empty_when_queue_empty() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        assert!(matches!(
+            service.dispatch_next(&transport, false),
+            NextDispatchResult::Empty
+        ));
+    }
+
+    #[test]
+    fn dispatch_next_sends_play_and_marks_auto_advance() {
+        let service = make_service();
+        let status = service.status.clone();
+        let transport = TestTransport::new(true);
+        let path = PathBuf::from("/music/a.flac");
+        service.add_paths(vec![path.clone()]);
+
+        let result = service.dispatch_next(&transport, true);
+
+        assert!(matches!(result, NextDispatchResult::Dispatched));
+        let plays = transport.plays.lock().unwrap();
+        assert_eq!(plays.len(), 1);
+        assert_eq!(plays[0].0, path);
+        assert_eq!(plays[0].1, "flac");
+        assert!(status.inner().lock().unwrap().auto_advance_in_flight);
+    }
+
+    #[test]
+    fn maybe_auto_advance_dispatches_on_remote_end() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        let path = PathBuf::from("/music/a.flac");
+        service.add_paths(vec![path.clone()]);
+
+        let inputs = AutoAdvanceInputs {
+            last_duration_ms: Some(1000),
+            remote_duration_ms: None,
+            remote_elapsed_ms: None,
+            ..make_inputs()
+        };
+
+        assert!(service.maybe_auto_advance(&transport, inputs));
+    }
+
+    #[test]
+    fn maybe_auto_advance_dispatches_near_end() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        let path = PathBuf::from("/music/a.flac");
+        service.add_paths(vec![path.clone()]);
+
+        let inputs = AutoAdvanceInputs {
+            elapsed_ms: Some(9950),
+            duration_ms: Some(10000),
+            ..make_inputs()
+        };
+
+        assert!(service.maybe_auto_advance(&transport, inputs));
+    }
+
+    #[test]
+    fn maybe_auto_advance_respects_user_pause_and_seek() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+
+        let paused_inputs = AutoAdvanceInputs {
+            elapsed_ms: Some(9950),
+            duration_ms: Some(10000),
+            user_paused: true,
+            ..make_inputs()
+        };
+        assert!(!service.maybe_auto_advance(&transport, paused_inputs));
+
+        let seek_inputs = AutoAdvanceInputs {
+            elapsed_ms: Some(9950),
+            duration_ms: Some(10000),
+            seek_in_flight: true,
+            ..make_inputs()
+        };
+        assert!(!service.maybe_auto_advance(&transport, seek_inputs));
     }
 }

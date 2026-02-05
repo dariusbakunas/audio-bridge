@@ -238,3 +238,31 @@ fn add_signed(base: u64, delta: i64) -> u64 {
         base.saturating_sub(neg)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_content_range_total_reads_total() {
+        let total = parse_content_range_total("bytes 0-99/12345");
+        assert_eq!(total, Some(12345));
+    }
+
+    #[test]
+    fn parse_content_range_total_rejects_invalid() {
+        assert_eq!(parse_content_range_total("bytes 0-99/*"), None);
+        assert_eq!(parse_content_range_total("invalid"), None);
+    }
+
+    #[test]
+    fn add_signed_handles_positive_and_negative() {
+        assert_eq!(add_signed(10, 5), 15);
+        assert_eq!(add_signed(10, -3), 7);
+    }
+
+    #[test]
+    fn add_signed_saturates_on_underflow() {
+        assert_eq!(add_signed(5, -10), 0);
+    }
+}

@@ -185,10 +185,8 @@ impl StatusStore {
                 },
             );
 
-            if s.seek_in_flight {
-                if s.elapsed_ms.is_some() && s.duration_ms.is_some() {
-                    s.seek_in_flight = false;
-                }
+            if should_clear_seek_in_flight(&s) {
+                s.seek_in_flight = false;
             }
 
             return AutoAdvanceInputs {
@@ -255,5 +253,156 @@ fn apply_playback_fields(s: &mut PlayerStatus, fields: PlaybackFields) {
     s.elapsed_ms = fields.elapsed_ms;
     if let Some(paused) = fields.paused {
         s.paused = paused;
+    }
+}
+
+fn should_clear_seek_in_flight(state: &PlayerStatus) -> bool {
+    state.seek_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn make_store() -> StatusStore {
+        let status = Arc::new(Mutex::new(PlayerStatus::default()));
+        StatusStore::new(status)
+    }
+
+    fn make_bridge_status() -> BridgeStatus {
+        BridgeStatus {
+            now_playing: None,
+            paused: false,
+            elapsed_ms: None,
+            duration_ms: None,
+            source_codec: None,
+            source_bit_depth: None,
+            container: None,
+            output_sample_format: None,
+            resampling: None,
+            resample_from_hz: None,
+            resample_to_hz: None,
+            sample_rate: None,
+            channels: None,
+            device: None,
+            underrun_frames: None,
+            underrun_events: None,
+            buffer_size_frames: None,
+            buffered_frames: None,
+            buffer_capacity_frames: None,
+        }
+    }
+
+    #[test]
+    fn on_play_sets_core_fields() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), true);
+        let status = store.inner().lock().unwrap();
+        assert_eq!(status.now_playing, Some(PathBuf::from("/music/a.flac")));
+        assert_eq!(status.elapsed_ms, Some(0));
+        assert!(status.user_paused);
+        assert!(status.paused);
+    }
+
+    #[test]
+    fn on_stop_clears_playback_fields() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        store.on_stop();
+        let status = store.inner().lock().unwrap();
+        assert!(status.now_playing.is_none());
+        assert!(status.duration_ms.is_none());
+        assert!(!status.paused);
+        assert!(!status.user_paused);
+    }
+
+    #[test]
+    fn on_pause_toggle_flips_and_tracks_user_pause() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        store.on_pause_toggle();
+        let status = store.inner().lock().unwrap();
+        assert!(status.paused);
+        assert!(status.user_paused);
+    }
+
+    #[test]
+    fn on_local_playback_start_sets_fields() {
+        let store = make_store();
+        store.on_local_playback_start(
+            PathBuf::from("/music/a.flac"),
+            Some("Device".to_string()),
+            48000,
+            2,
+            Some(1000),
+            Some("FLAC".to_string()),
+            Some(24),
+            Some("FLAC".to_string()),
+            Some("F32".to_string()),
+            true,
+            96000,
+            48000,
+            Some(10),
+            false,
+        );
+        let status = store.inner().lock().unwrap();
+        assert_eq!(status.output_device.as_deref(), Some("Device"));
+        assert_eq!(status.sample_rate, Some(48000));
+        assert_eq!(status.channels, Some(2));
+        assert_eq!(status.duration_ms, Some(1000));
+        assert_eq!(status.source_codec.as_deref(), Some("FLAC"));
+        assert_eq!(status.source_bit_depth, Some(24));
+        assert_eq!(status.output_sample_format.as_deref(), Some("F32"));
+        assert_eq!(status.resampling, Some(true));
+        assert_eq!(status.resample_from_hz, Some(96000));
+        assert_eq!(status.resample_to_hz, Some(48000));
+        assert_eq!(status.elapsed_ms, Some(10));
+        assert!(!status.paused);
+    }
+
+    #[test]
+    fn should_clear_seek_in_flight_requires_elapsed_and_duration() {
+        let mut status = PlayerStatus::default();
+        status.seek_in_flight = true;
+        assert!(!should_clear_seek_in_flight(&status));
+        status.elapsed_ms = Some(10);
+        assert!(!should_clear_seek_in_flight(&status));
+        status.duration_ms = Some(100);
+        assert!(should_clear_seek_in_flight(&status));
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_clears_seek_when_ready() {
+        let store = make_store();
+        store.mark_seek_in_flight();
+        let remote = BridgeStatus {
+            elapsed_ms: Some(10),
+            duration_ms: Some(100),
+            ..make_bridge_status()
+        };
+
+        store.apply_remote_and_inputs(&remote, None);
+        let status = store.inner().lock().unwrap();
+        assert!(!status.seek_in_flight);
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_returns_auto_advance_inputs() {
+        let store = make_store();
+        let remote = BridgeStatus {
+            elapsed_ms: Some(50),
+            duration_ms: Some(100),
+            ..make_bridge_status()
+        };
+
+        let inputs = store.apply_remote_and_inputs(&remote, Some(90));
+        assert_eq!(inputs.last_duration_ms, Some(90));
+        assert_eq!(inputs.remote_duration_ms, Some(100));
+        assert_eq!(inputs.remote_elapsed_ms, Some(50));
+        assert_eq!(inputs.elapsed_ms, Some(50));
+        assert_eq!(inputs.duration_ms, Some(100));
+        assert!(!inputs.user_paused);
+        assert!(!inputs.seek_in_flight);
     }
 }

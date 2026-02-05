@@ -256,12 +256,7 @@ fn play_one_http(
         hint.with_extension(&ext);
     }
 
-    let mut playback_eff = playback.clone();
-    if seek_ms.is_some() {
-        playback_eff.buffer_seconds = playback_eff.buffer_seconds.min(1.0);
-        playback_eff.refill_max_frames = playback_eff.refill_max_frames.min(2048);
-        playback_eff.chunk_frames = playback_eff.chunk_frames.min(1024);
-    }
+    let playback_eff = effective_playback_for_seek(playback, seek_ms);
 
     let source = HttpRangeSource::new(url.clone(), HttpRangeConfig::default(), Some(cancel.clone()));
     let (src_spec, srcq, duration_ms, source_info) =
@@ -358,6 +353,19 @@ fn play_one_http(
     result
 }
 
+fn effective_playback_for_seek(
+    playback: &PlaybackConfig,
+    seek_ms: Option<u64>,
+) -> PlaybackConfig {
+    let mut playback_eff = playback.clone();
+    if seek_ms.is_some() {
+        playback_eff.buffer_seconds = playback_eff.buffer_seconds.min(1.0);
+        playback_eff.refill_max_frames = playback_eff.refill_max_frames.min(2048);
+        playback_eff.chunk_frames = playback_eff.chunk_frames.min(1024);
+    }
+    playback_eff
+}
+
 /// Infer a file extension from the URL path if present.
 fn infer_ext_from_url(url: &str) -> Option<String> {
     let tail = url.split('?').next().unwrap_or(url);
@@ -368,5 +376,45 @@ fn infer_ext_from_url(url: &str) -> Option<String> {
         Some(ext.to_ascii_lowercase())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_playback_for_seek_caps_values() {
+        let playback = PlaybackConfig {
+            buffer_seconds: 3.0,
+            refill_max_frames: 8192,
+            chunk_frames: 4096,
+        };
+        let eff = effective_playback_for_seek(&playback, Some(1000));
+        assert_eq!(eff.buffer_seconds, 1.0);
+        assert_eq!(eff.refill_max_frames, 2048);
+        assert_eq!(eff.chunk_frames, 1024);
+    }
+
+    #[test]
+    fn effective_playback_for_seek_keeps_values_without_seek() {
+        let playback = PlaybackConfig {
+            buffer_seconds: 2.5,
+            refill_max_frames: 4096,
+            chunk_frames: 2048,
+        };
+        let eff = effective_playback_for_seek(&playback, None);
+        assert_eq!(eff.buffer_seconds, 2.5);
+        assert_eq!(eff.refill_max_frames, 4096);
+        assert_eq!(eff.chunk_frames, 2048);
+    }
+
+    #[test]
+    fn infer_ext_from_url_handles_query_and_missing_ext() {
+        assert_eq!(
+            infer_ext_from_url("http://example/a.flac?x=1"),
+            Some("flac".to_string())
+        );
+        assert_eq!(infer_ext_from_url("http://example/a"), None);
     }
 }
