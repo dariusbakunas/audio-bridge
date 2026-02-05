@@ -625,4 +625,52 @@ mod tests {
             vec![file_path.canonicalize().unwrap()]
         );
     }
+
+    #[test]
+    fn canonicalize_under_root_rejects_missing_path() {
+        let (state, _root) = make_state_with_root();
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let result = controller.canonicalize_under_root(&state, std::path::Path::new("missing.flac"));
+
+        assert!(matches!(result, Err(OutputControllerError::Http(_))));
+    }
+
+    #[test]
+    fn queue_remove_path_returns_false_when_not_queued() {
+        let (state, root) = make_state_with_root();
+        let file_path = root.join("a.flac");
+        let _ = std::fs::write(&file_path, b"test");
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let removed = controller
+            .queue_remove_path(&state, "a.flac")
+            .expect("remove path");
+
+        assert!(!removed);
+    }
+
+    #[test]
+    fn queue_remove_path_removes_existing_item() {
+        let (state, root) = make_state_with_root();
+        let file_path = root.join("a.flac");
+        let _ = std::fs::write(&file_path, b"test");
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let added = controller.queue_add_paths(&state, vec!["a.flac".to_string()]);
+        assert_eq!(added, 1);
+        let removed = controller
+            .queue_remove_path(&state, "a.flac")
+            .expect("remove path");
+
+        assert!(removed);
+        assert!(state
+            .playback_manager
+            .queue_service()
+            .queue()
+            .lock()
+            .unwrap()
+            .items
+            .is_empty());
+    }
 }
