@@ -1096,6 +1096,8 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Re
 mod tests {
     use super::*;
     use crate::library::Track;
+    use crate::worker::Command;
+    use crossbeam_channel::unbounded;
 
     fn track_item(path: &str, artist: &str) -> LibraryItem {
         LibraryItem::Track(Track {
@@ -1159,6 +1161,148 @@ mod tests {
         app.auto_preview = vec![PathBuf::from("/music/next.flac")];
         app.pending_scan = Some(PathBuf::from("/music/other"));
         assert_eq!(app.auto_preview, vec![PathBuf::from("/music/next.flac")]);
+    }
+
+    #[test]
+    fn mark_queue_dirty_resets_auto_preview_state() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        let revision = app.queue_revision;
+        app.auto_preview_dirty = false;
+        app.auto_base_path = Some(PathBuf::from("/music/a.flac"));
+        app.mark_queue_dirty();
+        assert_ne!(app.queue_revision, revision);
+        assert!(app.auto_preview_dirty);
+        assert!(app.auto_base_path.is_none());
+    }
+
+    #[test]
+    fn seek_relative_clamps_to_duration() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        let (tx, rx) = unbounded::<Command>();
+        app.remote_output_id = Some("bridge:test:device".to_string());
+        app.remote_bridge_online = true;
+        app.remote_elapsed_ms = Some(90_000);
+        app.remote_duration_ms = Some(100_000);
+
+        app.seek_relative(20_000, &tx);
+
+        let cmd = rx.try_recv().unwrap();
+        assert!(matches!(cmd, Command::Seek { ms: 100_000 }));
+    }
+
+    #[test]
+    fn seek_relative_handles_missing_progress() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        let (tx, rx) = unbounded::<Command>();
+        app.remote_output_id = Some("bridge:test:device".to_string());
+        app.remote_bridge_online = true;
+        app.remote_elapsed_ms = None;
+
+        app.seek_relative(5_000, &tx);
+
+        assert!(rx.try_recv().is_err());
+        assert_eq!(app.status, "Seek unavailable (no progress yet)");
+    }
+
+    #[test]
+    fn toggle_logs_resets_scroll_when_closed() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        app.logs_open = true;
+        app.logs_scroll = 5;
+        app.toggle_logs();
+        assert!(!app.logs_open);
+        assert_eq!(app.logs_scroll, 0);
+    }
+
+    #[test]
+    fn scroll_logs_up_clamps_to_len() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        app.logs.push_back("line1".to_string());
+        app.logs.push_back("line2".to_string());
+        app.logs_scroll = 0;
+        app.scroll_logs_up();
+        app.scroll_logs_up();
+        assert_eq!(app.logs_scroll, 1);
+    }
+
+    #[test]
+    fn scroll_logs_down_stops_at_zero() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        app.logs_scroll = 2;
+        app.scroll_logs_down();
+        app.scroll_logs_down();
+        app.scroll_logs_down();
+        assert_eq!(app.logs_scroll, 0);
+    }
+
+    #[test]
+    fn select_next_clamps_at_end() {
+        let entries = vec![
+            track_item("/music/a.flac", "A"),
+            track_item("/music/b.flac", "B"),
+        ];
+        let mut app = app_with_entries(entries);
+        app.select_index(1);
+        app.select_next();
+        assert_eq!(app.selected_index(), Some(1));
+    }
+
+    #[test]
+    fn select_prev_clamps_at_start() {
+        let entries = vec![
+            track_item("/music/a.flac", "A"),
+            track_item("/music/b.flac", "B"),
+        ];
+        let mut app = app_with_entries(entries);
+        app.select_index(0);
+        app.select_prev();
+        assert_eq!(app.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn page_step_returns_list_height_with_minimum() {
+        let entries = vec![track_item("/music/a.flac", "A")];
+        let mut app = app_with_entries(entries);
+        app.list_view_height = 0;
+        assert_eq!(app.page_step(), 1);
+        app.list_view_height = 10;
+        assert_eq!(app.page_step(), 10);
+    }
+
+    #[test]
+    fn page_down_advances_by_step() {
+        let entries = vec![
+            track_item("/music/a.flac", "A"),
+            track_item("/music/b.flac", "B"),
+            track_item("/music/c.flac", "C"),
+            track_item("/music/d.flac", "D"),
+        ];
+        let mut app = app_with_entries(entries);
+        app.list_view_height = 3;
+        app.select_index(0);
+        app.page_down();
+        assert_eq!(app.selected_index(), Some(3));
+    }
+
+    #[test]
+    fn page_up_moves_back_by_step() {
+        let entries = vec![
+            track_item("/music/a.flac", "A"),
+            track_item("/music/b.flac", "B"),
+            track_item("/music/c.flac", "C"),
+            track_item("/music/d.flac", "D"),
+        ];
+        let mut app = app_with_entries(entries);
+        app.list_view_height = 3;
+        app.select_index(3);
+        app.page_up();
+        assert_eq!(app.selected_index(), Some(0));
     }
 
     // auto-advance moved to server; client no longer manipulates queue on playback end.
