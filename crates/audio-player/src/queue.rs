@@ -374,4 +374,34 @@ mod tests {
         assert_eq!(out.len(), 4);
         assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
     }
+
+    #[test]
+    fn wait_for_any_returns_true_when_data_arrives() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        let q_push = q.clone();
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            q_push.push_interleaved_blocking(&[1.0, 2.0]);
+        });
+
+        assert!(q.wait_for_any(Duration::from_millis(100)));
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_until_done_and_empty_or_cancel_respects_cancel() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_set = cancel.clone();
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            cancel_set.store(true, Ordering::Relaxed);
+        });
+
+        let drained = wait_until_done_and_empty_or_cancel(&q, &cancel);
+        assert!(!drained);
+        handle.join().unwrap();
+    }
 }

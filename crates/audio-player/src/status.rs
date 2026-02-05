@@ -94,3 +94,61 @@ impl PlayerStatusState {
         self.buffer_capacity_frames = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_reports_elapsed_and_paused() {
+        let mut state = PlayerStatusState::default();
+        state.sample_rate = Some(48_000);
+        state.played_frames = Some(Arc::new(AtomicU64::new(96_000)));
+        state.paused_flag = Some(Arc::new(AtomicBool::new(true)));
+
+        let snap = state.snapshot();
+        assert_eq!(snap.elapsed_ms, Some(2000));
+        assert!(snap.paused);
+    }
+
+    #[test]
+    fn snapshot_includes_buffer_counters() {
+        let mut state = PlayerStatusState::default();
+        state.buffer_size_frames = Some(512);
+        state.buffered_frames = Some(Arc::new(AtomicU64::new(1024)));
+        state.buffer_capacity_frames = Some(Arc::new(AtomicU64::new(4096)));
+        state.underrun_frames = Some(Arc::new(AtomicU64::new(12)));
+        state.underrun_events = Some(Arc::new(AtomicU64::new(3)));
+
+        let snap = state.snapshot();
+        assert_eq!(snap.buffer_size_frames, Some(512));
+        assert_eq!(snap.buffered_frames, Some(1024));
+        assert_eq!(snap.buffer_capacity_frames, Some(4096));
+        assert_eq!(snap.underrun_frames, Some(12));
+        assert_eq!(snap.underrun_events, Some(3));
+    }
+
+    #[test]
+    fn clear_playback_resets_track_fields() {
+        let mut state = PlayerStatusState::default();
+        state.now_playing = Some("track".to_string());
+        state.sample_rate = Some(48_000);
+        state.channels = Some(2);
+        state.duration_ms = Some(10);
+        state.source_codec = Some("FLAC".to_string());
+        state.played_frames = Some(Arc::new(AtomicU64::new(1)));
+        state.paused_flag = Some(Arc::new(AtomicBool::new(false)));
+        state.buffered_frames = Some(Arc::new(AtomicU64::new(1)));
+
+        state.clear_playback();
+
+        assert!(state.now_playing.is_none());
+        assert!(state.sample_rate.is_none());
+        assert!(state.channels.is_none());
+        assert!(state.duration_ms.is_none());
+        assert!(state.source_codec.is_none());
+        assert!(state.played_frames.is_none());
+        assert!(state.paused_flag.is_none());
+        assert!(state.buffered_frames.is_none());
+    }
+}
