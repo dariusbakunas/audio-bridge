@@ -44,23 +44,10 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                         port = info.get_port(),
                         "mdns: service resolved"
                     );
-                    let id = info
-                        .get_property("id")
-                        .map(|p| p.val_str().to_string())
-                        .map(|s| s.strip_prefix("id=").unwrap_or(&s).to_string())
+                    let id = property_value(&info, "id")
                         .unwrap_or_else(|| info.get_fullname().to_string());
-                    let name = info
-                        .get_property("name")
-                        .map(|p| p.val_str().to_string())
-                        .map(|s| s.strip_prefix("name=").unwrap_or(&s).to_string())
-                        .unwrap_or_else(|| id.clone());
-                    let addr = info
-                        .get_addresses()
-                        .iter()
-                        .find_map(|ip| match ip {
-                            mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
-                            _ => None,
-                        });
+                    let name = property_value(&info, "name").unwrap_or_else(|| id.clone());
+                    let addr = first_ipv4_addr(&info);
                     let Some(ip) = addr else {
                         tracing::warn!(fullname = %info.get_fullname(), "mdns: resolved without IPv4");
                         continue;
@@ -143,6 +130,21 @@ fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
     resp.map(|r| r.status().is_success()).unwrap_or(false)
 }
 
+fn property_value(info: &mdns_sd::ResolvedService, key: &str) -> Option<String> {
+    info.get_property(key)
+        .map(|p| p.val_str().to_string())
+        .map(|s| s.strip_prefix(&format!("{key}=")).unwrap_or(&s).to_string())
+}
+
+fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr> {
+    info.get_addresses()
+        .iter()
+        .find_map(|ip| match ip {
+            mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
+            _ => None,
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +153,40 @@ mod tests {
     fn ping_bridge_returns_false_on_unreachable() {
         let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
         assert!(!ping_bridge(addr));
+    }
+
+    #[test]
+    fn property_value_strips_key_prefix() {
+        let mut props = std::collections::HashMap::new();
+        props.insert("id".to_string(), "id=bridge-1".to_string());
+        let info = mdns_sd::ServiceInfo::new(
+            "_audio-bridge._tcp.local.",
+            "bridge-1",
+            "bridge.local.",
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            5556,
+            props,
+        )
+        .unwrap()
+        .as_resolved_service();
+        assert_eq!(property_value(&info, "id"), Some("bridge-1".to_string()));
+    }
+
+    #[test]
+    fn first_ipv4_addr_returns_address() {
+        let info = mdns_sd::ServiceInfo::new(
+            "_audio-bridge._tcp.local.",
+            "bridge-1",
+            "bridge.local.",
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 2)),
+            5556,
+            std::collections::HashMap::new(),
+        )
+        .unwrap()
+        .as_resolved_service();
+        assert_eq!(
+            first_ipv4_addr(&info),
+            Some(std::net::Ipv4Addr::new(127, 0, 0, 2))
+        );
     }
 }

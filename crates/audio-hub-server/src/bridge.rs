@@ -84,13 +84,10 @@ pub fn spawn_bridge_worker(
                         status.mark_seek_in_flight();
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
-                        let title = path
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.to_string());
+                        let title = title_from_path(&path);
                         let _ = client.play_path(
                             &path,
-                            if ext_hint.is_empty() { None } else { Some(ext_hint.as_str()) },
+                            ext_hint_option(&ext_hint),
                             title.as_deref(),
                             seek_ms,
                             start_paused,
@@ -158,15 +155,69 @@ impl BridgeStatusPoller {
                 }
             }
             Err(_) => {
-                if self
-                    .bridges_state
-                    .lock()
-                    .map(|s| s.active_bridge_id.as_deref() == Some(self.bridge_id.as_str()))
-                    .unwrap_or(false)
-                {
+                if is_active_bridge(&self.bridges_state, &self.bridge_id) {
                     self.bridge_online.store(false, Ordering::Relaxed);
                 }
             }
         }
+    }
+}
+
+fn title_from_path(path: &PathBuf) -> Option<String> {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+fn ext_hint_option(ext_hint: &str) -> Option<&str> {
+    if ext_hint.trim().is_empty() {
+        None
+    } else {
+        Some(ext_hint)
+    }
+}
+
+fn is_active_bridge(
+    bridges_state: &Arc<Mutex<crate::state::BridgeState>>,
+    bridge_id: &str,
+) -> bool {
+    bridges_state
+        .lock()
+        .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_from_path_returns_file_name() {
+        let path = PathBuf::from("/music/track.flac");
+        assert_eq!(title_from_path(&path), Some("track.flac".to_string()));
+    }
+
+    #[test]
+    fn title_from_path_returns_none_for_dir() {
+        let path = PathBuf::from("/");
+        assert!(title_from_path(&path).is_none());
+    }
+
+    #[test]
+    fn ext_hint_option_rejects_empty() {
+        assert!(ext_hint_option("").is_none());
+        assert!(ext_hint_option("   ").is_none());
+        assert_eq!(ext_hint_option("flac"), Some("flac"));
+    }
+
+    #[test]
+    fn is_active_bridge_matches_state() {
+        let bridges = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: Some("bridge-1".to_string()),
+            active_output_id: None,
+        }));
+        assert!(is_active_bridge(&bridges, "bridge-1"));
+        assert!(!is_active_bridge(&bridges, "bridge-2"));
     }
 }

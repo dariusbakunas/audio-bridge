@@ -503,4 +503,10 @@ mod tests {
         let range = parse_single_range("bytes=0-0", 100).unwrap();
         assert_eq!(range, (0, 0));
     }
+
+    #[test]
+    fn parse_single_range_uses_first_range() {
+        let range = parse_single_range("bytes=0-1,2-3", 100).unwrap();
+        assert_eq!(range, (0, 1));
+    }
 }
