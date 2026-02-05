@@ -446,6 +446,61 @@ mod tests {
         )
     }
 
+    fn make_state_with_root() -> (AppState, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-server-root-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let library = crate::library::scan_library(&root).expect("scan library");
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: None,
+            active_output_id: None,
+        }));
+        let bridge_state = Arc::new(crate::state::BridgeProviderState::new(
+            cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(crate::state::LocalProviderState {
+            enabled: false,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status,
+            queue_service,
+        );
+        let device_selection = crate::state::DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        let state = AppState::new(
+            library,
+            bridge_state,
+            local_state,
+            playback_manager,
+            device_selection,
+        );
+        (state, root)
+    }
+
     #[test]
     fn apply_queue_mode_keep_preserves_items() {
         let mut queue = QueueState {
@@ -516,5 +571,58 @@ mod tests {
             result,
             Err(OutputControllerError::OutputOffline { .. })
         ));
+    }
+
+    #[test]
+    fn canonicalize_under_root_accepts_relative_paths() {
+        let (state, root) = make_state_with_root();
+        let file_path = root.join("a.flac");
+        let _ = std::fs::write(&file_path, b"test");
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let resolved = controller
+            .canonicalize_under_root(&state, std::path::Path::new("a.flac"))
+            .expect("canonicalize");
+
+        assert_eq!(resolved, file_path.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn canonicalize_under_root_rejects_outside_root() {
+        let (state, _root) = make_state_with_root();
+        let other_root = std::env::temp_dir().join(format!(
+            "audio-hub-server-outside-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&other_root);
+        let outside = other_root.join("outside.flac");
+        let _ = std::fs::write(&outside, b"test");
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let result = controller.canonicalize_under_root(&state, &outside);
+
+        assert!(matches!(result, Err(OutputControllerError::Http(_))));
+    }
+
+    #[test]
+    fn queue_add_paths_skips_missing_files() {
+        let (state, root) = make_state_with_root();
+        let file_path = root.join("a.flac");
+        let _ = std::fs::write(&file_path, b"test");
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let added = controller.queue_add_paths(
+            &state,
+            vec!["a.flac".to_string(), "missing.flac".to_string()],
+        );
+
+        assert_eq!(added, 1);
+        assert_eq!(
+            state.playback_manager.queue_service().queue().lock().unwrap().items,
+            vec![file_path.canonicalize().unwrap()]
+        );
     }
 }
