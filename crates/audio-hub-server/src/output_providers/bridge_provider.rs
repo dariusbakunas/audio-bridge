@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use async_trait::async_trait;
 
-use crate::bridge::{http_list_devices, http_set_device, http_status};
+use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_manager::{merge_bridges, parse_output_id, parse_provider_id};
 use crate::models::{
     OutputCapabilities,
@@ -228,7 +228,7 @@ impl OutputProvider for BridgeProvider {
             bridge.http_addr
         };
 
-        let device_name = match http_list_devices(http_addr) {
+        let device_name = match BridgeTransportClient::new(http_addr, String::new()).list_devices() {
             Ok(devices) => {
                 if let Some(device) = devices.iter().find(|d| d.id == device_id) {
                     device.name.clone()
@@ -271,7 +271,7 @@ impl OutputProvider for BridgeProvider {
             );
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
-        if let Err(e) = http_set_device(http_addr, &device_name) {
+        if let Err(e) = BridgeTransportClient::new(http_addr, String::new()).set_device(&device_name) {
             tracing::warn!(
                 bridge_id = %bridge_id,
                 device = %device_name,
@@ -395,7 +395,7 @@ impl OutputProvider for BridgeProvider {
         };
         drop(status);
         if let Some(http_addr) = http_addr {
-            match crate::bridge::http_status(http_addr) {
+            match BridgeTransportClient::new(http_addr, String::new()).status() {
                 Ok(remote) => {
                     resp.paused = remote.paused;
                     resp.elapsed_ms = remote.elapsed_ms;
@@ -432,7 +432,7 @@ fn build_outputs_from_bridges_with_failures(
     let mut failed = Vec::new();
 
     for bridge in bridges {
-        let devices = match http_list_devices(bridge.http_addr) {
+        let devices = match BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices() {
             Ok(list) => {
                 tracing::info!(
                     bridge_id = %bridge.id,
@@ -490,7 +490,7 @@ fn build_outputs_from_bridges_with_failures(
 fn build_outputs_for_bridge(
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>, anyhow::Error> {
-    let devices = http_list_devices(bridge.http_addr)?;
+    let devices = BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices()?;
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
     for device in &devices {
@@ -555,7 +555,7 @@ fn inject_active_output_for_bridge(
     if bridge_id != bridge.id {
         return;
     }
-    let status = match http_status(bridge.http_addr) {
+    let status = match BridgeTransportClient::new(bridge.http_addr, String::new()).status() {
         Ok(status) => status,
         Err(_) => return,
     };

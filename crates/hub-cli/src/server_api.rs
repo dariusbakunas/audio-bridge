@@ -160,6 +160,17 @@ pub(crate) fn pause_toggle(server: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn stop(server: &str) -> Result<()> {
+    let url = format!("{}/stop", server.trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .send_empty()
+        .context("request /stop")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("stop failed with {}", resp.status()));
+    }
+    Ok(())
+}
+
 pub(crate) fn seek(server: &str, ms: u64) -> Result<()> {
     let url = format!("{}/seek", server.trim_end_matches('/'));
     let resp = ureq::post(&url)
@@ -340,6 +351,17 @@ pub(crate) fn queue_next(server: &str) -> Result<bool> {
     Ok(resp.status().is_success())
 }
 
+pub(crate) fn queue_clear(server: &str) -> Result<()> {
+    let url = format!("{}/queue/clear", server.trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .send_empty()
+        .context("request /queue/clear")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("queue clear failed with {}", resp.status()));
+    }
+    Ok(())
+}
+
 pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
     let url = format!("{}/play", server.trim_end_matches('/'));
     let resp = ureq::post(&url)
@@ -350,6 +372,20 @@ pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
         .context("request /play (replace)")?;
     if !resp.status().is_success() {
         return Err(anyhow::anyhow!("play replace failed with {}", resp.status()));
+    }
+    Ok(())
+}
+
+pub(crate) fn play_keep(server: &str, path: &Path) -> Result<()> {
+    let url = format!("{}/play", server.trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .send_json(PlayRequest {
+            path: path.to_string_lossy().to_string(),
+            queue_mode: Some(QueueMode::Keep),
+        })
+        .context("request /play (keep)")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("play failed with {}", resp.status()));
     }
     Ok(())
 }

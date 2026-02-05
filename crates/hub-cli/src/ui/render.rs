@@ -295,7 +295,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
     }
     f.render_widget(
         Paragraph::new(Line::from(
-            "keys: ↑/↓ select | Enter play/enter | Space pause | n next | ←/→ seek | o outputs | l logs | i info | h help | q quit",
+            "keys: ↑/↓ select | Enter play/enter | Space pause | s stop | n next | c clear | ←/→ seek | o outputs | l logs | i info | h help | q quit",
         )),
         footer_chunks[3],
     );
@@ -396,6 +396,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             "",
             "Playback",
             "  Space        pause/resume",
+            "  s            stop",
             "  n            next",
             "  ←/→          seek −5s / +5s",
             "  Shift+←/→    seek −30s / +30s",
@@ -403,6 +404,7 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
             "Queue",
             "  k            queue selected track",
             "  K            queue all tracks in dir",
+            "  c            clear queue",
             "",
             "Other",
             "  p            jump to playing",
@@ -476,6 +478,15 @@ pub(crate) fn draw(f: &mut ratatui::Frame, app: &mut App) {
         }
         let list = List::new(items).block(block);
         f.render_widget(list, area);
+    }
+
+    if app.confirm_clear_queue {
+        let area = centered_rect(40, 25, f.area());
+        f.render_widget(Clear, area);
+        let body = ["Clear entire queue?", "", "Press y to confirm, n to cancel"]
+            .join("\n");
+        let block = Block::default().title("Clear Queue").borders(Borders::ALL);
+        f.render_widget(Paragraph::new(body).block(block), area);
     }
 }
 

@@ -1,6 +1,7 @@
 mod api;
 mod bridge;
 mod bridge_manager;
+mod bridge_transport;
 mod config;
 mod discovery;
 mod library;

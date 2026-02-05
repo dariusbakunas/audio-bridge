@@ -197,6 +197,7 @@ pub(crate) struct App {
     pub(crate) logs_scroll: usize,
     pub(crate) help_open: bool,
     pub(crate) now_playing_open: bool,
+    pub(crate) confirm_clear_queue: bool,
     last_status_snapshot: String,
     log_rx: Receiver<String>,
     pub(crate) list_view_height: usize,
@@ -279,6 +280,7 @@ impl App {
             logs_scroll: 0,
             help_open: false,
             now_playing_open: false,
+            confirm_clear_queue: false,
             last_status_snapshot: String::new(),
             log_rx,
             list_view_height: 0,
@@ -322,6 +324,14 @@ impl App {
 
     fn toggle_now_playing(&mut self) {
         self.now_playing_open = !self.now_playing_open;
+    }
+
+    fn open_clear_queue_confirm(&mut self) {
+        self.confirm_clear_queue = true;
+    }
+
+    fn close_clear_queue_confirm(&mut self) {
+        self.confirm_clear_queue = false;
     }
 
     fn seek_relative(&mut self, delta_ms: i64, cmd_tx: &Sender<crate::worker::Command>) {
@@ -780,7 +790,7 @@ impl App {
         };
         let track_duration = track.duration_ms;
 
-        if server_api::play_replace(&self.server, &track_path).is_err() {
+        if server_api::play_keep(&self.server, &track_path).is_err() {
             self.status = "Play failed".into();
         }
         self.now_playing_index = Some(index);
@@ -937,6 +947,19 @@ fn ui_loop(
                     }
                     continue;
                 }
+                if app.confirm_clear_queue {
+                    match k.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            cmd_tx.send(Command::QueueClear).ok();
+                            app.close_clear_queue_confirm();
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            app.close_clear_queue_confirm();
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.outputs_open {
                     match k.code {
                         KeyCode::Esc => app.close_outputs(),
@@ -981,6 +1004,13 @@ fn ui_loop(
                     }
                     KeyCode::Char(' ') => {
                         cmd_tx.send(Command::PauseToggle).ok();
+                    }
+                    KeyCode::Char('s') => {
+                        cmd_tx.send(Command::Stop).ok();
+                        app.status = "Stopped".into();
+                    }
+                    KeyCode::Char('c') => {
+                        app.open_clear_queue_confirm();
                     }
                     KeyCode::Char('n') => {
                         if app.ensure_output_selected() {

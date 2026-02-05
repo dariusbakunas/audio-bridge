@@ -222,6 +222,23 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
 
 #[utoipa::path(
     post,
+    path = "/stop",
+    responses(
+        (status = 200, description = "Playback stopped"),
+        (status = 500, description = "Player offline")
+    )
+)]
+#[post("/stop")]
+pub async fn stop(state: web::Data<AppState>) -> impl Responder {
+    tracing::info!("stop request");
+    match state.output_controller.stop(&state).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
     path = "/seek",
     request_body = SeekBody,
     responses(

@@ -8,6 +8,8 @@ use crate::server_api;
 #[derive(Debug, Clone)]
 pub enum Command {
     PauseToggle,
+    Stop,
+    QueueClear,
     Next,
     Seek { ms: u64 },
     Quit,
@@ -33,6 +35,20 @@ pub fn worker_main(server: String, cmd_rx: Receiver<Command>, evt_tx: Sender<Eve
                     let _ = evt_tx.send(Event::Error(format!("Pause failed: {e:#}")));
                 } else {
                     let _ = evt_tx.send(Event::Status("Toggled pause".into()));
+                }
+            }
+            Command::Stop => {
+                if let Err(e) = server_api::stop(&server) {
+                    let _ = evt_tx.send(Event::Error(format!("Stop failed: {e:#}")));
+                } else {
+                    let _ = evt_tx.send(Event::Status("Stopped".into()));
+                }
+            }
+            Command::QueueClear => {
+                if let Err(e) = server_api::queue_clear(&server) {
+                    let _ = evt_tx.send(Event::Error(format!("Clear queue failed: {e:#}")));
+                } else {
+                    let _ = evt_tx.send(Event::Status("Queue cleared".into()));
                 }
             }
             Command::Next => {

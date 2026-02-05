@@ -13,7 +13,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
-use crate::bridge::{http_list_devices, http_set_device};
+use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
@@ -61,7 +61,8 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     }));
     let discovered_bridges = Arc::new(Mutex::new(std::collections::HashMap::new()));
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = http_set_device(http_addr, &device_name);
+        let _ = BridgeTransportClient::new(http_addr, public_base_url.clone())
+            .set_device(&device_name);
     }
 
     let bridge_state = Arc::new(BridgeProviderState::new(
@@ -141,6 +142,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::rescan_library)
             .service(api::play_track)
             .service(api::pause_toggle)
+            .service(api::stop)
             .service(api::seek)
             .service(api::stream_track)
             .service(api::queue_list)
@@ -296,7 +298,9 @@ fn resolve_active_output(
                     .find(|b| b.id == bridge_id)
                     .map(|b| b.http_addr);
                 if let Some(http_addr) = http_addr {
-                    if let Ok(devices) = http_list_devices(http_addr) {
+                    if let Ok(devices) = BridgeTransportClient::new(http_addr, String::new())
+                        .list_devices()
+                    {
                         if let Some(device) = devices.iter().find(|d| d.id == device_id) {
                             let active_id = format!("bridge:{}:{}", bridge_id, device.id);
                             *device_to_set = Some(device.name.clone());
@@ -325,7 +329,9 @@ fn resolve_active_output(
                     if first_bridge.is_none() {
                         first_bridge = Some(bridge.clone());
                     }
-                    match http_list_devices(bridge.http_addr) {
+                    match BridgeTransportClient::new(bridge.http_addr, String::new())
+                        .list_devices()
+                    {
                         Ok(devices) if !devices.is_empty() => {
                             let device = devices[0].clone();
                             let active_id = format!("bridge:{}:{}", bridge.id, device.id);

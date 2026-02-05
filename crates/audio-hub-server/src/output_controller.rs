@@ -139,12 +139,7 @@ impl OutputController {
         requested_output: Option<&str>,
     ) -> Result<String, OutputControllerError> {
         match queue_mode {
-            QueueMode::Keep => {
-                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
-                if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-                    queue.items.remove(pos);
-                }
-            }
+            QueueMode::Keep => {}
             QueueMode::Replace => {
                 let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
                 queue.items.clear();
@@ -161,12 +156,6 @@ impl OutputController {
             .resolve_active_output_id(state, requested_output)
             .await?;
         self.dispatch_play(state, path.clone(), None, false)?;
-
-        if let Ok(mut queue) = state.playback_manager.queue_service().queue().lock() {
-            if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-                queue.items.remove(pos);
-            }
-        }
 
         Ok(output_id)
     }
@@ -236,6 +225,15 @@ impl OutputController {
         state
             .playback_manager
             .seek(ms)
+            .map_err(|_| OutputControllerError::PlayerOffline)?;
+        Ok(())
+    }
+
+    pub(crate) async fn stop(&self, state: &AppState) -> Result<(), OutputControllerError> {
+        let _ = self.resolve_active_output_id(state, None).await?;
+        state
+            .playback_manager
+            .stop()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
     }
