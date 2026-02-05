@@ -376,6 +376,14 @@ mod tests {
     }
 
     #[test]
+    fn pop_blocking_exact_returns_none_when_closed() {
+        let q = SharedAudio::new(2, 64);
+        q.close();
+        let out = q.pop(PopStrategy::BlockingExact { frames: 1 });
+        assert!(out.is_none());
+    }
+
+    #[test]
     fn wait_for_any_returns_true_when_data_arrives() {
         let q = Arc::new(SharedAudio::new(2, 64));
         let q_push = q.clone();
@@ -387,6 +395,29 @@ mod tests {
 
         assert!(q.wait_for_any(Duration::from_millis(100)));
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_any_returns_false_on_timeout() {
+        let q = SharedAudio::new(2, 64);
+        assert!(!q.wait_for_any(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn wait_until_done_and_empty_returns_when_closed() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        q.close();
+        wait_until_done_and_empty(&q);
+        assert!(q.is_done());
+    }
+
+    #[test]
+    fn wait_until_done_and_empty_or_cancel_returns_true_when_closed() {
+        let q = Arc::new(SharedAudio::new(2, 64));
+        let cancel = Arc::new(AtomicBool::new(false));
+        q.close();
+        let drained = wait_until_done_and_empty_or_cancel(&q, &cancel);
+        assert!(drained);
     }
 
     #[test]

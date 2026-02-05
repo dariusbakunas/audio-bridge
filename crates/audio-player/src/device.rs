@@ -25,11 +25,10 @@ pub fn pick_device(host: &cpal::Host, needle: Option<&str>) -> Result<cpal::Devi
         .collect();
 
     if let Some(needle) = needle {
-        let needle_lc = needle.to_lowercase();
         if let Some(d) = devices.drain(..).find(|d| {
             d.description()
                 .ok()
-                .map(|n| n.name().to_lowercase().contains(&needle_lc))
+                .map(|n| matches_device_name(&n.name(), needle))
                 .unwrap_or(false)
         }) {
             return Ok(d);
@@ -59,43 +58,20 @@ pub fn pick_output_config(
         return Err(anyhow!("No supported output configs"));
     }
 
-    let target = target_rate.unwrap_or(u32::MAX);
     let mut best: Option<(bool, u32, u8, cpal::SupportedStreamConfig)> = None;
 
     for range in ranges {
         let min = range.min_sample_rate();
         let max = range.max_sample_rate();
-        let rate = if target_rate.is_some() {
-            if target >= min && target <= max {
-                target
-            } else if target < min {
-                min
-            } else {
-                max
-            }
-        } else {
-            max
-        };
+        let rate = pick_rate_for_range(min, max, target_rate);
         let below = target_rate.map(|t| rate <= t).unwrap_or(true);
-        let format_rank = match range.sample_format() {
-            cpal::SampleFormat::F32 => 0,
-            cpal::SampleFormat::I32 => 1,
-            cpal::SampleFormat::I16 => 2,
-            cpal::SampleFormat::U16 => 3,
-            _ => 10,
-        };
+        let format_rank = sample_format_rank(range.sample_format());
         let cfg = range.with_sample_rate(rate);
         let candidate = (below, rate, format_rank, cfg);
         let replace = match &best {
             None => true,
             Some((b_below, b_rate, b_rank, _)) => {
-                if below != *b_below {
-                    below && !*b_below
-                } else if rate != *b_rate {
-                    rate > *b_rate
-                } else {
-                    format_rank < *b_rank
-                }
+                is_better_candidate(below, rate, format_rank, *b_below, *b_rate, *b_rank)
             }
         };
         if replace {
@@ -131,6 +107,52 @@ pub fn pick_buffer_size(
             Some(cpal::BufferSize::Fixed(chosen))
         }
         cpal::SupportedBufferSize::Unknown => None,
+    }
+}
+
+fn pick_rate_for_range(
+    min: u32,
+    max: u32,
+    target_rate: Option<u32>,
+) -> u32 {
+    let target = target_rate.unwrap_or(u32::MAX);
+    if target_rate.is_some() {
+        if target >= min && target <= max {
+            target
+        } else if target < min {
+            min
+        } else {
+            max
+        }
+    } else {
+        max
+    }
+}
+
+fn sample_format_rank(format: cpal::SampleFormat) -> u8 {
+    match format {
+        cpal::SampleFormat::F32 => 0,
+        cpal::SampleFormat::I32 => 1,
+        cpal::SampleFormat::I16 => 2,
+        cpal::SampleFormat::U16 => 3,
+        _ => 10,
+    }
+}
+
+fn is_better_candidate(
+    below: bool,
+    rate: u32,
+    format_rank: u8,
+    best_below: bool,
+    best_rate: u32,
+    best_rank: u8,
+) -> bool {
+    if below != best_below {
+        below && !best_below
+    } else if rate != best_rate {
+        rate > best_rate
+    } else {
+        format_rank < best_rank
     }
 }
 
@@ -214,18 +236,7 @@ fn device_id_for(device: &cpal::Device, name: &str, min_rate: u32, max_rate: u32
     if let Ok(id) = device.id() {
         return id.to_string();
     }
-    let mut hash: u64 = 0xcbf29ce484222325;
-    let mut input = String::new();
-    input.push_str(name);
-    input.push('|');
-    input.push_str(&min_rate.to_string());
-    input.push('|');
-    input.push_str(&max_rate.to_string());
-    for b in input.as_bytes() {
-        hash ^= u64::from(*b);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
+    hash_device_id(name, min_rate, max_rate)
 }
 
 fn device_cache_key(device: &cpal::Device, name: &str) -> String {
@@ -247,5 +258,105 @@ fn cached_rates(key: &str) -> Option<(u32, u32)> {
 fn update_cached_rates(key: &str, min_rate: u32, max_rate: u32) {
     if let Ok(mut m) = rates_cache().lock() {
         m.insert(key.to_string(), (min_rate, max_rate));
+    }
+}
+
+fn hash_device_id(name: &str, min_rate: u32, max_rate: u32) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut input = String::new();
+    input.push_str(name);
+    input.push('|');
+    input.push_str(&min_rate.to_string());
+    input.push('|');
+    input.push_str(&max_rate.to_string());
+    for b in input.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn matches_device_name(name: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    name.to_lowercase().contains(&needle.to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_device_id_is_deterministic() {
+        let first = hash_device_id("Device", 44_100, 96_000);
+        let second = hash_device_id("Device", 44_100, 96_000);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn hash_device_id_changes_with_inputs() {
+        let base = hash_device_id("Device", 44_100, 96_000);
+        let other = hash_device_id("Other", 44_100, 96_000);
+        assert_ne!(base, other);
+    }
+
+    #[test]
+    fn cached_rates_roundtrip() {
+        let key = "device-key";
+        update_cached_rates(key, 48_000, 96_000);
+        let cached = cached_rates(key).unwrap();
+        assert_eq!(cached, (48_000, 96_000));
+    }
+
+    #[test]
+    fn matches_device_name_is_case_insensitive() {
+        assert!(matches_device_name("USB DAC", "dac"));
+        assert!(matches_device_name("usb dac", "USB"));
+        assert!(!matches_device_name("USB DAC", "speaker"));
+        assert!(!matches_device_name("USB DAC", ""));
+    }
+
+    #[test]
+    fn pick_rate_for_range_prefers_target_when_in_range() {
+        let rate = pick_rate_for_range(44_100, 96_000, Some(48_000));
+        assert_eq!(rate, 48_000);
+    }
+
+    #[test]
+    fn pick_rate_for_range_clamps_below_min() {
+        let rate = pick_rate_for_range(44_100, 96_000, Some(22_050));
+        assert_eq!(rate, 44_100);
+    }
+
+    #[test]
+    fn pick_rate_for_range_clamps_above_max() {
+        let rate = pick_rate_for_range(44_100, 96_000, Some(192_000));
+        assert_eq!(rate, 96_000);
+    }
+
+    #[test]
+    fn pick_rate_for_range_defaults_to_max() {
+        let rate = pick_rate_for_range(44_100, 96_000, None);
+        assert_eq!(rate, 96_000);
+    }
+
+    #[test]
+    fn is_better_candidate_prefers_below_target() {
+        let better = is_better_candidate(true, 48_000, 1, false, 48_000, 1);
+        assert!(better);
+    }
+
+    #[test]
+    fn is_better_candidate_prefers_higher_rate() {
+        let better = is_better_candidate(true, 96_000, 2, true, 48_000, 2);
+        assert!(better);
+    }
+
+    #[test]
+    fn is_better_candidate_prefers_lower_rank() {
+        let better = is_better_candidate(true, 48_000, 0, true, 48_000, 2);
+        assert!(better);
     }
 }

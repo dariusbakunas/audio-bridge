@@ -206,3 +206,41 @@ fn codec_name_from_params(params: &CodecParameters) -> Option<String> {
     };
     Some(name.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use symphonia::core::codecs::*;
+
+    #[test]
+    fn duration_ms_from_codec_params_handles_zero_rate() {
+        let mut params = CodecParameters::new();
+        params.sample_rate = Some(0);
+        params.n_frames = Some(100);
+        assert!(duration_ms_from_codec_params(&params).is_none());
+    }
+
+    #[test]
+    fn duration_ms_from_codec_params_computes() {
+        let mut params = CodecParameters::new();
+        params.sample_rate = Some(48_000);
+        params.n_frames = Some(96_000);
+        let ms = duration_ms_from_codec_params(&params).unwrap();
+        assert_eq!(ms, 2000);
+    }
+
+    #[test]
+    fn codec_name_from_params_maps_known_codecs() {
+        let mut params = CodecParameters::new();
+        params.codec = CODEC_TYPE_FLAC;
+        assert_eq!(codec_name_from_params(&params), Some("FLAC".to_string()));
+        params.codec = CODEC_TYPE_PCM_S16LE;
+        assert_eq!(codec_name_from_params(&params), Some("PCM_S16".to_string()));
+    }
+
+    #[test]
+    fn codec_name_from_params_unknown_returns_none() {
+        let params = CodecParameters::new();
+        assert!(codec_name_from_params(&params).is_none());
+    }
+}

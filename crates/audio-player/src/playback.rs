@@ -220,3 +220,72 @@ fn next_sample_mapped_from_vec(st: &mut PlaybackState, dst_channels: usize, dst_
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_sample_mapped_from_vec_mono_to_stereo() {
+        let mut st = PlaybackState {
+            pos: 0,
+            src_channels: 1,
+            src: vec![0.25],
+        };
+        let left = next_sample_mapped_from_vec(&mut st, 2, 0);
+        let right = next_sample_mapped_from_vec(&mut st, 2, 1);
+        assert_eq!(left, 0.25);
+        assert_eq!(right, 0.25);
+        assert_eq!(st.pos, 1);
+    }
+
+    #[test]
+    fn next_sample_mapped_from_vec_stereo_to_mono() {
+        let mut st = PlaybackState {
+            pos: 0,
+            src_channels: 2,
+            src: vec![0.5, -0.5],
+        };
+        let mono = next_sample_mapped_from_vec(&mut st, 1, 0);
+        assert_eq!(mono, 0.0);
+        assert_eq!(st.pos, 2);
+    }
+
+    #[test]
+    fn next_sample_mapped_from_vec_passthrough() {
+        let mut st = PlaybackState {
+            pos: 0,
+            src_channels: 2,
+            src: vec![0.1, 0.2],
+        };
+        let left = next_sample_mapped_from_vec(&mut st, 2, 0);
+        let right = next_sample_mapped_from_vec(&mut st, 2, 1);
+        assert_eq!(left, 0.1);
+        assert_eq!(right, 0.2);
+        assert_eq!(st.pos, 2);
+    }
+
+    #[test]
+    fn next_sample_mapped_from_vec_clamps_missing_channels() {
+        let mut st = PlaybackState {
+            pos: 0,
+            src_channels: 3,
+            src: vec![0.1, 0.2, 0.3],
+        };
+        let sample = next_sample_mapped_from_vec(&mut st, 5, 4);
+        assert_eq!(sample, 0.3);
+        assert_eq!(st.pos, 3);
+    }
+
+    #[test]
+    fn next_sample_mapped_from_vec_returns_zero_when_empty() {
+        let mut st = PlaybackState {
+            pos: 0,
+            src_channels: 2,
+            src: Vec::new(),
+        };
+        let sample = next_sample_mapped_from_vec(&mut st, 2, 0);
+        assert_eq!(sample, 0.0);
+        assert_eq!(st.pos, 0);
+    }
+}

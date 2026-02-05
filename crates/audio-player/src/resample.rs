@@ -55,7 +55,7 @@ pub fn start_resampler(
     let src_rate = src_spec.rate;
     let channels = src_spec.channels.count();
 
-    let max_buffered_samples = calc_max_buffered_samples(dst_rate, channels, cfg.buffer_seconds);
+    let max_buffered_samples = max_buffered_samples_for_resample(dst_rate, channels, cfg.buffer_seconds);
     let dstq = Arc::new(SharedAudio::new(channels, max_buffered_samples));
 
     let f_ratio = dst_rate as f64 / src_rate as f64;
@@ -74,7 +74,7 @@ pub fn start_resampler(
         window,
     };
 
-    let chunk_in_frames = cfg.chunk_frames.max(1);
+    let chunk_in_frames = normalize_chunk_frames(cfg.chunk_frames);
 
     let dstq_thread = dstq.clone();
     thread::spawn(move || {
@@ -204,4 +204,34 @@ pub fn start_resampler(
     });
 
     Ok(dstq)
+}
+
+fn normalize_chunk_frames(chunk_frames: usize) -> usize {
+    chunk_frames.max(1)
+}
+
+fn max_buffered_samples_for_resample(
+    dst_rate: u32,
+    channels: usize,
+    buffer_seconds: f32,
+) -> usize {
+    calc_max_buffered_samples(dst_rate, channels, buffer_seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_chunk_frames_clamps_to_one() {
+        assert_eq!(normalize_chunk_frames(0), 1);
+        assert_eq!(normalize_chunk_frames(128), 128);
+    }
+
+    #[test]
+    fn max_buffered_samples_for_resample_matches_queue_calc() {
+        let expected = calc_max_buffered_samples(48_000, 2, 1.5);
+        let got = max_buffered_samples_for_resample(48_000, 2, 1.5);
+        assert_eq!(expected, got);
+    }
 }
