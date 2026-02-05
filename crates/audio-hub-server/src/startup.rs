@@ -53,7 +53,6 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let (cmd_tx, _cmd_rx) = unbounded();
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
-    let playback_state = Arc::new(crate::state::PlaybackState::new(status, queue));
     let bridge_online = Arc::new(AtomicBool::new(false));
     let bridges_state = Arc::new(Mutex::new(BridgeState {
         bridges,
@@ -72,6 +71,13 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         discovered_bridges.clone(),
         public_base_url,
     ));
+    let status_store = crate::status_store::StatusStore::new(status);
+    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone());
+    let playback_manager = crate::playback_manager::PlaybackManager::new(
+        bridge_state.player.clone(),
+        status_store,
+        queue_service,
+    );
     let local_enabled = cfg.local_outputs.unwrap_or(false);
     let local_id = cfg
         .local_id
@@ -101,21 +107,24 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             }
         }
     }
-    let local_device_selected = Arc::new(Mutex::new(local_device.clone()));
     let (local_cmd_tx, _local_cmd_rx) = unbounded();
     let local_state = Arc::new(LocalProviderState {
         enabled: local_enabled,
         id: local_id,
         name: local_name,
         player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
-        device_selected: local_device_selected,
         running: Arc::new(AtomicBool::new(false)),
     });
+    let device_selection = crate::state::DeviceSelectionState {
+        local: Arc::new(Mutex::new(local_device.clone())),
+        bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+    };
     let state = web::Data::new(AppState::new(
         library,
         bridge_state,
         local_state,
-        playback_state,
+        playback_manager,
+        device_selection,
     ));
     setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());

@@ -2,7 +2,6 @@ use actix_web::HttpResponse;
 
 use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
-use crate::playback_transport::{ChannelTransport, PlaybackTransport};
 use crate::queue_service::NextDispatchResult;
 use crate::state::AppState;
 
@@ -141,17 +140,17 @@ impl OutputController {
     ) -> Result<String, OutputControllerError> {
         match queue_mode {
             QueueMode::Keep => {
-                let mut queue = state.playback.queue.lock().unwrap();
+                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
                 if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                     queue.items.remove(pos);
                 }
             }
             QueueMode::Replace => {
-                let mut queue = state.playback.queue.lock().unwrap();
+                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
                 queue.items.clear();
             }
             QueueMode::Append => {
-                let mut queue = state.playback.queue.lock().unwrap();
+                let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
                 if !queue.items.iter().any(|p| p == &path) {
                     queue.items.push(path.clone());
                 }
@@ -163,7 +162,7 @@ impl OutputController {
             .await?;
         self.dispatch_play(state, path.clone(), None, false)?;
 
-        if let Ok(mut queue) = state.playback.queue.lock() {
+        if let Ok(mut queue) = state.playback_manager.queue_service().queue().lock() {
             if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                 queue.items.remove(pos);
             }
@@ -173,7 +172,7 @@ impl OutputController {
     }
 
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        state.queue_service.list(&state.library.read().unwrap())
+        state.playback_manager.queue_service().list(&state.library.read().unwrap())
     }
 
     pub(crate) fn queue_add_paths(
@@ -190,7 +189,7 @@ impl OutputController {
             };
             resolved.push(path);
         }
-        state.queue_service.add_paths(resolved)
+        state.playback_manager.queue_service().add_paths(resolved)
     }
 
     pub(crate) fn queue_remove_path(
@@ -200,17 +199,16 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        Ok(state.queue_service.remove_path(&path))
+        Ok(state.playback_manager.queue_service().remove_path(&path))
     }
 
     pub(crate) fn queue_clear(&self, state: &AppState) {
-        state.queue_service.clear();
+        state.playback_manager.queue_service().clear();
     }
 
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
-        match state.queue_service.dispatch_next(&transport, false) {
+        match state.playback_manager.queue_next() {
             NextDispatchResult::Dispatched => Ok(true),
             NextDispatchResult::Empty => Ok(false),
             NextDispatchResult::Failed => Err(OutputControllerError::PlayerOffline),
@@ -222,11 +220,10 @@ impl OutputController {
         state: &AppState,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
-        transport
+        state
+            .playback_manager
             .pause_toggle()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
-        state.playback.status.on_pause_toggle();
         Ok(())
     }
 
@@ -236,11 +233,10 @@ impl OutputController {
         ms: u64,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
-        transport
+        state
+            .playback_manager
             .seek(ms)
             .map_err(|_| OutputControllerError::PlayerOffline)?;
-        state.playback.status.mark_seek_in_flight();
         Ok(())
     }
 
@@ -256,16 +252,10 @@ impl OutputController {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let transport = ChannelTransport::new(state.bridge.player.lock().unwrap().cmd_tx.clone());
-        if transport
-            .play(path.clone(), ext_hint, seek_ms, start_paused)
-            .is_ok()
-        {
-            state.playback.status.on_play(path, start_paused);
-            Ok(())
-        } else {
-            Err(OutputControllerError::PlayerOffline)
-        }
+        state
+            .playback_manager
+            .play(path, ext_hint, seek_ms, start_paused)
+            .map_err(|_| OutputControllerError::PlayerOffline)
     }
 
     pub(crate) fn canonicalize_under_root(

@@ -50,8 +50,8 @@ impl BridgeProvider {
             addr,
             cmd_rx,
             cmd_tx,
-            state.playback.status.clone(),
-            state.playback.queue.clone(),
+            state.playback_manager.status().clone(),
+            state.playback_manager.queue_service().queue().clone(),
             state.bridge.bridge_online.clone(),
             state.bridge.bridges.clone(),
             state.bridge.public_base_url.clone(),
@@ -254,7 +254,7 @@ impl OutputProvider for BridgeProvider {
         };
 
         let resume_info = {
-            let status = state.playback.status.inner().lock().unwrap();
+                let status = state.playback_manager.status().inner().lock().unwrap();
             (status.now_playing.clone(), status.elapsed_ms, status.paused)
         };
 
@@ -283,13 +283,16 @@ impl OutputProvider for BridgeProvider {
 
         {
             let mut bridges = state.bridge.bridges.lock().unwrap();
-            bridges.active_bridge_id = Some(bridge_id);
+            bridges.active_bridge_id = Some(bridge_id.clone());
             bridges.active_output_id = Some(output_id.to_string());
             tracing::info!(
                 output_id = ?bridges.active_output_id,
                 bridge_id = ?bridges.active_bridge_id,
                 "output selected"
             );
+        }
+        if let Ok(mut sel) = state.device_selection.bridge.lock() {
+            sel.insert(bridge_id.clone(), device_id.clone());
         }
 
         Self::ensure_active_connected(state).await?;
@@ -337,7 +340,7 @@ impl OutputProvider for BridgeProvider {
         }
         Self::ensure_active_connected(state).await?;
 
-        let status = state.playback.status.inner().lock().unwrap();
+        let status = state.playback_manager.status().inner().lock().unwrap();
         let (title, artist, album, format, sample_rate, bitrate_kbps) =
             match status.now_playing.as_ref() {
                 Some(path) => {

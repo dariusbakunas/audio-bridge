@@ -8,8 +8,7 @@ use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
-use crate::queue_service::QueueService;
-use crate::status_store::StatusStore;
+use crate::playback_manager::PlaybackManager;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerStatus {
@@ -36,8 +35,8 @@ pub struct AppState {
     pub library: RwLock<LibraryIndex>,
     pub bridge: Arc<BridgeProviderState>,
     pub local: Arc<LocalProviderState>,
-    pub playback: Arc<PlaybackState>,
-    pub queue_service: QueueService,
+    pub playback_manager: PlaybackManager,
+    pub device_selection: DeviceSelectionState,
     pub output_controller: OutputController,
 }
 
@@ -46,15 +45,15 @@ impl AppState {
         library: LibraryIndex,
         bridge: Arc<BridgeProviderState>,
         local: Arc<LocalProviderState>,
-        playback: Arc<PlaybackState>,
+        playback_manager: PlaybackManager,
+        device_selection: DeviceSelectionState,
     ) -> Self {
-        let queue_service = QueueService::new(playback.queue.clone(), playback.status.clone());
         Self {
             library: RwLock::new(library),
             bridge,
             local,
-            playback,
-            queue_service,
+            playback_manager,
+            device_selection,
             output_controller: OutputController::default(),
         }
     }
@@ -104,25 +103,17 @@ impl BridgeProviderState {
     }
 }
 
-pub struct PlaybackState {
-    pub status: StatusStore,
-    pub queue: Arc<Mutex<QueueState>>,
-}
-
-impl PlaybackState {
-    pub fn new(status: Arc<Mutex<PlayerStatus>>, queue: Arc<Mutex<QueueState>>) -> Self {
-        Self {
-            status: StatusStore::new(status),
-            queue,
-        }
-    }
-}
 
 pub struct LocalProviderState {
     pub enabled: bool,
     pub id: String,
     pub name: String,
     pub player: Arc<Mutex<BridgePlayer>>,
-    pub device_selected: Arc<Mutex<Option<String>>>,
     pub running: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+pub struct DeviceSelectionState {
+    pub local: Arc<Mutex<Option<String>>>,
+    pub bridge: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }

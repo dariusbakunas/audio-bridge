@@ -9,6 +9,7 @@ mod openapi;
 mod output_controller;
 mod output_providers;
 mod playback_transport;
+mod playback_manager;
 mod queue_service;
 mod local_player;
 mod startup;

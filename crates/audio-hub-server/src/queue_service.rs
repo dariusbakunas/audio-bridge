@@ -35,6 +35,10 @@ impl QueueService {
         Self { queue, status }
     }
 
+    pub(crate) fn queue(&self) -> &Arc<Mutex<QueueState>> {
+        &self.queue
+    }
+
     pub(crate) fn list(&self, library: &crate::library::LibraryIndex) -> QueueResponse {
         let queue = self.queue.lock().unwrap();
         let items = queue
