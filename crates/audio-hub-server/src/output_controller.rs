@@ -407,6 +407,14 @@ mod tests {
         ) -> Result<StatusResponse, ProviderError> {
             Err(ProviderError::Unavailable("offline".to_string()))
         }
+
+        async fn stop_output(
+            &self,
+            _state: &AppState,
+            _output_id: &str,
+        ) -> Result<(), ProviderError> {
+            Ok(())
+        }
     }
 
     fn make_state(active_output_id: Option<String>) -> AppState {
