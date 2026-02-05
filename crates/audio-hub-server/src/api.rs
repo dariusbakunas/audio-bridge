@@ -304,6 +304,26 @@ pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddReque
 
 #[utoipa::path(
     post,
+    path = "/queue/next/add",
+    request_body = QueueAddRequest,
+    responses(
+        (status = 200, description = "Queue updated")
+    )
+)]
+#[post("/queue/next/add")]
+/// Insert paths at the front of the queue.
+pub async fn queue_add_next(
+    state: web::Data<AppState>,
+    body: web::Json<QueueAddRequest>,
+) -> impl Responder {
+    let added = state
+        .output_controller
+        .queue_add_next_paths(&state, body.paths.clone());
+    HttpResponse::Ok().body(format!("added {added}"))
+}
+
+#[utoipa::path(
+    post,
     path = "/queue/remove",
     request_body = QueueRemoveRequest,
     responses(

@@ -329,6 +329,23 @@ pub(crate) fn queue_add(server: &str, paths: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn queue_add_next(server: &str, paths: &[PathBuf]) -> Result<()> {
+    let url = format!("{}/queue/next/add", server.trim_end_matches('/'));
+    let body = QueueAddRequest {
+        paths: paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+    };
+    let resp = ureq::post(&url)
+        .send_json(body)
+        .context("request /queue/next/add")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("queue add-next failed with {}", resp.status()));
+    }
+    Ok(())
+}
+
 pub(crate) fn queue_remove(server: &str, path: &Path) -> Result<()> {
     let url = format!("{}/queue/remove", server.trim_end_matches('/'));
     let body = QueueRemoveRequest {

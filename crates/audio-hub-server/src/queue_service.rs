@@ -110,6 +110,20 @@ impl QueueService {
         added
     }
 
+    /// Insert paths at the front of the queue, preserving order and skipping duplicates.
+    pub(crate) fn add_next_paths(&self, paths: Vec<PathBuf>) -> usize {
+        let mut added = 0usize;
+        let mut queue = self.queue.lock().unwrap();
+        for path in paths {
+            if queue.items.iter().any(|p| p == &path) {
+                continue;
+            }
+            queue.items.insert(added, path);
+            added += 1;
+        }
+        added
+    }
+
     /// Remove a single path from the queue.
     pub(crate) fn remove_path(&self, path: &PathBuf) -> bool {
         let mut queue = self.queue.lock().unwrap();
@@ -298,6 +312,21 @@ mod tests {
         assert_eq!(plays[0].0, path);
         assert_eq!(plays[0].1, "flac");
         assert!(status.inner().lock().unwrap().auto_advance_in_flight);
+    }
+
+    #[test]
+    fn add_next_paths_inserts_at_front() {
+        let service = make_service();
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        let c = PathBuf::from("/music/c.flac");
+        service.add_paths(vec![a.clone(), b.clone()]);
+
+        let added = service.add_next_paths(vec![c.clone()]);
+
+        assert_eq!(added, 1);
+        let queue = service.queue.lock().unwrap();
+        assert_eq!(queue.items, vec![c, a, b]);
     }
 
     #[test]

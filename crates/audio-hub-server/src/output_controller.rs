@@ -205,6 +205,24 @@ impl OutputController {
         state.playback_manager.queue_service().add_paths(resolved)
     }
 
+    /// Insert paths to the front of the queue and return the number added.
+    pub(crate) fn queue_add_next_paths(
+        &self,
+        state: &AppState,
+        paths: Vec<String>,
+    ) -> usize {
+        let mut resolved = Vec::new();
+        for path_str in paths {
+            let path = std::path::PathBuf::from(path_str);
+            let path = match self.canonicalize_under_root(state, &path) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            resolved.push(path);
+        }
+        state.playback_manager.queue_service().add_next_paths(resolved)
+    }
+
     /// Remove a path from the queue.
     pub(crate) fn queue_remove_path(
         &self,

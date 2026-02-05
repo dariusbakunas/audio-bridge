@@ -19,6 +19,7 @@ use crate::models;
         api::stream_track,
         api::queue_list,
         api::queue_add,
+        api::queue_add_next,
         api::queue_remove,
         api::queue_clear,
         api::queue_next,

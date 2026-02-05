@@ -152,6 +152,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::stream_track)
             .service(api::queue_list)
             .service(api::queue_add)
+            .service(api::queue_add_next)
             .service(api::queue_remove)
             .service(api::queue_clear)
             .service(api::queue_next)

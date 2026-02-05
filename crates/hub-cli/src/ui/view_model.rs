@@ -66,7 +66,7 @@ impl UiView {
         let outputs_empty = app.outputs.is_empty();
         let outputs_error = app.outputs_error.clone();
         let status_line = format!("status: {}", app.status);
-        let keys_line = "keys: ↑/↓ select | Enter play/enter | Space pause | s stop | n next | c clear | ←/→ seek | o outputs | l logs | i info | h help | q quit".to_string();
+        let keys_line = "keys: ↑/↓ select | Enter play/enter | Space pause | s stop | n next | m play-next | c clear | ←/→ seek | o outputs | l logs | i info | h help | q quit".to_string();
         let help_lines = build_help_lines();
         let (logs_title, logs_empty) = build_logs_view(app);
         let active_modal = build_active_modal(
@@ -363,6 +363,7 @@ fn build_help_lines() -> Vec<String> {
         "".to_string(),
         "Queue".to_string(),
         "  k            queue selected track".to_string(),
+        "  m            play next (insert at front)".to_string(),
         "  K            queue all tracks in dir".to_string(),
         "  c            clear queue".to_string(),
         "".to_string(),
