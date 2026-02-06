@@ -156,6 +156,12 @@ export default function App() {
   );
   const showPlayIcon = !status?.now_playing || status?.paused;
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
+  const uiBuildId = useMemo(() => {
+    if (__BUILD_MODE__ === "development") {
+      return "dev";
+    }
+    return `v${__APP_VERSION__}+${__GIT_SHA__}`;
+  }, []);
   const playButtonTitle = !activeOutputId
     ? "Select an output to control playback."
     : !status?.now_playing && !selectedTrackPath
@@ -559,6 +565,9 @@ export default function App() {
 
       <div className="player-bar">
         <div className="player-left">
+          {status?.title || status?.now_playing ? (
+            <div className="album-art">Artwork</div>
+          ) : null}
           <div>
             <div className="track-title">
               {status?.title ?? status?.now_playing ?? "Nothing playing"}
@@ -658,6 +667,7 @@ export default function App() {
           <button className="btn ghost small" onClick={() => setOutputsOpen(true)}>
             Select output
           </button>
+          <div className="muted small build-footer">UI build: {uiBuildId}</div>
         </div>
       </div>
 

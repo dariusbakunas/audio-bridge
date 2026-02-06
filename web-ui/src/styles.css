@@ -524,6 +524,10 @@ p {
   text-align: right;
 }
 
+.build-footer {
+  font-family: "IBM Plex Mono", monospace;
+}
+
 .modal {
   position: fixed;
   inset: 0;
