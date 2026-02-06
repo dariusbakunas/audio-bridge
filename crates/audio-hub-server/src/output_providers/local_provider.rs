@@ -472,8 +472,12 @@ mod tests {
             local: Arc::new(Mutex::new(None)),
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
+        let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
         AppState::new(
             library,
+            metadata_db,
+            None,
+            crate::state::MetadataWake::new(),
             bridge_state,
             local_state,
             playback_manager,

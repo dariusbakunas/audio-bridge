@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
+use symphonia::core::meta::{MetadataOptions, StandardVisualKey};
 use symphonia::core::probe::Hint;
 
 use crate::models::LibraryEntry;
@@ -46,10 +46,48 @@ impl LibraryIndex {
         }
         None
     }
+
+    pub fn update_track_meta(&mut self, path: &Path, meta: &TrackMeta) -> bool {
+        let dir = match path.parent() {
+            Some(dir) => dir,
+            None => return false,
+        };
+        let Some(entries) = self.entries_by_dir.get_mut(dir) else {
+            return false;
+        };
+        let path_str = path.to_string_lossy();
+        let ext_hint = path
+            .extension()
+            .and_then(OsStr::to_str)
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        for entry in entries.iter_mut() {
+            if let LibraryEntry::Track { path, ext_hint: hint, duration_ms, sample_rate, album, artist, format, .. } = entry {
+                if path == path_str.as_ref() {
+                    *duration_ms = meta.duration_ms;
+                    *sample_rate = meta.sample_rate;
+                    *album = meta.album.clone();
+                    *artist = meta.artist.clone();
+                    *format = meta.format.clone().unwrap_or_else(|| ext_hint.clone());
+                    *hint = meta.format.clone().unwrap_or_else(|| ext_hint.clone());
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Scan the media root and build a new library index.
 pub fn scan_library(root: &Path) -> Result<LibraryIndex> {
+    scan_library_with_meta(root, |_path, _file_name, _ext, _meta, _fs_meta| {})
+}
+
+/// Scan the media root and build a new library index, invoking `on_track` per file.
+pub fn scan_library_with_meta<F>(root: &Path, mut on_track: F) -> Result<LibraryIndex>
+where
+    F: FnMut(&Path, &str, &str, &TrackMeta, &std::fs::Metadata),
+{
     let root = root
         .canonicalize()
         .with_context(|| format!("canonicalize root {:?}", root))?;
@@ -60,13 +98,21 @@ pub fn scan_library(root: &Path) -> Result<LibraryIndex> {
     tracing::info!(root = %root.display(), "scanning library");
 
     let mut entries_by_dir = std::collections::HashMap::new();
-    scan_dir(&root, &root, &mut entries_by_dir)?;
+    scan_dir(&root, &root, &mut entries_by_dir, &mut on_track)?;
 
     tracing::info!(root = %root.display(), dirs = entries_by_dir.len(), "library scan complete");
     Ok(LibraryIndex { root, entries_by_dir })
 }
 
-fn scan_dir(root: &Path, dir: &Path, entries_by_dir: &mut std::collections::HashMap<PathBuf, Vec<LibraryEntry>>) -> Result<()> {
+fn scan_dir<F>(
+    root: &Path,
+    dir: &Path,
+    entries_by_dir: &mut std::collections::HashMap<PathBuf, Vec<LibraryEntry>>,
+    on_track: &mut F,
+) -> Result<()>
+where
+    F: FnMut(&Path, &str, &str, &TrackMeta, &std::fs::Metadata),
+{
     let mut dirs = Vec::new();
     let mut tracks = Vec::new();
 
@@ -103,6 +149,11 @@ fn scan_dir(root: &Path, dir: &Path, entries_by_dir: &mut std::collections::Hash
             .to_string();
 
         let meta = probe_track_meta(&path, &ext);
+        let fs_meta = match fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+        on_track(&path, &file_name, &ext, &meta, &fs_meta);
         let entry = LibraryEntry::Track {
             path: path.to_string_lossy().to_string(),
             file_name: file_name.clone(),
@@ -133,7 +184,7 @@ fn scan_dir(root: &Path, dir: &Path, entries_by_dir: &mut std::collections::Hash
                 .canonicalize()
                 .with_context(|| format!("canonicalize {:?}", path))?;
             if canon.starts_with(root) {
-                scan_dir(root, &canon, entries_by_dir)?;
+                scan_dir(root, &canon, entries_by_dir, on_track)?;
             }
         }
     }
@@ -149,13 +200,26 @@ fn is_supported_extension(ext: &str) -> bool {
 }
 
 #[derive(Clone, Debug, Default)]
-struct TrackMeta {
-    duration_ms: Option<u64>,
-    sample_rate: Option<u32>,
-    album: Option<String>,
-    artist: Option<String>,
-    format: Option<String>,
+pub struct TrackMeta {
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub album: Option<String>,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub year: Option<i32>,
+    pub format: Option<String>,
+    pub cover_art: Option<CoverArt>,
 }
+
+#[derive(Clone, Debug)]
+pub struct CoverArt {
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
+const MAX_COVER_ART_BYTES: usize = 5_000_000;
 
 fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
     let mut meta = TrackMeta::default();
@@ -208,12 +272,77 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
                         meta.artist = Some(tag.value.to_string());
                     }
                 }
+                Some(symphonia::core::meta::StandardTagKey::TrackTitle) => {
+                    if meta.title.is_none() {
+                        meta.title = Some(tag.value.to_string());
+                    }
+                }
+                Some(symphonia::core::meta::StandardTagKey::TrackNumber) => {
+                    if meta.track_number.is_none() {
+                        meta.track_number = parse_u32_tag(&tag.value.to_string());
+                    }
+                }
+                Some(symphonia::core::meta::StandardTagKey::DiscNumber) => {
+                    if meta.disc_number.is_none() {
+                        meta.disc_number = parse_u32_tag(&tag.value.to_string());
+                    }
+                }
+                Some(symphonia::core::meta::StandardTagKey::Date) => {
+                    if meta.year.is_none() {
+                        meta.year = parse_i32_tag(&tag.value.to_string());
+                    }
+                }
                 _ => {}
             }
+        }
+        if meta.cover_art.is_none() {
+            meta.cover_art = select_cover_art(rev);
         }
     }
 
     meta
+}
+
+pub fn probe_track(path: &Path) -> Result<TrackMeta> {
+    let ext = path
+        .extension()
+        .and_then(OsStr::to_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !is_supported_extension(&ext) {
+        return Err(anyhow::anyhow!("unsupported extension"));
+    }
+    Ok(probe_track_meta(path, &ext))
+}
+
+fn parse_u32_tag(raw: &str) -> Option<u32> {
+    raw.split('/')
+        .next()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+fn parse_i32_tag(raw: &str) -> Option<i32> {
+    raw.split('-')
+        .next()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+}
+
+fn select_cover_art(rev: &symphonia::core::meta::MetadataRevision) -> Option<CoverArt> {
+    let mut best = rev
+        .visuals()
+        .iter()
+        .find(|visual| visual.usage == Some(StandardVisualKey::FrontCover));
+    if best.is_none() {
+        best = rev.visuals().first();
+    }
+    let visual = best?;
+    if visual.data.len() > MAX_COVER_ART_BYTES {
+        return None;
+    }
+    Some(CoverArt {
+        mime_type: visual.media_type.clone(),
+        data: visual.data.to_vec(),
+    })
 }
 
 #[cfg(test)]

@@ -158,6 +158,8 @@ Use a TOML config to define the media path, outputs, and default output:
 # active_output: output id to use by default (bridge:{bridge_id}:{device_id})
 # local_outputs: enable local outputs on the hub host
 # local_id/name/device: optional overrides for local outputs
+# musicbrainz: optional metadata enrichment settings (requires user_agent)
+# note: enrichment runs in a background job and only fills missing MBIDs
 
 bind = "0.0.0.0:8080"
 public_base_url = "http://192.168.1.10:8080"
@@ -167,6 +169,12 @@ active_output = "bridge:living-room:Built-in Output"
 # local_id = "local"
 # local_name = "Local Host"
 # local_device = ""
+
+# [musicbrainz]
+# enabled = true
+# user_agent = "audio-hub/0.1 (you@example.com)"
+# base_url = "https://musicbrainz.org/ws/2"
+# rate_limit_ms = 1000
 
 [[bridges]]
 id = "living-room"

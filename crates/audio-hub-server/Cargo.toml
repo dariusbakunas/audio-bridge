@@ -23,6 +23,9 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
 toml = "0.9.11+spec-1.1.0"
 ureq = { version = "3.1.4", features = ["json"] }
 mdns-sd = "0.17.2"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.25.0"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 tokio = { version = "1.43.0", features = ["fs", "io-util", "macros", "time"] }
 tokio-util = "0.7.12"
 urlencoding = "2.1.3"

@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Condvar};
 use std::sync::atomic::AtomicBool;
 
 use crossbeam_channel::Sender;
@@ -14,6 +15,37 @@ use crate::events::EventBus;
 use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
+use crate::metadata_db::MetadataDb;
+use crate::musicbrainz::MusicBrainzClient;
+
+#[derive(Clone)]
+pub struct MetadataWake {
+    inner: Arc<(Mutex<u64>, Condvar)>,
+}
+
+impl MetadataWake {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new((Mutex::new(0), Condvar::new())),
+        }
+    }
+
+    pub fn notify(&self) {
+        let (lock, cvar) = &*self.inner;
+        let mut seq = lock.lock().expect("metadata wake lock");
+        *seq = seq.wrapping_add(1);
+        cvar.notify_all();
+    }
+
+    pub fn wait(&self, last_seen: &mut u64) {
+        let (lock, cvar) = &*self.inner;
+        let mut seq = lock.lock().expect("metadata wake lock");
+        while *seq == *last_seen {
+            seq = cvar.wait(seq).expect("metadata wake wait");
+        }
+        *last_seen = *seq;
+    }
+}
 
 /// Snapshot of current playback state used for API responses and UI.
 #[derive(Debug, Clone, Default)]
@@ -66,6 +98,12 @@ pub struct PlayerStatus {
 pub struct AppState {
     /// Library index and root.
     pub library: RwLock<LibraryIndex>,
+    /// Metadata database.
+    pub metadata_db: MetadataDb,
+    /// Optional MusicBrainz client for enrichment.
+    pub musicbrainz: Option<Arc<MusicBrainzClient>>,
+    /// Wake signal for metadata background jobs.
+    pub metadata_wake: MetadataWake,
     /// Bridge provider state (active bridge, discovery, transport).
     pub bridge: Arc<BridgeProviderState>,
     /// Local provider state (optional local playback).
@@ -83,6 +121,9 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         library: LibraryIndex,
+        metadata_db: MetadataDb,
+        musicbrainz: Option<Arc<MusicBrainzClient>>,
+        metadata_wake: MetadataWake,
         bridge: Arc<BridgeProviderState>,
         local: Arc<LocalProviderState>,
         playback_manager: PlaybackManager,
@@ -91,6 +132,9 @@ impl AppState {
     ) -> Self {
         Self {
             library: RwLock::new(library),
+            metadata_db,
+            musicbrainz,
+            metadata_wake,
             bridge,
             local,
             playback_manager,

@@ -22,8 +22,12 @@ use crate::api;
 use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_manager::parse_output_id;
 use crate::config;
+use crate::cover_art::{apply_cover_art, spawn_caa_loop};
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
-use crate::library::scan_library;
+use crate::library::scan_library_with_meta;
+use crate::metadata_db::MetadataDb;
+use crate::musicbrainz::{MusicBrainzClient, spawn_enrichment_loop};
+use crate::state::MetadataWake;
 use crate::openapi;
 use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderState, PlayerStatus, QueueState};
 
@@ -45,7 +49,45 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     } else {
         tracing::info!("web ui static assets disabled (web-ui/dist not found)");
     }
-    let library = scan_library(&media_dir)?;
+    let metadata_db = MetadataDb::new(&media_dir)?;
+    let musicbrainz = match cfg.musicbrainz.as_ref() {
+        Some(cfg) => MusicBrainzClient::new(cfg)?,
+        None => None,
+    }
+    .map(Arc::new);
+    if let Some(client) = musicbrainz.as_ref() {
+        tracing::info!(user_agent = client.user_agent(), "musicbrainz enrichment enabled");
+    } else {
+        tracing::info!("musicbrainz enrichment disabled");
+    }
+    let library = scan_library_with_meta(&media_dir, |path, file_name, _ext, meta, fs_meta| {
+        let record = crate::metadata_db::TrackRecord {
+            path: path.to_string_lossy().to_string(),
+            file_name: file_name.to_string(),
+            title: meta.title.clone(),
+            artist: meta.artist.clone(),
+            album: meta.album.clone(),
+            track_number: meta.track_number,
+            disc_number: meta.disc_number,
+            year: meta.year,
+            duration_ms: meta.duration_ms,
+            sample_rate: meta.sample_rate,
+            format: meta.format.clone(),
+            mtime_ms: fs_meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+            size_bytes: fs_meta.len() as i64,
+        };
+        if let Err(err) = metadata_db.upsert_track(&record) {
+            tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
+        }
+        if let Err(err) = apply_cover_art(&metadata_db, &media_dir, path, meta, &record) {
+            tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
+        }
+    })?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
         count = bridges.len(),
@@ -134,14 +176,33 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         local: Arc::new(Mutex::new(local_device.clone())),
         bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
+    let metadata_wake = MetadataWake::new();
     let state = web::Data::new(AppState::new(
         library,
+        metadata_db,
+        musicbrainz,
+        metadata_wake.clone(),
         bridge_state,
         local_state,
         playback_manager,
         device_selection,
         events,
     ));
+    if let Some(client) = state.musicbrainz.as_ref() {
+        spawn_enrichment_loop(
+            state.metadata_db.clone(),
+            client.clone(),
+            state.events.clone(),
+            metadata_wake.clone(),
+        );
+        spawn_caa_loop(
+            state.metadata_db.clone(),
+            state.library.read().unwrap().root().to_path_buf(),
+            client.user_agent().to_string(),
+            state.events.clone(),
+            metadata_wake.clone(),
+        );
+    }
     setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
@@ -163,6 +224,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             )
             .service(api::list_library)
             .service(api::rescan_library)
+            .service(api::rescan_track)
             .service(api::play_track)
             .service(api::pause_toggle)
             .service(api::stop)
@@ -175,12 +237,19 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::queue_clear)
             .service(api::queue_next)
             .service(api::queue_stream)
+            .service(api::artists_list)
+            .service(api::albums_list)
+            .service(api::tracks_list)
+            .service(api::art_for_track)
+            .service(api::track_cover)
+            .service(api::album_cover)
             .service(api::status_for_output)
             .service(api::status_stream)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::outputs_list)
             .service(api::outputs_stream)
+            .service(api::metadata_stream)
             .service(api::outputs_select);
 
         if let Some(dist) = web_ui_dist.clone() {

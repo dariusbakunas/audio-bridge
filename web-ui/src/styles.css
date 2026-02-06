@@ -43,6 +43,40 @@ body {
   z-index: 1;
 }
 
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.top-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.hidden {
+  display: none;
+}
+
+.settings-screen {
+  display: none;
+  position: relative;
+  z-index: 1;
+  margin-top: 20px;
+}
+
+.settings-screen.active {
+  display: block;
+}
+
+.settings-mode .grid,
+.settings-mode .player-bar,
+.settings-mode .hero-left {
+  display: none;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -526,6 +560,57 @@ p {
 
 .build-footer {
   font-family: "IBM Plex Mono", monospace;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title {
+  font-weight: 600;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-title {
+  font-weight: 600;
 }
 
 .modal {

@@ -30,6 +30,8 @@ pub struct ServerConfig {
     pub local_name: Option<String>,
     /// Optional local output device override.
     pub local_device: Option<String>,
+    /// MusicBrainz enrichment settings.
+    pub musicbrainz: Option<MusicBrainzConfig>,
 }
 
 /// Bridge config from TOML.
@@ -41,6 +43,19 @@ pub struct BridgeConfig {
     pub name: Option<String>,
     /// Bridge HTTP address (host:port).
     pub http_addr: String,
+}
+
+/// MusicBrainz configuration.
+#[derive(Debug, Deserialize)]
+pub struct MusicBrainzConfig {
+    /// Enable MusicBrainz lookups during scans.
+    pub enabled: Option<bool>,
+    /// User-Agent string required by MusicBrainz (include contact info).
+    pub user_agent: Option<String>,
+    /// Optional base URL override (defaults to https://musicbrainz.org/ws/2).
+    pub base_url: Option<String>,
+    /// Minimum delay between requests in milliseconds (default: 1000).
+    pub rate_limit_ms: Option<u64>,
 }
 
 /// Resolved bridge config with parsed socket address.
@@ -139,6 +154,7 @@ mod tests {
             local_id: None,
             local_name: None,
             local_device: None,
+            musicbrainz: None,
         };
         let bind: std::net::SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let url = public_base_url_from_config(&cfg, bind).unwrap();
@@ -157,6 +173,7 @@ mod tests {
             local_id: None,
             local_name: None,
             local_device: None,
+            musicbrainz: None,
         };
         let bind: std::net::SocketAddr = "0.0.0.0:8080".parse().unwrap();
         assert!(public_base_url_from_config(&cfg, bind).is_err());
@@ -174,6 +191,7 @@ mod tests {
             local_id: None,
             local_name: None,
             local_device: None,
+            musicbrainz: None,
         };
         let addr = bind_from_config(&cfg).unwrap().unwrap();
         assert_eq!(addr, "127.0.0.1:9000".parse().unwrap());

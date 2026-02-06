@@ -1,0 +1,812 @@
+//! SQLite metadata store for artists/albums/tracks.
+//!
+//! Provides pooled connections and schema bootstrap.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::musicbrainz::MusicBrainzMatch;
+const SCHEMA_VERSION: i32 = 3;
+
+#[derive(Clone)]
+pub struct MetadataDb {
+    pool: Pool<SqliteConnectionManager>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TrackRecord {
+    pub path: String,
+    pub file_name: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub year: Option<i32>,
+    pub duration_ms: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub format: Option<String>,
+    pub mtime_ms: i64,
+    pub size_bytes: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct ArtistSummary {
+    pub id: i64,
+    pub name: String,
+    pub sort_name: Option<String>,
+    pub mbid: Option<String>,
+    pub album_count: i64,
+    pub track_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct AlbumSummary {
+    pub id: i64,
+    pub title: String,
+    pub artist: Option<String>,
+    pub year: Option<i32>,
+    pub mbid: Option<String>,
+    pub track_count: i64,
+    pub cover_art_path: Option<String>,
+    pub cover_art_url: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct TrackSummary {
+    pub id: i64,
+    pub path: String,
+    pub file_name: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub duration_ms: Option<u64>,
+    pub format: Option<String>,
+    pub mbid: Option<String>,
+    pub cover_art_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MusicBrainzCandidate {
+    pub path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub no_match_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CoverArtCandidate {
+    pub album_id: i64,
+    pub mbid: String,
+    pub fail_count: i64,
+}
+
+fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
+    Ok(ArtistSummary {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        sort_name: row.get(2)?,
+        mbid: row.get(3)?,
+        album_count: row.get(4)?,
+        track_count: row.get(5)?,
+    })
+}
+
+impl MetadataDb {
+    pub fn new(media_root: &Path) -> Result<Self> {
+        let db_path = db_path_for(media_root);
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create metadata dir {:?}", parent))?;
+        }
+
+        let manager = SqliteConnectionManager::file(&db_path)
+            .with_init(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+                Ok(())
+            });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .context("create metadata db pool")?;
+
+        {
+            let conn = pool.get().context("open metadata db")?;
+            init_schema(&conn)?;
+        }
+
+        Ok(Self { pool })
+    }
+
+    pub fn pool(&self) -> &Pool<SqliteConnectionManager> {
+        &self.pool
+    }
+
+    pub fn upsert_track(&self, record: &TrackRecord) -> Result<()> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+
+        let existing: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT mtime_ms, size_bytes FROM tracks WHERE path = ?1",
+                params![record.path],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .context("lookup existing track")?;
+        if let Some((mtime_ms, size_bytes)) = existing {
+            if mtime_ms == record.mtime_ms && size_bytes == record.size_bytes {
+                return tx.commit().context("commit metadata tx");
+            }
+        }
+
+        let artist_id = if let Some(name) = record.artist.as_deref() {
+            Some(upsert_artist(&tx, name)?)
+        } else {
+            None
+        };
+
+        let album_id = if let Some(title) = record.album.as_deref() {
+            Some(upsert_album(&tx, title, artist_id, record.year)?)
+        } else {
+            None
+        };
+
+        tx.execute(
+            r#"
+            INSERT INTO tracks (
+                path, file_name, title, artist_id, album_id, track_number, disc_number,
+                duration_ms, sample_rate, format, mtime_ms, size_bytes, mb_no_match_key
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(path) DO UPDATE SET
+                file_name = excluded.file_name,
+                title = excluded.title,
+                artist_id = excluded.artist_id,
+                album_id = excluded.album_id,
+                track_number = excluded.track_number,
+                disc_number = excluded.disc_number,
+                duration_ms = excluded.duration_ms,
+                sample_rate = excluded.sample_rate,
+                format = excluded.format,
+                mtime_ms = excluded.mtime_ms,
+                size_bytes = excluded.size_bytes,
+                mb_no_match_key = NULL
+            "#,
+            params![
+                record.path,
+                record.file_name,
+                record.title,
+                artist_id,
+                album_id,
+                record.track_number,
+                record.disc_number,
+                record.duration_ms.map(|v| v as i64),
+                record.sample_rate.map(|v| v as i64),
+                record.format,
+                record.mtime_ms,
+                record.size_bytes,
+                Option::<String>::None
+            ],
+        )
+        .context("upsert track")?;
+
+        tx.commit().context("commit metadata tx")?;
+        Ok(())
+    }
+
+    pub fn needs_musicbrainz(&self, path: &str) -> Result<bool> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
+            .query_row(
+                r#"
+                SELECT t.mbid, ar.mbid, al.mbid
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.path = ?1
+                "#,
+                params![path],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .context("check musicbrainz metadata")?;
+        let Some((track_mbid, artist_mbid, album_mbid)) = row else {
+            return Ok(true);
+        };
+        Ok(is_blank(&track_mbid) || is_blank(&artist_mbid) || is_blank(&album_mbid))
+    }
+
+    pub fn apply_musicbrainz(
+        &self,
+        record: &TrackRecord,
+        mb: &MusicBrainzMatch,
+    ) -> Result<()> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+
+        let artist_id = if let Some(name) = record.artist.as_deref() {
+            find_artist_id(&tx, name)?
+        } else {
+            None
+        };
+        let album_id = if let Some(title) = record.album.as_deref() {
+            find_album_id(&tx, title, artist_id)?
+        } else {
+            None
+        };
+
+        if let (Some(artist_id), Some(artist_mbid)) = (artist_id, mb.artist_mbid.as_deref()) {
+            tx.execute(
+                "UPDATE artists SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                params![artist_mbid, artist_id],
+            )
+            .context("update artist mbid")?;
+            if let Some(sort_name) = mb.artist_sort_name.as_deref() {
+                tx.execute(
+                    "UPDATE artists SET sort_name = ?1 WHERE id = ?2 AND sort_name IS NULL",
+                    params![sort_name, artist_id],
+                )
+                .context("update artist sort name")?;
+            }
+        }
+
+        if let (Some(album_id), Some(album_mbid)) = (album_id, mb.album_mbid.as_deref()) {
+            tx.execute(
+                "UPDATE albums SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                params![album_mbid, album_id],
+            )
+            .context("update album mbid")?;
+            if let Some(year) = mb.release_year {
+                tx.execute(
+                    "UPDATE albums SET year = ?1 WHERE id = ?2 AND year IS NULL",
+                    params![year, album_id],
+                )
+                .context("update album year")?;
+            }
+        }
+
+        if let Some(recording_mbid) = mb.recording_mbid.as_deref() {
+            tx.execute(
+                "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2 AND (mbid IS NULL OR mbid = '')",
+                params![recording_mbid, record.path],
+            )
+            .context("update track mbid")?;
+        }
+
+        tx.commit().context("commit metadata tx")?;
+        Ok(())
+    }
+
+    pub fn list_musicbrainz_candidates(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<MusicBrainzCandidate>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT t.path, t.title, ar.name, al.title, t.mb_no_match_key
+            FROM tracks t
+            LEFT JOIN artists ar ON ar.id = t.artist_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            WHERE t.title IS NOT NULL
+              AND ar.name IS NOT NULL
+              AND (
+                t.mbid IS NULL OR t.mbid = ''
+                OR ar.mbid IS NULL OR ar.mbid = ''
+                OR al.mbid IS NULL OR al.mbid = ''
+              )
+            ORDER BY t.path
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(MusicBrainzCandidate {
+                path: row.get(0)?,
+                title: row.get(1)?,
+                artist: row.get(2)?,
+                album: row.get(3)?,
+                no_match_key: row.get(4)?,
+            })
+        })?;
+
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn album_cover_path(
+        &self,
+        album: &str,
+        artist: Option<&str>,
+    ) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let artist_id = if let Some(artist) = artist {
+            find_artist_id(&conn, artist)?
+        } else {
+            None
+        };
+        let album_id = find_album_id(&conn, album, artist_id)?;
+        let Some(album_id) = album_id else {
+            return Ok(None);
+        };
+        let cover: Option<String> = conn
+            .query_row(
+                "SELECT cover_art_path FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch album cover path")?;
+        Ok(cover.filter(|value| !value.trim().is_empty()))
+    }
+
+    pub fn set_album_cover_if_empty(
+        &self,
+        album: &str,
+        artist: Option<&str>,
+        cover_path: &str,
+    ) -> Result<bool> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+        let artist_id = if let Some(artist) = artist {
+            find_artist_id(&tx, artist)?
+        } else {
+            None
+        };
+        let album_id = find_album_id(&tx, album, artist_id)?;
+        let Some(album_id) = album_id else {
+            return Ok(false);
+        };
+        let updated = tx.execute(
+            "UPDATE albums SET cover_art_path = ?1 WHERE id = ?2 AND (cover_art_path IS NULL OR cover_art_path = '')",
+            params![cover_path, album_id],
+        )?;
+        tx.commit().context("commit metadata tx")?;
+        Ok(updated > 0)
+    }
+
+    pub fn cover_path_for_track(&self, path: &str) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let cover: Option<String> = conn
+            .query_row(
+                r#"
+                SELECT al.cover_art_path
+                FROM tracks t
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.path = ?1
+                "#,
+                params![path],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch cover path for track")?;
+        Ok(cover.filter(|value| !value.trim().is_empty()))
+    }
+
+    pub fn cover_path_for_track_id(&self, track_id: i64) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let cover: Option<String> = conn
+            .query_row(
+                r#"
+                SELECT al.cover_art_path
+                FROM tracks t
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.id = ?1
+                "#,
+                params![track_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch cover path for track id")?;
+        Ok(cover.filter(|value| !value.trim().is_empty()))
+    }
+
+    pub fn cover_path_for_album_id(&self, album_id: i64) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let cover: Option<String> = conn
+            .query_row(
+                "SELECT cover_art_path FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch cover path for album")?;
+        Ok(cover.filter(|value| !value.trim().is_empty()))
+    }
+
+    pub fn set_album_cover_by_id_if_empty(
+        &self,
+        album_id: i64,
+        cover_path: &str,
+    ) -> Result<bool> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+        let updated = tx.execute(
+            "UPDATE albums SET cover_art_path = ?1, caa_fail_count = NULL, caa_last_error = NULL WHERE id = ?2 AND (cover_art_path IS NULL OR cover_art_path = '')",
+            params![cover_path, album_id],
+        )?;
+        tx.commit().context("commit metadata tx")?;
+        Ok(updated > 0)
+    }
+
+    pub fn list_cover_art_candidates(&self, limit: i64) -> Result<Vec<CoverArtCandidate>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT al.id, al.mbid, COALESCE(al.caa_fail_count, 0)
+            FROM albums al
+            WHERE al.mbid IS NOT NULL
+              AND al.mbid != ''
+              AND (al.cover_art_path IS NULL OR al.cover_art_path = '')
+              AND COALESCE(al.caa_fail_count, 0) < 3
+            ORDER BY al.id
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(CoverArtCandidate {
+                album_id: row.get(0)?,
+                mbid: row.get(1)?,
+                fail_count: row.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn increment_cover_art_fail(
+        &self,
+        album_id: i64,
+        error: &str,
+    ) -> Result<i64> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            "UPDATE albums SET caa_fail_count = COALESCE(caa_fail_count, 0) + 1, caa_last_error = ?1 WHERE id = ?2",
+            params![error, album_id],
+        )
+        .context("increment cover art fail count")?;
+        let count: i64 = conn.query_row(
+            "SELECT COALESCE(caa_fail_count, 0) FROM albums WHERE id = ?1",
+            params![album_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn set_musicbrainz_no_match(&self, path: &str, key: &str) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            "UPDATE tracks SET mb_no_match_key = ?1 WHERE path = ?2",
+            params![key, path],
+        )
+        .context("set musicbrainz no match")?;
+        Ok(())
+    }
+
+    pub fn clear_musicbrainz_no_match(&self, path: &str) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            "UPDATE tracks SET mb_no_match_key = NULL WHERE path = ?1",
+            params![path],
+        )
+        .context("clear musicbrainz no match")?;
+        Ok(())
+    }
+
+    pub fn clear_musicbrainz_no_match_all(&self) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute("UPDATE tracks SET mb_no_match_key = NULL", [])
+            .context("clear musicbrainz no match all")?;
+        Ok(())
+    }
+
+    pub fn list_artists(&self, search: Option<&str>, limit: i64, offset: i64) -> Result<Vec<ArtistSummary>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
+        let mut stmt = if search_like.is_some() {
+            conn.prepare(
+                r#"
+                SELECT a.id, a.name, a.sort_name, a.mbid,
+                       COUNT(DISTINCT al.id) AS album_count,
+                       COUNT(t.id) AS track_count
+                FROM artists a
+                LEFT JOIN albums al ON al.artist_id = a.id
+                LEFT JOIN tracks t ON t.artist_id = a.id
+                WHERE LOWER(a.name) LIKE ?1
+                GROUP BY a.id
+                ORDER BY a.name
+                LIMIT ?2 OFFSET ?3
+                "#,
+            )?
+        } else {
+            conn.prepare(
+                r#"
+                SELECT a.id, a.name, a.sort_name, a.mbid,
+                       COUNT(DISTINCT al.id) AS album_count,
+                       COUNT(t.id) AS track_count
+                FROM artists a
+                LEFT JOIN albums al ON al.artist_id = a.id
+                LEFT JOIN tracks t ON t.artist_id = a.id
+                GROUP BY a.id
+                ORDER BY a.name
+                LIMIT ?1 OFFSET ?2
+                "#,
+            )?
+        };
+
+        let rows = if let Some(search_like) = search_like {
+            stmt.query_map(params![search_like, limit, offset], map_artist_row)?
+        } else {
+            stmt.query_map(params![limit, offset], map_artist_row)?
+        };
+
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn list_albums(
+        &self,
+        artist_id: Option<i64>,
+        search: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<AlbumSummary>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT al.id, al.title, ar.name, al.year, al.mbid,
+                   COUNT(t.id) AS track_count, al.cover_art_path
+            FROM albums al
+            LEFT JOIN artists ar ON ar.id = al.artist_id
+            LEFT JOIN tracks t ON t.album_id = al.id
+            WHERE (?1 IS NULL OR al.artist_id = ?1)
+              AND (?2 IS NULL OR LOWER(al.title) LIKE ?2)
+            GROUP BY al.id
+            ORDER BY al.title
+            LIMIT ?3 OFFSET ?4
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![artist_id, search_like, limit, offset],
+            |row| {
+                let album_id: i64 = row.get(0)?;
+                let cover_path: Option<String> = row.get(6)?;
+                let cover_art_url = cover_path
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|_| format!("/albums/{}/cover", album_id));
+                Ok(AlbumSummary {
+                    id: album_id,
+                    title: row.get(1)?,
+                    artist: row.get(2)?,
+                    year: row.get(3)?,
+                    mbid: row.get(4)?,
+                    track_count: row.get(5)?,
+                    cover_art_path: cover_path,
+                    cover_art_url,
+                })
+            },
+        )?;
+
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn list_tracks(
+        &self,
+        album_id: Option<i64>,
+        artist_id: Option<i64>,
+        search: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<TrackSummary>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT t.id, t.path, t.file_name, t.title, ar.name, al.title,
+                   t.track_number, t.disc_number, t.duration_ms, t.format, t.mbid,
+                   al.cover_art_path
+            FROM tracks t
+            LEFT JOIN artists ar ON ar.id = t.artist_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            WHERE (?1 IS NULL OR t.album_id = ?1)
+              AND (?2 IS NULL OR t.artist_id = ?2)
+              AND (?3 IS NULL OR LOWER(COALESCE(t.title, t.file_name)) LIKE ?3)
+            ORDER BY COALESCE(t.disc_number, 0), COALESCE(t.track_number, 0), t.file_name
+            LIMIT ?4 OFFSET ?5
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![album_id, artist_id, search_like, limit, offset],
+            |row| {
+                let track_id: i64 = row.get(0)?;
+                let cover_path: Option<String> = row.get(11)?;
+                let cover_art_url = cover_path
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|_| format!("/tracks/{}/cover", track_id));
+                Ok(TrackSummary {
+                    id: track_id,
+                    path: row.get(1)?,
+                    file_name: row.get(2)?,
+                    title: row.get(3)?,
+                    artist: row.get(4)?,
+                    album: row.get(5)?,
+                    track_number: row.get::<_, Option<i64>>(6)?.map(|v| v as u32),
+                    disc_number: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
+                    duration_ms: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                    format: row.get(9)?,
+                    mbid: row.get(10)?,
+                    cover_art_url,
+                })
+            },
+        )?;
+
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+}
+
+fn db_path_for(media_root: &Path) -> PathBuf {
+    media_root.join(".audio-hub").join("metadata.sqlite")
+}
+
+fn is_blank(value: &Option<String>) -> bool {
+    value.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+}
+
+fn find_artist_id(conn: &Connection, name: &str) -> Result<Option<i64>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM artists WHERE name = ?1",
+            params![name],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("find artist id")?;
+    Ok(id)
+}
+
+fn find_album_id(conn: &Connection, title: &str, artist_id: Option<i64>) -> Result<Option<i64>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM albums WHERE title = ?1 AND artist_id IS ?2",
+            params![title, artist_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("find album id")?;
+    Ok(id)
+}
+
+fn init_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS artists (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            sort_name TEXT,
+            mbid TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS albums (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            sort_title TEXT,
+            artist_id INTEGER,
+            year INTEGER,
+            mbid TEXT,
+            cover_art_path TEXT,
+            caa_fail_count INTEGER,
+            caa_last_error TEXT,
+            FOREIGN KEY(artist_id) REFERENCES artists(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            file_name TEXT NOT NULL,
+            title TEXT,
+            artist_id INTEGER,
+            album_id INTEGER,
+            track_number INTEGER,
+            disc_number INTEGER,
+            duration_ms INTEGER,
+            sample_rate INTEGER,
+            format TEXT,
+            mtime_ms INTEGER,
+            size_bytes INTEGER,
+            mbid TEXT,
+            mb_no_match_key TEXT,
+            FOREIGN KEY(artist_id) REFERENCES artists(id) ON DELETE SET NULL,
+            FOREIGN KEY(album_id) REFERENCES albums(id) ON DELETE SET NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_title_artist ON albums(title, artist_id);
+        CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);
+        CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id);
+        "#,
+    )
+    .context("create metadata schema")?;
+
+    let version_raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let version = version_raw
+        .as_deref()
+        .and_then(|value| value.parse::<i32>().ok());
+    if version.is_none() {
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("insert schema version")?;
+        return Ok(());
+    }
+    let version = version.unwrap_or(1);
+    if version < 2 {
+        conn.execute("ALTER TABLE tracks ADD COLUMN mb_no_match_key TEXT", [])
+            .context("migrate tracks mb_no_match_key")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+        return Ok(());
+    }
+    if version < 3 {
+        conn.execute("ALTER TABLE albums ADD COLUMN caa_fail_count INTEGER", [])
+            .context("migrate albums caa_fail_count")?;
+        conn.execute("ALTER TABLE albums ADD COLUMN caa_last_error TEXT", [])
+            .context("migrate albums caa_last_error")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
+    Ok(())
+}
+
+fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
+    conn.execute(
+        "INSERT OR IGNORE INTO artists (name, sort_name) VALUES (?1, ?2)",
+        params![name, name.to_lowercase()],
+    )
+    .context("upsert artist")?;
+    let id: i64 = conn.query_row(
+        "SELECT id FROM artists WHERE name = ?1",
+        params![name],
+        |row| row.get(0),
+    )?;
+    Ok(id)
+}
+
+fn upsert_album(conn: &Connection, title: &str, artist_id: Option<i64>, year: Option<i32>) -> Result<i64> {
+    conn.execute(
+        "INSERT OR IGNORE INTO albums (title, artist_id, year, sort_title) VALUES (?1, ?2, ?3, ?4)",
+        params![title, artist_id, year, title.to_lowercase()],
+    )
+    .context("upsert album")?;
+    let id: i64 = conn.query_row(
+        "SELECT id FROM albums WHERE title = ?1 AND artist_id IS ?2",
+        params![title, artist_id],
+        |row| row.get(0),
+    )?;
+    Ok(id)
+}

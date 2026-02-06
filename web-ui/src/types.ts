@@ -57,3 +57,60 @@ export interface LibraryResponse {
   dir: string;
   entries: LibraryEntry[];
 }
+
+export type MetadataEvent =
+  | {
+      kind: "music_brainz_batch";
+      count: number;
+    }
+  | {
+      kind: "music_brainz_lookup_start";
+      path: string;
+      title: string;
+      artist: string;
+      album?: string | null;
+    }
+  | {
+      kind: "music_brainz_lookup_success";
+      path: string;
+      recording_mbid?: string | null;
+      artist_mbid?: string | null;
+      album_mbid?: string | null;
+    }
+  | {
+      kind: "music_brainz_lookup_no_match";
+      path: string;
+      title: string;
+      artist: string;
+      album?: string | null;
+      query: string;
+      top_score?: number | null;
+      best_recording_id?: string | null;
+      best_recording_title?: string | null;
+    }
+  | {
+      kind: "music_brainz_lookup_failure";
+      path: string;
+      error: string;
+    }
+  | {
+      kind: "cover_art_batch";
+      count: number;
+    }
+  | {
+      kind: "cover_art_fetch_start";
+      album_id: number;
+      mbid: string;
+    }
+  | {
+      kind: "cover_art_fetch_success";
+      album_id: number;
+      cover_path: string;
+    }
+  | {
+      kind: "cover_art_fetch_failure";
+      album_id: number;
+      mbid: string;
+      error: string;
+      attempts: number;
+    };

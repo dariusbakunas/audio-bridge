@@ -15,6 +15,7 @@ interface LibraryListProps {
   onPlay: (path: string) => void;
   onQueue: (path: string) => void;
   onPlayNext: (path: string) => void;
+  onRescan: (path: string) => void;
 }
 
 export default function LibraryList({
@@ -30,7 +31,8 @@ export default function LibraryList({
   onToggleMenu,
   onPlay,
   onQueue,
-  onPlayNext
+  onPlayNext,
+  onRescan
 }: LibraryListProps) {
   return (
     <div className="library-list">
@@ -81,6 +83,7 @@ export default function LibraryList({
                   onPlay={() => onPlay(entry.path)}
                   onQueue={() => onQueue(entry.path)}
                   onPlayNext={() => onPlayNext(entry.path)}
+                  onRescan={() => onRescan(entry.path)}
                 />
               </div>
             </button>

@@ -3,6 +3,7 @@ import { apiUrl, fetchJson, postJson } from "./api";
 import {
   LibraryEntry,
   LibraryResponse,
+  MetadataEvent,
   OutputInfo,
   OutputsResponse,
   QueueItem,
@@ -37,6 +38,14 @@ interface StatusResponse {
   buffered_frames?: number | null;
   buffer_capacity_frames?: number | null;
 }
+
+interface MetadataEventEntry {
+  id: number;
+  time: Date;
+  event: MetadataEvent;
+}
+
+const MAX_METADATA_EVENTS = 200;
 
 function formatMs(ms?: number | null): string {
   if (!ms && ms !== 0) return "--:--";
@@ -79,6 +88,65 @@ function sortLibraryEntries(entries: LibraryEntry[]): LibraryEntry[] {
   });
 }
 
+function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
+  switch (event.kind) {
+    case "music_brainz_batch":
+      return { title: "MusicBrainz batch", detail: `${event.count} candidates` };
+    case "music_brainz_lookup_start":
+      return {
+        title: "MusicBrainz lookup started",
+        detail: `${event.title} — ${event.artist}${event.album ? ` (${event.album})` : ""}`
+      };
+    case "music_brainz_lookup_success":
+      return {
+        title: "MusicBrainz lookup success",
+        detail: event.recording_mbid ?? "match found"
+      };
+    case "music_brainz_lookup_no_match":
+      return {
+        title: "MusicBrainz lookup no match",
+        detail: `${event.title} — ${event.artist}${event.album ? ` (${event.album})` : ""}`
+      };
+    case "music_brainz_lookup_failure":
+      return { title: "MusicBrainz lookup failed", detail: event.error };
+    case "cover_art_batch":
+      return { title: "Cover art batch", detail: `${event.count} albums` };
+    case "cover_art_fetch_start":
+      return { title: "Cover art fetch started", detail: `album ${event.album_id}` };
+    case "cover_art_fetch_success":
+      return { title: "Cover art fetched", detail: `album ${event.album_id}` };
+    case "cover_art_fetch_failure":
+      return {
+        title: "Cover art fetch failed",
+        detail: `${event.error} (attempt ${event.attempts})`
+      };
+    default:
+      return { title: "Metadata event" };
+  }
+}
+
+function metadataDetailLines(event: MetadataEvent): string[] {
+  if (event.kind !== "music_brainz_lookup_no_match") {
+    if (event.kind === "cover_art_fetch_failure") {
+      return [`MBID: ${event.mbid}`];
+    }
+    return [];
+  }
+  const lines: string[] = [];
+  if (event.query) {
+    lines.push(`Query: ${event.query}`);
+  }
+  if (event.top_score !== null && event.top_score !== undefined) {
+    lines.push(`Top score: ${event.top_score}`);
+  }
+  if (event.best_recording_title || event.best_recording_id) {
+    const title = event.best_recording_title ?? "unknown";
+    const id = event.best_recording_id ? ` (${event.best_recording_id})` : "";
+    lines.push(`Best: ${title}${id}`);
+  }
+  return lines;
+}
+
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
@@ -87,6 +155,7 @@ export default function App() {
   const [libraryDir, setLibraryDir] = useState<string | null>(null);
   const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
   const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
+  const [rescanBusy, setRescanBusy] = useState<boolean>(false);
   const [selectedTrackPath, setSelectedTrackPath] = useState<string | null>(null);
   const [trackMenuPath, setTrackMenuPath] = useState<string | null>(null);
   const [trackMenuPosition, setTrackMenuPosition] = useState<{
@@ -96,6 +165,8 @@ export default function App() {
   const [queueOpen, setQueueOpen] = useState<boolean>(false);
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -194,6 +265,58 @@ export default function App() {
       stream.close();
     };
   }, []);
+
+  async function handleRescanLibrary() {
+    if (rescanBusy) return;
+    setRescanBusy(true);
+    try {
+      await postJson("/library/rescan");
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRescanBusy(false);
+    }
+  }
+
+  async function handleRescanTrack(path: string) {
+    if (rescanBusy) return;
+    setRescanBusy(true);
+    try {
+      await postJson("/library/rescan/track", { path });
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRescanBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let mounted = true;
+    const stream = new EventSource(apiUrl("/metadata/stream"));
+    stream.addEventListener("metadata", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as MetadataEvent;
+      setMetadataEvents((prev) => {
+        const entry: MetadataEventEntry = {
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          time: new Date(),
+          event: data
+        };
+        return [entry, ...prev].slice(0, MAX_METADATA_EVENTS);
+      });
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setError("Live metadata updates disconnected.");
+    };
+    return () => {
+      mounted = false;
+      stream.close();
+    };
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!activeOutputId) {
@@ -347,10 +470,17 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${settingsOpen ? "settings-mode" : ""}`}>
       <header className="hero">
-        <div className="hero-left">
+        <div className="top-bar">
           <span className="eyebrow">Audio Hub</span>
+          <div className="top-actions">
+            <button className="btn ghost small" onClick={() => setSettingsOpen(!settingsOpen)}>
+              {settingsOpen ? "Back to player" : "Settings"}
+            </button>
+          </div>
+        </div>
+        <div className={`hero-left ${settingsOpen ? "hidden" : ""}`}>
           <h1>Lossless control with a live signal view.</h1>
           <p>
             A focused dashboard for your playback pipeline. Keep an eye on output state, signal
@@ -360,7 +490,7 @@ export default function App() {
         </div>
       </header>
 
-      <section className="grid">
+      <section className={`grid ${settingsOpen ? "hidden" : ""}`}>
         <div className="card">
           <div className="card-header">
             <span>Library</span>
@@ -434,12 +564,17 @@ export default function App() {
               setTrackMenuPath(null);
               setTrackMenuPosition(null);
             }}
+            onRescan={(path) => {
+              handleRescanTrack(path);
+              setTrackMenuPath(null);
+              setTrackMenuPosition(null);
+            }}
           />
         </div>
 
       </section>
 
-      <div className="player-bar">
+      <div className={`player-bar ${settingsOpen ? "hidden" : ""}`}>
         <div className="player-left">
           {status?.title || status?.now_playing ? (
             <div className="album-art">Artwork</div>
@@ -587,6 +722,55 @@ export default function App() {
       >
         <QueueList items={queue} formatMs={formatMs} />
       </Modal>
+
+      <section className={`settings-screen ${settingsOpen ? "active" : ""}`}>
+        <div className="card">
+          <div className="card-header">
+            <span>Metadata jobs</span>
+            <div className="card-actions">
+              <button className="btn ghost small" onClick={() => setMetadataEvents([])}>
+                Clear
+              </button>
+              <span className="pill">{metadataEvents.length} events</span>
+            </div>
+          </div>
+          <div className="settings-panel">
+            <div className="muted small">Live MusicBrainz and cover art updates.</div>
+            <div className="settings-actions">
+              <button
+                className="btn ghost small"
+                onClick={handleRescanLibrary}
+                disabled={rescanBusy}
+              >
+                {rescanBusy ? "Rescanning..." : "Rescan library"}
+              </button>
+            </div>
+            <div className="settings-list">
+              {metadataEvents.map((entry) => {
+                const info = describeMetadataEvent(entry.event);
+                const extraLines = metadataDetailLines(entry.event);
+                return (
+                  <div key={entry.id} className="settings-row">
+                    <div>
+                      <div className="settings-title">{info.title}</div>
+                      <div className="muted small">{info.detail ?? "—"}</div>
+                      {extraLines.map((line) => (
+                        <div key={line} className="muted small">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="muted small">{entry.time.toLocaleTimeString()}</div>
+                  </div>
+                );
+              })}
+              {metadataEvents.length === 0 ? (
+                <div className="muted small">No metadata events yet.</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

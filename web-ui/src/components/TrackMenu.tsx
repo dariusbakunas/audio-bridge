@@ -9,6 +9,7 @@ interface TrackMenuProps {
   onPlay: () => void;
   onQueue: () => void;
   onPlayNext: () => void;
+  onRescan: () => void;
 }
 
 export default function TrackMenu({
@@ -18,7 +19,8 @@ export default function TrackMenu({
   onToggle,
   onPlay,
   onQueue,
-  onPlayNext
+  onPlayNext,
+  onRescan
 }: TrackMenuProps) {
   return (
     <div className="track-menu-wrap" data-track-menu="true">
@@ -49,6 +51,9 @@ export default function TrackMenu({
           </button>
           <button className="track-menu-item" disabled={!canPlay} onClick={onPlayNext}>
             Play next
+          </button>
+          <button className="track-menu-item" onClick={onRescan}>
+            Rescan metadata
           </button>
         </div>
       ) : null}

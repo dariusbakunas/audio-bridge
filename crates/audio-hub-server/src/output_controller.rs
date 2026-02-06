@@ -484,8 +484,12 @@ mod tests {
             local: Arc::new(Mutex::new(None)),
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
+        let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
         AppState::new(
             library,
+            metadata_db,
+            None,
+            crate::state::MetadataWake::new(),
             bridge_state,
             local_state,
             playback_manager,
@@ -504,6 +508,7 @@ mod tests {
         ));
         let _ = std::fs::create_dir_all(&root);
         let library = crate::library::scan_library(&root).expect("scan library");
+        let metadata_db = crate::metadata_db::MetadataDb::new(&root).unwrap();
         let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
         let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
             bridges: Vec::new(),
@@ -548,6 +553,9 @@ mod tests {
         };
         let state = AppState::new(
             library,
+            metadata_db,
+            None,
+            crate::state::MetadataWake::new(),
             bridge_state,
             local_state,
             playback_manager,

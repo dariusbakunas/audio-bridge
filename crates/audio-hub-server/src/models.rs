@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use audio_bridge_types::PlaybackStatus;
+use crate::metadata_db::{AlbumSummary, ArtistSummary, TrackSummary};
 
 /// A library entry returned by directory listings.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -105,6 +106,21 @@ pub enum QueueItem {
 pub struct QueueResponse {
     /// Ordered queue items.
     pub items: Vec<QueueItem>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ArtistListResponse {
+    pub items: Vec<ArtistSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumListResponse {
+    pub items: Vec<AlbumSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackListResponse {
+    pub items: Vec<TrackSummary>,
 }
 
 /// Payload to add items to the queue.

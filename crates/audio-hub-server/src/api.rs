@@ -6,20 +6,24 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use actix_files::NamedFile;
 use actix_web::{Error, get, post, web, HttpRequest, HttpResponse, Responder};
 use actix_web::http::{header, StatusCode};
 use actix_web::body::SizedStream;
 use actix_web::web::Bytes;
 use futures_util::stream::unfold;
 use serde::Deserialize;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use tokio_util::io::ReaderStream;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::time::{Duration, Interval, MissedTickBehavior};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::library::scan_library;
+use crate::cover_art::apply_cover_art;
+use crate::library::{probe_track, scan_library_with_meta};
 use crate::models::{
+    AlbumListResponse,
+    ArtistListResponse,
     LibraryResponse,
     PlayRequest,
     QueueMode,
@@ -30,6 +34,7 @@ use crate::models::{
     OutputsResponse,
     OutputSelectRequest,
     ProvidersResponse,
+    TrackListResponse,
 };
 use crate::events::HubEvent;
 use crate::state::AppState;
@@ -53,6 +58,42 @@ pub struct StreamQuery {
 pub struct SeekBody {
     /// Absolute seek position in milliseconds.
     pub ms: u64,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ListQuery {
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AlbumListQuery {
+    #[serde(default)]
+    pub artist_id: Option<i64>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct TrackListQuery {
+    #[serde(default)]
+    pub album_id: Option<i64>,
+    #[serde(default)]
+    pub artist_id: Option<i64>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
 }
 
 #[utoipa::path(
@@ -182,12 +223,218 @@ pub async fn stream_track(
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     tracing::info!(root = %root.display(), "rescan requested");
-    match scan_library(&root) {
+    if let Err(err) = state.metadata_db.clear_musicbrainz_no_match_all() {
+        tracing::warn!(error = %err, "clear musicbrainz no match failed");
+    }
+    match scan_library_with_meta(&root, |path, file_name, _ext, meta, fs_meta| {
+        let record = crate::metadata_db::TrackRecord {
+            path: path.to_string_lossy().to_string(),
+            file_name: file_name.to_string(),
+            title: meta.title.clone(),
+            artist: meta.artist.clone(),
+            album: meta.album.clone(),
+            track_number: meta.track_number,
+            disc_number: meta.disc_number,
+            year: meta.year,
+            duration_ms: meta.duration_ms,
+            sample_rate: meta.sample_rate,
+            format: meta.format.clone(),
+            mtime_ms: fs_meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+            size_bytes: fs_meta.len() as i64,
+        };
+        if let Err(err) = state.metadata_db.upsert_track(&record) {
+            tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
+        }
+        if let Err(err) = apply_cover_art(&state.metadata_db, &root, path, meta, &record) {
+            tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
+        }
+    }) {
         Ok(new_index) => {
             *state.library.write().unwrap() = new_index;
+            state.metadata_wake.notify();
             HttpResponse::Ok().finish()
         }
         Err(e) => HttpResponse::InternalServerError().body(format!("scan failed: {e:#}")),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct RescanTrackRequest {
+    pub path: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/rescan/track",
+    request_body = RescanTrackRequest,
+    responses(
+        (status = 200, description = "Track rescan completed"),
+        (status = 400, description = "Invalid path"),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[post("/library/rescan/track")]
+/// Rescan metadata for a single track.
+pub async fn rescan_track(
+    state: web::Data<AppState>,
+    body: web::Json<RescanTrackRequest>,
+) -> impl Responder {
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let raw_path = PathBuf::from(body.path.as_str());
+    let full_path = match raw_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    if !full_path.starts_with(&root) {
+        return HttpResponse::BadRequest().body("path outside library root");
+    }
+    if !full_path.is_file() {
+        return HttpResponse::NotFound().finish();
+    }
+    let meta = match probe_track(&full_path) {
+        Ok(meta) => meta,
+        Err(err) => return HttpResponse::BadRequest().body(err.to_string()),
+    };
+    let fs_meta = match std::fs::metadata(&full_path) {
+        Ok(meta) => meta,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    let record = crate::metadata_db::TrackRecord {
+        path: full_path.to_string_lossy().to_string(),
+        file_name: full_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("<unknown>")
+            .to_string(),
+        title: meta.title.clone(),
+        artist: meta.artist.clone(),
+        album: meta.album.clone(),
+        track_number: meta.track_number,
+        disc_number: meta.disc_number,
+        year: meta.year,
+        duration_ms: meta.duration_ms,
+        sample_rate: meta.sample_rate,
+        format: meta.format.clone(),
+        mtime_ms: fs_meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0),
+        size_bytes: fs_meta.len() as i64,
+    };
+    let _ = state.metadata_db.clear_musicbrainz_no_match(&record.path);
+    if let Err(err) = state.metadata_db.upsert_track(&record) {
+        return HttpResponse::InternalServerError().body(err.to_string());
+    }
+    if let Err(err) = apply_cover_art(&state.metadata_db, &root, &full_path, &meta, &record) {
+        tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
+    }
+    if let Ok(mut index) = state.library.write() {
+        index.update_track_meta(&full_path, &meta);
+    }
+    state.metadata_wake.notify();
+    HttpResponse::Ok().finish()
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct ArtQuery {
+    pub path: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/art",
+    params(ArtQuery),
+    responses(
+        (status = 200, description = "Cover art image"),
+        (status = 404, description = "Cover art not found")
+    )
+)]
+#[get("/art")]
+pub async fn art_for_track(
+    state: web::Data<AppState>,
+    query: web::Query<ArtQuery>,
+    req: HttpRequest,
+) -> impl Responder {
+    let cover_rel = match state.metadata_db.cover_path_for_track(&query.path) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    serve_cover_art(&state, &cover_rel, &req)
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct CoverPath {
+    pub id: i64,
+}
+
+#[utoipa::path(
+    get,
+    path = "/tracks/{id}/cover",
+    params(CoverPath),
+    responses(
+        (status = 200, description = "Cover art image"),
+        (status = 404, description = "Cover art not found")
+    )
+)]
+#[get("/tracks/{id}/cover")]
+pub async fn track_cover(
+    state: web::Data<AppState>,
+    path: web::Path<CoverPath>,
+    req: HttpRequest,
+) -> impl Responder {
+    let cover_rel = match state.metadata_db.cover_path_for_track_id(path.id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    serve_cover_art(&state, &cover_rel, &req)
+}
+
+#[utoipa::path(
+    get,
+    path = "/albums/{id}/cover",
+    params(CoverPath),
+    responses(
+        (status = 200, description = "Cover art image"),
+        (status = 404, description = "Cover art not found")
+    )
+)]
+#[get("/albums/{id}/cover")]
+pub async fn album_cover(
+    state: web::Data<AppState>,
+    path: web::Path<CoverPath>,
+    req: HttpRequest,
+) -> impl Responder {
+    let cover_rel = match state.metadata_db.cover_path_for_album_id(path.id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    serve_cover_art(&state, &cover_rel, &req)
+}
+
+fn serve_cover_art(state: &AppState, cover_rel: &str, req: &HttpRequest) -> HttpResponse {
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let art_root = root.join(".audio-hub").join("art");
+    let full_path = root.join(cover_rel);
+    let full_path = match full_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    if !full_path.starts_with(&art_root) {
+        return HttpResponse::Forbidden().finish();
+    }
+    match NamedFile::open(full_path) {
+        Ok(file) => file.into_response(req),
+        Err(_) => HttpResponse::NotFound().finish(),
     }
 }
 
@@ -365,6 +612,107 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 }
 
 #[utoipa::path(
+    get,
+    path = "/artists",
+    params(
+        ("search" = Option<String>, Query, description = "Search term"),
+        ("limit" = Option<i64>, Query, description = "Max rows"),
+        ("offset" = Option<i64>, Query, description = "Offset rows")
+    ),
+    responses(
+        (status = 200, description = "Artist list", body = ArtistListResponse)
+    )
+)]
+#[get("/artists")]
+/// List artists from the metadata database.
+pub async fn artists_list(state: web::Data<AppState>, query: web::Query<ListQuery>) -> impl Responder {
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    let offset = query.offset.unwrap_or(0).max(0);
+    match state
+        .metadata_db
+        .list_artists(query.search.as_deref(), limit, offset)
+    {
+        Ok(items) => HttpResponse::Ok().json(ArtistListResponse { items }),
+        Err(err) => {
+            tracing::warn!(error = %err, "artists list failed");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/albums",
+    params(
+        ("artist_id" = Option<i64>, Query, description = "Artist id"),
+        ("search" = Option<String>, Query, description = "Search term"),
+        ("limit" = Option<i64>, Query, description = "Max rows"),
+        ("offset" = Option<i64>, Query, description = "Offset rows")
+    ),
+    responses(
+        (status = 200, description = "Album list", body = AlbumListResponse)
+    )
+)]
+#[get("/albums")]
+/// List albums from the metadata database.
+pub async fn albums_list(
+    state: web::Data<AppState>,
+    query: web::Query<AlbumListQuery>,
+) -> impl Responder {
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    let offset = query.offset.unwrap_or(0).max(0);
+    match state.metadata_db.list_albums(
+        query.artist_id,
+        query.search.as_deref(),
+        limit,
+        offset,
+    ) {
+        Ok(items) => HttpResponse::Ok().json(AlbumListResponse { items }),
+        Err(err) => {
+            tracing::warn!(error = %err, "albums list failed");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/tracks",
+    params(
+        ("album_id" = Option<i64>, Query, description = "Album id"),
+        ("artist_id" = Option<i64>, Query, description = "Artist id"),
+        ("search" = Option<String>, Query, description = "Search term"),
+        ("limit" = Option<i64>, Query, description = "Max rows"),
+        ("offset" = Option<i64>, Query, description = "Offset rows")
+    ),
+    responses(
+        (status = 200, description = "Track list", body = TrackListResponse)
+    )
+)]
+#[get("/tracks")]
+/// List tracks from the metadata database.
+pub async fn tracks_list(
+    state: web::Data<AppState>,
+    query: web::Query<TrackListQuery>,
+) -> impl Responder {
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    let offset = query.offset.unwrap_or(0).max(0);
+    match state.metadata_db.list_tracks(
+        query.album_id,
+        query.artist_id,
+        query.search.as_deref(),
+        limit,
+        offset,
+    ) {
+        Ok(items) => HttpResponse::Ok().json(TrackListResponse { items }),
+        Err(err) => {
+            tracing::warn!(error = %err, "tracks list failed");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[utoipa::path(
     post,
     path = "/queue/next",
     responses(
@@ -459,6 +807,12 @@ struct OutputsStreamState {
     last_ping: Instant,
 }
 
+struct MetadataStreamState {
+    receiver: tokio::sync::broadcast::Receiver<HubEvent>,
+    pending: VecDeque<Bytes>,
+    last_ping: Instant,
+}
+
 #[utoipa::path(
     get,
     path = "/outputs/{id}/status/stream",
@@ -511,6 +865,7 @@ pub async fn status_stream(
                             Ok(HubEvent::StatusChanged) => refresh = true,
                             Ok(HubEvent::QueueChanged) => {}
                             Ok(HubEvent::OutputsChanged) => {}
+                            Ok(HubEvent::Metadata(_)) => {}
                             Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
@@ -595,6 +950,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                             }
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::OutputsChanged) => {}
+                            Ok(HubEvent::Metadata(_)) => {}
                             Err(RecvError::Lagged(_)) => {
                                 let queue = ctx.state.output_controller.queue_list(&ctx.state);
                                 let json = serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
@@ -662,6 +1018,7 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                             Ok(HubEvent::OutputsChanged) => refresh = true,
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::QueueChanged) => {}
+                            Ok(HubEvent::Metadata(_)) => {}
                             Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
@@ -674,6 +1031,60 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                     if ctx.last_outputs.as_deref() != Some(json.as_str()) {
                         ctx.last_outputs = Some(json.clone());
                         ctx.pending.push_back(sse_event("outputs", &json));
+                    }
+                }
+
+                if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {
+                    ctx.last_ping = Instant::now();
+                    ctx.pending.push_back(Bytes::from(": ping\n\n"));
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/metadata/stream",
+    responses(
+        (status = 200, description = "Metadata event stream")
+    )
+)]
+#[get("/metadata/stream")]
+/// Stream metadata job updates via server-sent events.
+pub async fn metadata_stream(state: web::Data<AppState>) -> impl Responder {
+    let receiver = state.events.subscribe();
+    let mut pending = VecDeque::new();
+
+    let stream = unfold(
+        MetadataStreamState {
+            receiver,
+            pending,
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+                tokio::select! {
+                    result = ctx.receiver.recv() => {
+                        match result {
+                            Ok(HubEvent::Metadata(event)) => {
+                                let json = serde_json::to_string(&event)
+                                    .unwrap_or_else(|_| "null".to_string());
+                                ctx.pending.push_back(sse_event("metadata", &json));
+                            }
+                            Ok(_) => {}
+                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Closed) => return None,
+                        }
                     }
                 }
 
