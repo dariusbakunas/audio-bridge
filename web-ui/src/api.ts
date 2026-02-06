@@ -3,8 +3,12 @@ type JsonObject = { [key: string]: JsonValue };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await fetch(apiUrl(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",

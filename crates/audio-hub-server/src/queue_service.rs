@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::models::{QueueItem, QueueResponse};
+use crate::events::EventBus;
 use crate::playback_transport::PlaybackTransport;
 use crate::state::{QueueState};
 use crate::status_store::StatusStore;
@@ -50,12 +51,13 @@ fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
 pub(crate) struct QueueService {
     queue: Arc<Mutex<QueueState>>,
     status: StatusStore,
+    events: EventBus,
 }
 
 impl QueueService {
     /// Create a queue service backed by the shared queue + status store.
-    pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore) -> Self {
-        Self { queue, status }
+    pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore, events: EventBus) -> Self {
+        Self { queue, status, events }
     }
 
     /// Return the shared queue state (for inspection/testing).
@@ -107,6 +109,9 @@ impl QueueService {
             queue.items.push(path);
             added += 1;
         }
+        if added > 0 {
+            self.events.queue_changed();
+        }
         added
     }
 
@@ -121,6 +126,9 @@ impl QueueService {
             queue.items.insert(added, path);
             added += 1;
         }
+        if added > 0 {
+            self.events.queue_changed();
+        }
         added
     }
 
@@ -129,6 +137,7 @@ impl QueueService {
         let mut queue = self.queue.lock().unwrap();
         if let Some(pos) = queue.items.iter().position(|p| p == path) {
             queue.items.remove(pos);
+            self.events.queue_changed();
             return true;
         }
         false
@@ -137,7 +146,10 @@ impl QueueService {
     /// Clear the queue.
     pub(crate) fn clear(&self) {
         let mut queue = self.queue.lock().unwrap();
-        queue.items.clear();
+        if !queue.items.is_empty() {
+            queue.items.clear();
+            self.events.queue_changed();
+        }
     }
 
     /// Dispatch the next track (if any) via the provided transport.
@@ -154,7 +166,9 @@ impl QueueService {
             if q.items.is_empty() {
                 None
             } else {
-                Some(q.items.remove(0))
+                let path = q.items.remove(0);
+                self.events.queue_changed();
+                Some(path)
             }
         };
 
@@ -249,9 +263,12 @@ mod tests {
     }
 
     fn make_service() -> QueueService {
-        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let status = StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        QueueService::new(queue, status)
+        QueueService::new(queue, status, crate::events::EventBus::new())
     }
 
     fn make_inputs() -> AutoAdvanceInputs {

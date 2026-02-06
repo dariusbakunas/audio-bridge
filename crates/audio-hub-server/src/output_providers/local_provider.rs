@@ -453,11 +453,16 @@ mod tests {
             })),
             running: Arc::new(AtomicBool::new(false)),
         });
-        let status = crate::status_store::StatusStore::new(Arc::new(Mutex::new(
-            crate::state::PlayerStatus::default(),
-        )));
+        let status = crate::status_store::StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
         let queue = Arc::new(Mutex::new(crate::state::QueueState::default()));
-        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let queue_service = crate::queue_service::QueueService::new(
+            queue,
+            status.clone(),
+            crate::events::EventBus::new(),
+        );
         let playback_manager = crate::playback_manager::PlaybackManager::new(
             bridge_state.player.clone(),
             status,
@@ -473,6 +478,7 @@ mod tests {
             local_state,
             playback_manager,
             device_selection,
+            crate::events::EventBus::new(),
         )
     }
 

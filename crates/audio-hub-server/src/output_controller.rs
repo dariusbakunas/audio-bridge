@@ -48,15 +48,20 @@ pub(crate) struct OutputController {
     registry: OutputRegistry,
 }
 
-fn apply_queue_mode(queue: &mut QueueState, path: &std::path::Path, mode: QueueMode) {
+fn apply_queue_mode(queue: &mut QueueState, path: &std::path::Path, mode: QueueMode) -> bool {
     match mode {
-        QueueMode::Keep => {}
+        QueueMode::Keep => false,
         QueueMode::Replace => {
+            let changed = !queue.items.is_empty();
             queue.items.clear();
+            changed
         }
         QueueMode::Append => {
-            if !queue.items.iter().any(|p| p == path) {
+            if queue.items.iter().any(|p| p == path) {
+                false
+            } else {
                 queue.items.push(path.to_path_buf());
+                true
             }
         }
     }
@@ -171,7 +176,9 @@ impl OutputController {
     ) -> Result<String, OutputControllerError> {
         {
             let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
-            apply_queue_mode(&mut queue, &path, queue_mode);
+            if apply_queue_mode(&mut queue, &path, queue_mode) {
+                state.events.queue_changed();
+            }
         }
 
         let output_id = self
@@ -451,9 +458,16 @@ mod tests {
             })),
             running: Arc::new(AtomicBool::new(false)),
         });
-        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let status = StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let queue_service = crate::queue_service::QueueService::new(
+            queue,
+            status.clone(),
+            crate::events::EventBus::new(),
+        );
         let playback_manager = crate::playback_manager::PlaybackManager::new(
             bridge_state.player.clone(),
             status,
@@ -469,6 +483,7 @@ mod tests {
             local_state,
             playback_manager,
             device_selection,
+            crate::events::EventBus::new(),
         )
     }
 
@@ -505,9 +520,16 @@ mod tests {
             })),
             running: Arc::new(AtomicBool::new(false)),
         });
-        let status = StatusStore::new(Arc::new(Mutex::new(crate::state::PlayerStatus::default())));
+        let status = StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        let queue_service = crate::queue_service::QueueService::new(queue, status.clone());
+        let queue_service = crate::queue_service::QueueService::new(
+            queue,
+            status.clone(),
+            crate::events::EventBus::new(),
+        );
         let playback_manager = crate::playback_manager::PlaybackManager::new(
             bridge_state.player.clone(),
             status,
@@ -523,6 +545,7 @@ mod tests {
             local_state,
             playback_manager,
             device_selection,
+            crate::events::EventBus::new(),
         );
         (state, root)
     }

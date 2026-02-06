@@ -85,8 +85,9 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         discovered_bridges.clone(),
         public_base_url,
     ));
-    let status_store = crate::status_store::StatusStore::new(status);
-    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone());
+    let events = crate::events::EventBus::new();
+    let status_store = crate::status_store::StatusStore::new(status, events.clone());
+    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
     let playback_manager = crate::playback_manager::PlaybackManager::new(
         bridge_state.player.clone(),
         status_store,
@@ -139,6 +140,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         local_state,
         playback_manager,
         device_selection,
+        events,
     ));
     setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
@@ -172,7 +174,9 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::queue_remove)
             .service(api::queue_clear)
             .service(api::queue_next)
+            .service(api::queue_stream)
             .service(api::status_for_output)
+            .service(api::status_stream)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::outputs_list)
@@ -211,7 +215,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
 
 /// Return true when the request path should be logged.
 fn should_log_path(path: &str) -> bool {
-    if path == "/queue" || path == "/stream" {
+    if path == "/queue" || path == "/stream" || path == "/queue/stream" || path.ends_with("/status/stream") {
         return false;
     }
     if path.starts_with("/outputs/") && path != "/outputs/select" {

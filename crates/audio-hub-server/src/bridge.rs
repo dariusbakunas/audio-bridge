@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::bridge_transport::BridgeTransportClient;
+use crate::events::EventBus;
 use crate::playback_transport::ChannelTransport;
 use crate::queue_service::QueueService;
 
@@ -49,6 +50,7 @@ pub fn spawn_bridge_worker(
     bridge_online: Arc<AtomicBool>,
     bridges_state: Arc<Mutex<crate::state::BridgeState>>,
     public_base_url: String,
+    events: EventBus,
 ) {
     std::thread::spawn(move || {
         tracing::info!(bridge_id = %bridge_id, http_addr = %http_addr, "bridge worker start");
@@ -63,6 +65,7 @@ pub fn spawn_bridge_worker(
             cmd_tx.clone(),
             bridge_online.clone(),
             bridges_state.clone(),
+            events.clone(),
         );
 
         loop {
@@ -116,6 +119,7 @@ struct BridgeStatusPoller {
     cmd_tx: Sender<BridgeCommand>,
     bridge_online: Arc<AtomicBool>,
     bridges_state: Arc<Mutex<crate::state::BridgeState>>,
+    events: EventBus,
 }
 
 impl BridgeStatusPoller {
@@ -128,6 +132,7 @@ impl BridgeStatusPoller {
         cmd_tx: Sender<BridgeCommand>,
         bridge_online: Arc<AtomicBool>,
         bridges_state: Arc<Mutex<crate::state::BridgeState>>,
+        events: EventBus,
     ) -> Self {
         Self {
             bridge_id,
@@ -137,6 +142,7 @@ impl BridgeStatusPoller {
             cmd_tx,
             bridge_online,
             bridges_state,
+            events,
         }
     }
 
@@ -147,7 +153,11 @@ impl BridgeStatusPoller {
                 self.bridge_online.store(true, Ordering::Relaxed);
                 let inputs = self.status.apply_remote_and_inputs(&remote, *last_duration_ms);
                 let transport = ChannelTransport::new(self.cmd_tx.clone());
-                let dispatched = QueueService::new(self.queue.clone(), self.status.clone())
+                let dispatched = QueueService::new(
+                    self.queue.clone(),
+                    self.status.clone(),
+                    self.events.clone(),
+                )
                     .maybe_auto_advance(&transport, inputs);
                 *last_duration_ms = remote.duration_ms;
                 if dispatched {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchJson, postJson } from "./api";
+import { apiUrl, fetchJson, postJson } from "./api";
 
 interface OutputInfo {
   id: string;
@@ -159,12 +159,17 @@ export default function App() {
       }
     }
     loadOutputs();
+    if (!outputsOpen) {
+      return () => {
+        mounted = false;
+      };
+    }
     const timer = setInterval(loadOutputs, 5000);
     return () => {
       mounted = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [outputsOpen]);
 
   useEffect(() => {
     if (!activeOutputId) {
@@ -172,44 +177,43 @@ export default function App() {
       return;
     }
     let mounted = true;
-    async function loadStatus() {
-      try {
-        const response = await fetchJson<StatusResponse>(
-          `/outputs/${encodeURIComponent(activeOutputId)}/status`
-        );
-        if (!mounted) return;
-        setStatus(response);
-        setUpdatedAt(new Date());
-      } catch (err) {
-        if (!mounted) return;
-        setError((err as Error).message);
-      }
-    }
-    loadStatus();
-    const timer = setInterval(loadStatus, 1500);
+    const streamUrl = apiUrl(`/outputs/${encodeURIComponent(activeOutputId)}/status/stream`);
+
+    const stream = new EventSource(streamUrl);
+    stream.addEventListener("status", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as StatusResponse;
+      setStatus(data);
+      setUpdatedAt(new Date());
+      setError(null);
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setError("Live status disconnected.");
+    };
+
     return () => {
       mounted = false;
-      clearInterval(timer);
+      stream.close();
     };
   }, [activeOutputId]);
 
   useEffect(() => {
     let mounted = true;
-    async function loadQueue() {
-      try {
-        const response = await fetchJson<QueueResponse>("/queue");
-        if (!mounted) return;
-        setQueue(response.items);
-      } catch (err) {
-        if (!mounted) return;
-        setError((err as Error).message);
-      }
-    }
-    loadQueue();
-    const timer = setInterval(loadQueue, 4000);
+    const stream = new EventSource(apiUrl("/queue/stream"));
+    stream.addEventListener("queue", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as QueueResponse;
+      setQueue(data.items ?? []);
+      setError(null);
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setError("Live queue disconnected.");
+    };
     return () => {
       mounted = false;
-      clearInterval(timer);
+      stream.close();
     };
   }, []);
 

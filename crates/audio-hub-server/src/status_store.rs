@@ -8,18 +8,20 @@ use std::sync::{Arc, Mutex};
 use audio_bridge_types::BridgeStatus;
 
 use crate::queue_service::AutoAdvanceInputs;
+use crate::events::EventBus;
 use crate::state::PlayerStatus;
 
 /// Shared playback status tracker and update entry points.
 #[derive(Clone)]
 pub struct StatusStore {
     inner: Arc<Mutex<PlayerStatus>>,
+    events: EventBus,
 }
 
 impl StatusStore {
     /// Create a new store around the shared player status.
-    pub fn new(inner: Arc<Mutex<PlayerStatus>>) -> Self {
-        Self { inner }
+    pub fn new(inner: Arc<Mutex<PlayerStatus>>, events: EventBus) -> Self {
+        Self { inner, events }
     }
 
     /// Access the underlying shared status handle.
@@ -57,6 +59,7 @@ impl StatusStore {
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
         }
+        self.events.status_changed();
     }
 
     pub fn on_pause_toggle(&self) {
@@ -64,6 +67,7 @@ impl StatusStore {
             s.paused = !s.paused;
             s.user_paused = s.paused;
         }
+        self.events.status_changed();
     }
 
     /// Clear status when playback stops.
@@ -89,12 +93,14 @@ impl StatusStore {
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
         }
+        self.events.status_changed();
     }
 
     pub fn mark_seek_in_flight(&self) {
         if let Ok(mut s) = self.inner.lock() {
             s.seek_in_flight = true;
         }
+        self.events.status_changed();
     }
 
     /// Apply a local playback start snapshot.
@@ -139,6 +145,7 @@ impl StatusStore {
                 },
             );
         }
+        self.events.status_changed();
     }
 
     pub fn on_local_playback_end(&self) {
@@ -147,6 +154,7 @@ impl StatusStore {
             s.elapsed_ms = None;
             s.duration_ms = None;
         }
+        self.events.status_changed();
     }
 
     /// Set whether auto-advance has been triggered and awaiting completion.
@@ -154,6 +162,7 @@ impl StatusStore {
         if let Ok(mut s) = self.inner.lock() {
             s.auto_advance_in_flight = value;
         }
+        self.events.status_changed();
     }
 
     /// Merge remote bridge status and return inputs for auto-advance checks.
@@ -189,6 +198,7 @@ impl StatusStore {
                 s.seek_in_flight = false;
             }
 
+            self.events.status_changed();
             return AutoAdvanceInputs {
                 last_duration_ms,
                 remote_duration_ms: remote.duration_ms,
@@ -267,7 +277,7 @@ mod tests {
 
     fn make_store() -> StatusStore {
         let status = Arc::new(Mutex::new(PlayerStatus::default()));
-        StatusStore::new(status)
+        StatusStore::new(status, crate::events::EventBus::new())
     }
 
     fn make_bridge_status() -> BridgeStatus {

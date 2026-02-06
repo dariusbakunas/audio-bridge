@@ -8,6 +8,7 @@ mod bridge_manager;
 mod bridge_transport;
 mod config;
 mod discovery;
+mod events;
 mod library;
 mod models;
 mod openapi;

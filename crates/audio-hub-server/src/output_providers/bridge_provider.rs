@@ -60,6 +60,7 @@ impl BridgeProvider {
             state.bridge.bridge_online.clone(),
             state.bridge.bridges.clone(),
             state.bridge.public_base_url.clone(),
+            state.events.clone(),
         );
 
         let mut waited = 0u64;
