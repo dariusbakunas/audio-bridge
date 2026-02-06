@@ -91,18 +91,21 @@ fn player_thread_main(
             }
             PlayerCommand::PauseToggle => {
                 paused = !paused;
+                tracing::info!(paused, "bridge pause toggled");
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(paused, Ordering::Relaxed);
                 }
             }
             PlayerCommand::Pause => {
                 paused = true;
+                tracing::info!(paused, "bridge pause set");
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(true, Ordering::Relaxed);
                 }
             }
             PlayerCommand::Resume => {
                 paused = false;
+                tracing::info!(paused, "bridge resume set");
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(false, Ordering::Relaxed);
                 }
@@ -132,6 +135,13 @@ fn player_thread_main(
                 title,
                 seek_ms,
             } => {
+                tracing::info!(
+                    url = %url,
+                    title = title.as_deref().unwrap_or(""),
+                    seek_ms = ?seek_ms,
+                    "bridge play received"
+                );
+                preupdate_status_on_play(&status, title.as_ref().unwrap_or(&url));
                 current = Some(CurrentTrack {
                     url: url.clone(),
                     ext_hint: ext_hint.clone(),
@@ -153,6 +163,16 @@ fn player_thread_main(
                 );
             }
         }
+    }
+}
+
+fn preupdate_status_on_play(
+    status: &Arc<Mutex<BridgeStatusState>>,
+    now_playing: &str,
+) {
+    if let Ok(mut s) = status.lock() {
+        s.clear_playback();
+        s.now_playing = Some(now_playing.to_string());
     }
 }
 
@@ -318,6 +338,12 @@ fn play_one_http(
             s.buffer_capacity_frames = Some(buffer_capacity_frames.clone());
         }
     }
+    tracing::info!(
+        url = %url,
+        seek_ms = ?seek_ms,
+        paused = paused_flag.load(Ordering::Relaxed),
+        "bridge status updated from decoder"
+    );
 
     let result = pipeline::play_decoded_source(
         &device,

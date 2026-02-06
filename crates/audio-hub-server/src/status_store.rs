@@ -172,6 +172,14 @@ impl StatusStore {
         last_duration_ms: Option<u64>,
     ) -> AutoAdvanceInputs {
         if let Ok(mut s) = self.inner.lock() {
+            let prior_paused = s.paused;
+            if prior_paused != remote.paused  {
+                tracing::info!(
+                    prior_paused,
+                    paused = remote.paused,
+                    "bridge status update"
+                );
+            }
             apply_playback_fields(
                 &mut s,
                 PlaybackFields {
