@@ -1,65 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiUrl, fetchJson, postJson } from "./api";
-
-interface OutputInfo {
-  id: string;
-  name: string;
-  kind: string;
-  state: string;
-  provider_name?: string | null;
-  supported_rates?: { min_hz: number; max_hz: number } | null;
-}
-
-interface OutputsResponse {
-  active_id: string | null;
-  outputs: OutputInfo[];
-}
-
-interface QueueItemTrack {
-  kind: "track";
-  path: string;
-  file_name: string;
-  duration_ms?: number | null;
-  sample_rate?: number | null;
-  album?: string | null;
-  artist?: string | null;
-  format: string;
-}
-
-interface QueueItemMissing {
-  kind: "missing";
-  path: string;
-}
-
-type QueueItem = QueueItemTrack | QueueItemMissing;
-
-interface QueueResponse {
-  items: QueueItem[];
-}
-
-interface LibraryEntryDir {
-  kind: "dir";
-  path: string;
-  name: string;
-}
-
-interface LibraryEntryTrack {
-  kind: "track";
-  path: string;
-  file_name: string;
-  duration_ms?: number | null;
-  sample_rate?: number | null;
-  album?: string | null;
-  artist?: string | null;
-  format: string;
-}
-
-type LibraryEntry = LibraryEntryDir | LibraryEntryTrack;
-
-interface LibraryResponse {
-  dir: string;
-  entries: LibraryEntry[];
-}
+import {
+  LibraryEntry,
+  LibraryResponse,
+  OutputInfo,
+  OutputsResponse,
+  QueueItem,
+  QueueResponse
+} from "./types";
+import LibraryList from "./components/LibraryList";
+import Modal from "./components/Modal";
+import PlayerControls from "./components/PlayerControls";
+import QueueList from "./components/QueueList";
 
 interface StatusResponse {
   now_playing?: string | null;
@@ -154,7 +106,7 @@ export default function App() {
   const canTogglePlayback = Boolean(
     activeOutputId && (status?.now_playing || selectedTrackPath)
   );
-  const showPlayIcon = !status?.now_playing || status?.paused;
+  const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const uiBuildId = useMemo(() => {
     if (__BUILD_MODE__ === "development") {
@@ -444,124 +396,48 @@ export default function App() {
               Back to root
             </button>
           </div>
-          <div className="library-list">
-            {libraryLoading ? <p className="muted">Loading library...</p> : null}
-            {!libraryLoading &&
-              libraryEntries.map((entry) => {
-                if (entry.kind === "dir") {
-                  return (
-                    <button
-                      key={entry.path}
-                      className="library-row"
-                      onClick={() => setLibraryDir(entry.path)}
-                    >
-                      <div>
-                        <div className="library-title">{entry.name}</div>
-                        <div className="muted small">Folder</div>
-                      </div>
-                      <span className="chip">Open</span>
-                    </button>
-                  );
-                }
-                const isSelected = selectedTrackPath === entry.path;
-                const menuOpen = trackMenuPath === entry.path;
-                const canPlayTrack = Boolean(activeOutputId);
-                return (
-                  <button
-                    key={entry.path}
-                    type="button"
-                    className={`library-row track${isSelected ? " selected" : ""}`}
-                    onClick={() => setSelectedTrackPath(entry.path)}
-                  >
-                    <div>
-                      <div className="library-title">{entry.file_name}</div>
-                      <div className="muted small">
-                        {entry.artist ?? "Unknown artist"}
-                        {entry.album ? ` - ${entry.album}` : ""}
-                      </div>
-                    </div>
-                    <div className="library-actions-inline">
-                      <span className="muted small">{formatMs(entry.duration_ms)}</span>
-                      <div className="track-menu-wrap" data-track-menu="true">
-                        <button
-                          className="track-menu-button"
-                          aria-label="Track options"
-                          aria-expanded={menuOpen}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (menuOpen) {
-                              setTrackMenuPath(null);
-                              setTrackMenuPosition(null);
-                              return;
-                            }
-                            const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                            setTrackMenuPosition({
-                              top: rect.bottom + 6,
-                              right: window.innerWidth - rect.right,
-                            });
-                            setTrackMenuPath(entry.path);
-                          }}
-                          data-track-menu="true"
-                        >
-                          <span className="track-menu-dots" aria-hidden="true"></span>
-                        </button>
-                        {menuOpen ? (
-                          <div
-                            className="track-menu"
-                            onClick={(event) => event.stopPropagation()}
-                            data-track-menu="true"
-                            style={
-                              trackMenuPosition
-                                ? { top: trackMenuPosition.top, right: trackMenuPosition.right }
-                                : undefined
-                            }
-                          >
-                            <button
-                              className="track-menu-item"
-                              disabled={!canPlayTrack}
-                              onClick={() => {
-                                handlePlay(entry.path);
-                                setTrackMenuPath(null);
-                                setTrackMenuPosition(null);
-                              }}
-                            >
-                              Play
-                            </button>
-                            <button
-                              className="track-menu-item"
-                              onClick={() => {
-                                handleQueue(entry.path);
-                                setTrackMenuPath(null);
-                                setTrackMenuPosition(null);
-                              }}
-                            >
-                              Queue
-                            </button>
-                            <button
-                              className="track-menu-item"
-                              disabled={!canPlayTrack}
-                              onClick={() => {
-                                handlePlayNext(entry.path);
-                                setTrackMenuPath(null);
-                                setTrackMenuPosition(null);
-                              }}
-                            >
-                              Play next
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            {!libraryLoading && libraryEntries.length === 0 ? (
-              <p className="muted">No entries found in this folder.</p>
-            ) : null}
-          </div>
+          <LibraryList
+            entries={libraryEntries}
+            loading={libraryLoading}
+            selectedTrackPath={selectedTrackPath}
+            trackMenuPath={trackMenuPath}
+            trackMenuPosition={trackMenuPosition}
+            canPlay={Boolean(activeOutputId)}
+            formatMs={formatMs}
+            onSelectDir={setLibraryDir}
+            onSelectTrack={setSelectedTrackPath}
+            onToggleMenu={(path, target) => {
+              if (trackMenuPath === path) {
+                setTrackMenuPath(null);
+                setTrackMenuPosition(null);
+                return;
+              }
+              const rect = target.getBoundingClientRect();
+              setTrackMenuPosition({
+                top: rect.bottom + 6,
+                right: window.innerWidth - rect.right
+              });
+              setTrackMenuPath(path);
+            }}
+            onPlay={(path) => {
+              handlePlay(path);
+              setTrackMenuPath(null);
+              setTrackMenuPosition(null);
+            }}
+            onQueue={(path) => {
+              handleQueue(path);
+              setTrackMenuPath(null);
+              setTrackMenuPosition(null);
+            }}
+            onPlayNext={(path) => {
+              handlePlayNext(path);
+              setTrackMenuPath(null);
+              setTrackMenuPosition(null);
+            }}
+          />
         </div>
 
-        </section>
+      </section>
 
       <div className="player-bar">
         <div className="player-left">
@@ -578,70 +454,17 @@ export default function App() {
           </div>
         </div>
         <div className="player-middle">
-          <div className="player-controls">
-            <button
-              className={`icon-btn signal-btn${isPlaying ? " active" : ""}`}
-              aria-label="Signal details"
-              onClick={() => setSignalOpen(true)}
-              disabled={!isPlaying}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="10" width="2" height="4" rx="1" />
-                <rect x="7" y="7" width="2" height="10" rx="1" />
-                <rect x="11" y="4" width="2" height="16" rx="1" />
-                <rect x="15" y="7" width="2" height="10" rx="1" />
-                <rect x="19" y="10" width="2" height="4" rx="1" />
-              </svg>
-            </button>
-            <button className="icon-btn" aria-label="Previous" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="5" width="2" height="14" rx="1" />
-                <polygon points="21,5 13,12 21,19" />
-                <polygon points="13,5 5,12 13,19" />
-              </svg>
-            </button>
-            <button
-              className="icon-btn primary"
-              onClick={handlePrimaryAction}
-              aria-label="Play or pause"
-              disabled={!canTogglePlayback}
-              title={playButtonTitle}
-            >
-              {showPlayIcon ? (
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <polygon points="7,5 19,12 7,19" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="6" y="5" width="4" height="14" rx="1" />
-                  <rect x="14" y="5" width="4" height="14" rx="1" />
-                </svg>
-              )}
-            </button>
-            <button
-              className="icon-btn"
-              onClick={handleNext}
-              aria-label="Next"
-              disabled={queue.length === 0}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="19" y="5" width="2" height="14" rx="1" />
-                <polygon points="3,5 11,12 3,19" />
-                <polygon points="11,5 19,12 11,19" />
-              </svg>
-            </button>
-            <button
-              className="icon-btn queue-btn"
-              aria-label="Queue"
-              onClick={() => setQueueOpen(true)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="4" y="6" width="16" height="2" rx="1" />
-                <rect x="4" y="11" width="16" height="2" rx="1" />
-                <rect x="4" y="16" width="10" height="2" rx="1" />
-              </svg>
-            </button>
-          </div>
+          <PlayerControls
+            isPlaying={isPlaying}
+            canTogglePlayback={canTogglePlayback}
+            showPlayIcon={showPlayIcon}
+            playButtonTitle={playButtonTitle}
+            queueHasItems={queue.length > 0}
+            onPrimaryAction={handlePrimaryAction}
+            onNext={handleNext}
+            onSignalOpen={() => setSignalOpen(true)}
+            onQueueOpen={() => setQueueOpen(true)}
+          />
           <div className="progress">
             <div className="progress-track"></div>
             <div
@@ -671,148 +494,99 @@ export default function App() {
         </div>
       </div>
 
-      {outputsOpen ? (
-        <div className="modal" onClick={() => setOutputsOpen(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="card-header">
-              <span>Outputs</span>
-              <div className="card-actions">
-                <span className="pill">{outputs.length} devices</span>
-                <button className="btn ghost small" onClick={() => setOutputsOpen(false)}>
-                  Close
-                </button>
+      <Modal
+        open={outputsOpen}
+        title="Outputs"
+        onClose={() => setOutputsOpen(false)}
+        headerRight={<span className="pill">{outputs.length} devices</span>}
+      >
+        <div className="output-list">
+          {outputs.map((output) => (
+            <button
+              key={output.id}
+              className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
+              onClick={() => handleSelectOutput(output.id)}
+            >
+              <div>
+                <div className="output-title">{output.name}</div>
+                <div className="muted small">
+                  {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
+                </div>
               </div>
-            </div>
-            <div className="output-list">
-              {outputs.map((output) => (
-                <button
-                  key={output.id}
-                  className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
-                  onClick={() => handleSelectOutput(output.id)}
-                >
-                  <div>
-                    <div className="output-title">{output.name}</div>
-                    <div className="muted small">
-                      {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
-                    </div>
-                  </div>
-                  <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
-                </button>
-              ))}
-              {outputs.length === 0 ? (
-                <p className="muted">No outputs reported. Check provider discovery.</p>
-              ) : null}
-            </div>
-          </div>
+              <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
+            </button>
+          ))}
+          {outputs.length === 0 ? (
+            <p className="muted">No outputs reported. Check provider discovery.</p>
+          ) : null}
         </div>
-      ) : null}
+      </Modal>
 
-      {signalOpen ? (
-        <div className="modal" onClick={() => setSignalOpen(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="card-header">
-              <span>Signal</span>
-              <div className="card-actions">
-                <span className="pill">{activeOutput?.name ?? "No output"}</span>
-                <button className="btn ghost small" onClick={() => setSignalOpen(false)}>
-                  Close
-                </button>
-              </div>
+      <Modal
+        open={signalOpen}
+        title="Signal"
+        onClose={() => setSignalOpen(false)}
+        headerRight={<span className="pill">{activeOutput?.name ?? "No output"}</span>}
+      >
+        <div className="signal-grid">
+          <div>
+            <div className="signal-label">Source</div>
+            <div className="signal-value">
+              {status?.source_codec ?? status?.format ?? "—"}
+              {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
             </div>
-            <div className="signal-grid">
-              <div>
-                <div className="signal-label">Source</div>
-                <div className="signal-value">
-                  {status?.source_codec ?? status?.format ?? "—"}
-                  {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
-                </div>
-              </div>
-              <div>
-                <div className="signal-label">Sample rate</div>
-                <div className="signal-value">{formatHz(status?.sample_rate)}</div>
-              </div>
-              <div>
-                <div className="signal-label">Output rate</div>
-                <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
-              </div>
-              <div>
-                <div className="signal-label">Resample</div>
-                <div className="signal-value">
-                  {status?.resampling ? "Enabled" : "Direct"}
-                  {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
-                </div>
-              </div>
-              <div>
-                <div className="signal-label">Output format</div>
-                <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
-              </div>
-              <div>
-                <div className="signal-label">Channels</div>
-                <div className="signal-value">{status?.channels ?? "—"}</div>
-              </div>
-              <div>
-                <div className="signal-label">Bitrate</div>
-                <div className="signal-value">
-                  {status?.bitrate_kbps ? `${status.bitrate_kbps} kbps` : "—"}
-                </div>
-              </div>
-              <div>
-                <div className="signal-label">Buffer</div>
-                <div className="signal-value">
-                  {status?.buffered_frames && status?.buffer_capacity_frames
-                    ? `${status.buffered_frames} / ${status.buffer_capacity_frames} frames`
-                    : "—"}
-                </div>
-              </div>
+          </div>
+          <div>
+            <div className="signal-label">Sample rate</div>
+            <div className="signal-value">{formatHz(status?.sample_rate)}</div>
+          </div>
+          <div>
+            <div className="signal-label">Output rate</div>
+            <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
+          </div>
+          <div>
+            <div className="signal-label">Resample</div>
+            <div className="signal-value">
+              {status?.resampling ? "Enabled" : "Direct"}
+              {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
             </div>
-            <div className="muted small updated">
-              Updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
+          </div>
+          <div>
+            <div className="signal-label">Output format</div>
+            <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
+          </div>
+          <div>
+            <div className="signal-label">Channels</div>
+            <div className="signal-value">{status?.channels ?? "—"}</div>
+          </div>
+          <div>
+            <div className="signal-label">Bitrate</div>
+            <div className="signal-value">
+              {status?.bitrate_kbps ? `${status.bitrate_kbps} kbps` : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="signal-label">Buffer</div>
+            <div className="signal-value">
+              {status?.buffered_frames && status?.buffer_capacity_frames
+                ? `${status.buffered_frames} / ${status.buffer_capacity_frames} frames`
+                : "—"}
             </div>
           </div>
         </div>
-      ) : null}
+        <div className="muted small updated">
+          Updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
+        </div>
+      </Modal>
 
-      {queueOpen ? (
-        <div className="modal" onClick={() => setQueueOpen(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="card-header">
-              <span>Queue</span>
-              <div className="card-actions">
-                <span className="pill">{queue.length} items</span>
-                <button className="btn ghost small" onClick={() => setQueueOpen(false)}>
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="queue-list">
-              {queue.map((item, index) => (
-                <div key={`${item.kind}-${index}`} className="queue-row">
-                  {item.kind === "track" ? (
-                    <>
-                      <div>
-                        <div className="queue-title">{item.file_name}</div>
-                        <div className="muted small">
-                          {item.artist ?? "Unknown artist"}
-                          {item.album ? ` - ${item.album}` : ""}
-                        </div>
-                      </div>
-                      <div className="queue-meta">
-                        <span>{item.format}</span>
-                        <span>{formatMs(item.duration_ms)}</span>
-                      </div>
-                    </>
-                  ) : (
-                    <span className="muted">Missing: {item.path}</span>
-                  )}
-                </div>
-              ))}
-              {queue.length === 0 ? (
-                <p className="muted">Queue is empty. Add tracks from the TUI for now.</p>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal
+        open={queueOpen}
+        title="Queue"
+        onClose={() => setQueueOpen(false)}
+        headerRight={<span className="pill">{queue.length} items</span>}
+      >
+        <QueueList items={queue} formatMs={formatMs} />
+      </Modal>
     </div>
   );
 }
