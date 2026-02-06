@@ -375,7 +375,7 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 #[post("/queue/next")]
 /// Skip to the next queued track.
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
-    tracing::info!("queue next request");
+    tracing::debug!("queue next request");
     match state.output_controller.queue_next(&state).await {
         Ok(true) => HttpResponse::Ok().finish(),
         Ok(false) => HttpResponse::NoContent().finish(),
@@ -401,6 +401,7 @@ pub async fn status_for_output(
     id: web::Path<String>,
 ) -> impl Responder {
     let output_id = id.into_inner();
+    tracing::debug!(output_id = %output_id, "status for output request");
     match state.output_controller.status_for_output(&state, &output_id).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err(err) => err.into_response(),
@@ -483,7 +484,7 @@ pub async fn status_stream(
     let mut pending = VecDeque::new();
     pending.push_back(sse_event("status", &initial_json));
 
-    let mut interval = tokio::time::interval(Duration::from_millis(1000));
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let receiver = state.events.subscribe();
 
@@ -502,29 +503,33 @@ pub async fn status_stream(
                 if let Some(bytes) = ctx.pending.pop_front() {
                     return Some((Ok::<Bytes, Error>(bytes), ctx));
                 }
+                let mut refresh = false;
                 tokio::select! {
                     _ = ctx.interval.tick() => {}
                     result = ctx.receiver.recv() => {
                         match result {
-                            Ok(HubEvent::StatusChanged) => {}
+                            Ok(HubEvent::StatusChanged) => refresh = true,
                             Ok(HubEvent::QueueChanged) => {}
                             Ok(HubEvent::OutputsChanged) => {}
-                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
                     }
                 }
 
-                if let Ok(status) = ctx
-                    .state
-                    .output_controller
-                    .status_for_output(&ctx.state, &ctx.output_id)
-                    .await
-                {
-                    let json = serde_json::to_string(&status).unwrap_or_else(|_| "null".to_string());
-                    if ctx.last_status.as_deref() != Some(json.as_str()) {
-                        ctx.last_status = Some(json.clone());
-                        ctx.pending.push_back(sse_event("status", &json));
+                if refresh {
+                    if let Ok(status) = ctx
+                        .state
+                        .output_controller
+                        .status_for_output(&ctx.state, &ctx.output_id)
+                        .await
+                    {
+                        let json = serde_json::to_string(&status)
+                            .unwrap_or_else(|_| "null".to_string());
+                        if ctx.last_status.as_deref() != Some(json.as_str()) {
+                            ctx.last_status = Some(json.clone());
+                            ctx.pending.push_back(sse_event("status", &json));
+                        }
                     }
                 }
 

@@ -183,8 +183,8 @@ impl StatusStore {
     ) -> AutoAdvanceInputs {
         if let Ok(mut s) = self.inner.lock() {
             let prior_paused = s.paused;
-            if prior_paused != remote.paused  {
-                tracing::info!(
+            if prior_paused != remote.paused {
+                tracing::debug!(
                     prior_paused,
                     paused = remote.paused,
                     "bridge status update"

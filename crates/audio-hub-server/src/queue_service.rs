@@ -202,7 +202,7 @@ impl QueueService {
         transport: &dyn PlaybackTransport,
         inputs: AutoAdvanceInputs,
     ) -> bool {
-        tracing::info!(
+        tracing::debug!(
             last_duration_ms = ?inputs.last_duration_ms,
             remote_duration_ms = ?inputs.remote_duration_ms,
             remote_elapsed_ms = ?inputs.remote_elapsed_ms,
@@ -221,7 +221,7 @@ impl QueueService {
             return false;
         }
 
-        tracing::info!("auto-advance dispatching next track");
+        tracing::debug!("auto-advance dispatching next track");
         matches!(
             self.dispatch_next(transport, true),
             NextDispatchResult::Dispatched

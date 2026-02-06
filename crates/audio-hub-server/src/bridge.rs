@@ -150,7 +150,9 @@ impl BridgeStatusPoller {
     fn poll_once(&mut self, last_duration_ms: &mut Option<u64>) {
         match self.client.status() {
             Ok(remote) => {
-                self.bridge_online.store(true, Ordering::Relaxed);
+                if update_online_and_should_emit(&self.bridge_online, true) {
+                    self.events.outputs_changed();
+                }
                 let inputs = self.status.apply_remote_and_inputs(&remote, *last_duration_ms);
                 let transport = ChannelTransport::new(self.cmd_tx.clone());
                 let dispatched = QueueService::new(
@@ -166,7 +168,9 @@ impl BridgeStatusPoller {
             }
             Err(_) => {
                 if is_active_bridge(&self.bridges_state, &self.bridge_id) {
-                    self.bridge_online.store(false, Ordering::Relaxed);
+                    if update_online_and_should_emit(&self.bridge_online, false) {
+                        self.events.outputs_changed();
+                    }
                 }
             }
         }
@@ -195,6 +199,11 @@ fn is_active_bridge(
         .lock()
         .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id))
         .unwrap_or(false)
+}
+
+fn update_online_and_should_emit(bridge_online: &AtomicBool, new_status: bool) -> bool {
+    let was_online = bridge_online.swap(new_status, Ordering::Relaxed);
+    was_online != new_status
 }
 
 #[cfg(test)]
@@ -229,5 +238,14 @@ mod tests {
         }));
         assert!(is_active_bridge(&bridges, "bridge-1"));
         assert!(!is_active_bridge(&bridges, "bridge-2"));
+    }
+
+    #[test]
+    fn update_online_and_should_emit_tracks_transitions() {
+        let online = AtomicBool::new(false);
+        assert!(update_online_and_should_emit(&online, true));
+        assert!(!update_online_and_should_emit(&online, true));
+        assert!(update_online_and_should_emit(&online, false));
+        assert!(!update_online_and_should_emit(&online, false));
     }
 }

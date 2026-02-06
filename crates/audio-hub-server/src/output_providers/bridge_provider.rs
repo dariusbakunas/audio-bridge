@@ -23,6 +23,13 @@ pub(crate) struct BridgeProvider;
 impl BridgeProvider {
     /// Ensure the currently active bridge is reachable before serving requests.
     async fn ensure_active_connected(state: &AppState) -> Result<(), ProviderError> {
+        tracing::debug!(
+            bridge_online = state
+                .bridge
+                .bridge_online
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "ensure_active_connected called"
+        );
         if state
             .bridge
             .bridge_online
