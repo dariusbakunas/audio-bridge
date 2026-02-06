@@ -29,6 +29,7 @@ use crate::models;
         api::providers_list,
         api::provider_outputs_list,
         api::outputs_list,
+        api::outputs_stream,
         api::outputs_select,
     ),
     components(

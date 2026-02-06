@@ -69,6 +69,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                             },
                         );
                     }
+                    state.events.outputs_changed();
                     tracing::info!(
                         bridge_id = %id,
                         http_addr = %http,
@@ -81,6 +82,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                         if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                             map.remove(&id);
                         }
+                        state.events.outputs_changed();
                         tracing::info!(bridge_id = %id, "mdns: bridge removed");
                     }
                 }
@@ -114,6 +116,7 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
                 if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
                     map.remove(&id);
                 }
+                state.events.outputs_changed();
                 tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");
             }
         }

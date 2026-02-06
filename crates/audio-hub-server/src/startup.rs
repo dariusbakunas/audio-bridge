@@ -180,6 +180,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::outputs_list)
+            .service(api::outputs_stream)
             .service(api::outputs_select);
 
         if let Some(dist) = web_ui_dist.clone() {

@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 pub enum HubEvent {
     QueueChanged,
     StatusChanged,
+    OutputsChanged,
 }
 
 #[derive(Clone)]
@@ -36,5 +37,10 @@ impl EventBus {
     /// Notify subscribers that playback status has changed.
     pub fn status_changed(&self) {
         let _ = self.sender.send(HubEvent::StatusChanged);
+    }
+
+    /// Notify subscribers that outputs or selection have changed.
+    pub fn outputs_changed(&self) {
+        let _ = self.sender.send(HubEvent::OutputsChanged);
     }
 }

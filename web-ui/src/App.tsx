@@ -160,8 +160,11 @@ export default function App() {
       try {
         const response = await fetchJson<OutputsResponse>("/outputs");
         if (!mounted) return;
+        const activeId = response.outputs.some((output) => output.id === response.active_id)
+          ? response.active_id
+          : null;
         setOutputs(response.outputs);
-        setActiveOutputId(response.active_id ?? null);
+        setActiveOutputId(activeId);
         setError(null);
       } catch (err) {
         if (!mounted) return;
@@ -180,6 +183,29 @@ export default function App() {
       clearInterval(timer);
     };
   }, [outputsOpen]);
+
+  useEffect(() => {
+    let mounted = true;
+    const stream = new EventSource(apiUrl("/outputs/stream"));
+    stream.addEventListener("outputs", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as OutputsResponse;
+      const activeId = data.outputs.some((output) => output.id === data.active_id)
+        ? data.active_id
+        : null;
+      setOutputs(data.outputs);
+      setActiveOutputId(activeId);
+      setError(null);
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setError("Live outputs disconnected.");
+    };
+    return () => {
+      mounted = false;
+      stream.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeOutputId) {

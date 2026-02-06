@@ -430,12 +430,30 @@ fn sse_event(event: &str, data: &str) -> Bytes {
     Bytes::from(payload)
 }
 
+fn normalize_outputs_response(mut resp: OutputsResponse) -> OutputsResponse {
+    if let Some(active_id) = resp.active_id.as_deref() {
+        if !resp.outputs.iter().any(|o| o.id == active_id) {
+            resp.active_id = None;
+        }
+    }
+    resp
+}
+
 struct QueueStreamState {
     state: web::Data<AppState>,
     receiver: tokio::sync::broadcast::Receiver<HubEvent>,
     interval: Interval,
     pending: VecDeque<Bytes>,
     last_queue: Option<String>,
+    last_ping: Instant,
+}
+
+struct OutputsStreamState {
+    state: web::Data<AppState>,
+    receiver: tokio::sync::broadcast::Receiver<HubEvent>,
+    interval: Interval,
+    pending: VecDeque<Bytes>,
+    last_outputs: Option<String>,
     last_ping: Instant,
 }
 
@@ -489,6 +507,7 @@ pub async fn status_stream(
                         match result {
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::QueueChanged) => {}
+                            Ok(HubEvent::OutputsChanged) => {}
                             Err(RecvError::Lagged(_)) => {}
                             Err(RecvError::Closed) => return None,
                         }
@@ -569,6 +588,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                                 }
                             }
                             Ok(HubEvent::StatusChanged) => {}
+                            Ok(HubEvent::OutputsChanged) => {}
                             Err(RecvError::Lagged(_)) => {
                                 let queue = ctx.state.output_controller.queue_list(&ctx.state);
                                 let json = serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
@@ -578,6 +598,74 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                             Err(RecvError::Closed) => return None,
                         }
                     }
+                }
+
+                if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {
+                    ctx.last_ping = Instant::now();
+                    ctx.pending.push_back(Bytes::from(": ping\n\n"));
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/outputs/stream",
+    responses(
+        (status = 200, description = "Outputs event stream")
+    )
+)]
+#[get("/outputs/stream")]
+/// Stream output updates via server-sent events.
+pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
+    let initial = normalize_outputs_response(state.output_controller.list_outputs(&state));
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
+    let mut pending = VecDeque::new();
+    pending.push_back(sse_event("outputs", &initial_json));
+
+    let mut interval = tokio::time::interval(Duration::from_millis(2000));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let receiver = state.events.subscribe();
+
+    let stream = unfold(
+        OutputsStreamState {
+            state: state.clone(),
+            receiver,
+            interval,
+            pending,
+            last_outputs: Some(initial_json),
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+                tokio::select! {
+                    _ = ctx.interval.tick() => {}
+                    result = ctx.receiver.recv() => {
+                        match result {
+                            Ok(HubEvent::OutputsChanged) => {}
+                            Ok(HubEvent::StatusChanged) => {}
+                            Ok(HubEvent::QueueChanged) => {}
+                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Closed) => return None,
+                        }
+                    }
+                }
+
+                let outputs = normalize_outputs_response(ctx.state.output_controller.list_outputs(&ctx.state));
+                let json = serde_json::to_string(&outputs).unwrap_or_else(|_| "null".to_string());
+                if ctx.last_outputs.as_deref() != Some(json.as_str()) {
+                    ctx.last_outputs = Some(json.clone());
+                    ctx.pending.push_back(sse_event("outputs", &json));
                 }
 
                 if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {
@@ -643,7 +731,9 @@ pub async fn provider_outputs_list(
 #[get("/outputs")]
 /// List all outputs across providers.
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(state.output_controller.list_outputs(&state))
+    HttpResponse::Ok().json(normalize_outputs_response(
+        state.output_controller.list_outputs(&state),
+    ))
 }
 
 #[utoipa::path(
@@ -662,7 +752,10 @@ pub async fn outputs_select(
     body: web::Json<OutputSelectRequest>,
 ) -> impl Responder {
     match state.output_controller.select_output(&state, &body.id).await {
-        Ok(()) => HttpResponse::Ok().finish(),
+        Ok(()) => {
+            state.events.outputs_changed();
+            HttpResponse::Ok().finish()
+        }
         Err(err) => err.into_response(),
     }
 }
