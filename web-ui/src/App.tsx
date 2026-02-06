@@ -136,6 +136,11 @@ export default function App() {
   const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
   const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
   const [selectedTrackPath, setSelectedTrackPath] = useState<string | null>(null);
+  const [trackMenuPath, setTrackMenuPath] = useState<string | null>(null);
+  const [trackMenuPosition, setTrackMenuPosition] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -183,6 +188,22 @@ export default function App() {
       clearInterval(timer);
     };
   }, [outputsOpen]);
+
+  useEffect(() => {
+    if (!trackMenuPath) return;
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target as Element | null;
+      if (target?.closest('[data-track-menu="true"]')) {
+        return;
+      }
+      setTrackMenuPath(null);
+      setTrackMenuPosition(null);
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, [trackMenuPath]);
 
   useEffect(() => {
     let mounted = true;
@@ -275,6 +296,8 @@ export default function App() {
         setLibraryDir(response.dir);
         setLibraryEntries(sortLibraryEntries(response.entries));
         setSelectedTrackPath(null);
+        setTrackMenuPath(null);
+        setTrackMenuPosition(null);
         setError(null);
       } catch (err) {
         if (!mounted) return;
@@ -333,6 +356,14 @@ export default function App() {
   async function handleQueue(path: string) {
     try {
       await postJson("/queue", { paths: [path] });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function handlePlayNext(path: string) {
+    try {
+      await postJson("/queue/next/add", { paths: [path] });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -417,13 +448,14 @@ export default function App() {
                     </button>
                   );
                 }
+                const isSelected = selectedTrackPath === entry.path;
+                const menuOpen = trackMenuPath === entry.path;
+                const canPlayTrack = Boolean(activeOutputId);
                 return (
                   <button
                     key={entry.path}
                     type="button"
-                    className={`library-row track${
-                      selectedTrackPath === entry.path ? " selected" : ""
-                    }`}
+                    className={`library-row track${isSelected ? " selected" : ""}`}
                     onClick={() => setSelectedTrackPath(entry.path)}
                   >
                     <div>
@@ -435,24 +467,75 @@ export default function App() {
                     </div>
                     <div className="library-actions-inline">
                       <span className="muted small">{formatMs(entry.duration_ms)}</span>
-                      <button
-                        className="btn ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleQueue(entry.path);
-                        }}
-                      >
-                        Queue
-                      </button>
-                      <button
-                        className="btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handlePlay(entry.path);
-                        }}
-                      >
-                        Play
-                      </button>
+                      <div className="track-menu-wrap" data-track-menu="true">
+                        <button
+                          className="track-menu-button"
+                          aria-label="Track options"
+                          aria-expanded={menuOpen}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (menuOpen) {
+                              setTrackMenuPath(null);
+                              setTrackMenuPosition(null);
+                              return;
+                            }
+                            const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                            setTrackMenuPosition({
+                              top: rect.bottom + 6,
+                              right: window.innerWidth - rect.right,
+                            });
+                            setTrackMenuPath(entry.path);
+                          }}
+                          data-track-menu="true"
+                        >
+                          <span className="track-menu-dots" aria-hidden="true"></span>
+                        </button>
+                        {menuOpen ? (
+                          <div
+                            className="track-menu"
+                            onClick={(event) => event.stopPropagation()}
+                            data-track-menu="true"
+                            style={
+                              trackMenuPosition
+                                ? { top: trackMenuPosition.top, right: trackMenuPosition.right }
+                                : undefined
+                            }
+                          >
+                            <button
+                              className="track-menu-item"
+                              disabled={!canPlayTrack}
+                              onClick={() => {
+                                handlePlay(entry.path);
+                                setTrackMenuPath(null);
+                                setTrackMenuPosition(null);
+                              }}
+                            >
+                              Play
+                            </button>
+                            <button
+                              className="track-menu-item"
+                              onClick={() => {
+                                handleQueue(entry.path);
+                                setTrackMenuPath(null);
+                                setTrackMenuPosition(null);
+                              }}
+                            >
+                              Queue
+                            </button>
+                            <button
+                              className="track-menu-item"
+                              disabled={!canPlayTrack}
+                              onClick={() => {
+                                handlePlayNext(entry.path);
+                                setTrackMenuPath(null);
+                                setTrackMenuPosition(null);
+                              }}
+                            >
+                              Play next
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </button>
                 );

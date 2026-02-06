@@ -238,6 +238,68 @@ p {
   box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.2);
 }
 
+.track-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.track-menu-button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.track-menu-button:hover {
+  opacity: 1;
+}
+
+.track-menu-dots {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 -7px 0 currentColor, 0 7px 0 currentColor;
+}
+
+.track-menu {
+  position: fixed;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  z-index: 2;
+}
+
+.track-menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.track-menu-item:hover {
+  background: rgba(18, 18, 18, 0.06);
+}
+
+.track-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .library-title {
   font-weight: 600;
 }

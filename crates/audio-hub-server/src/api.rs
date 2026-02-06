@@ -375,6 +375,7 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 #[post("/queue/next")]
 /// Skip to the next queued track.
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
+    tracing::info!("queue next request");
     match state.output_controller.queue_next(&state).await {
         Ok(true) => HttpResponse::Ok().finish(),
         Ok(false) => HttpResponse::NoContent().finish(),
@@ -557,7 +558,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
     let mut pending = VecDeque::new();
     pending.push_back(sse_event("queue", &initial_json));
 
-    let mut interval = tokio::time::interval(Duration::from_millis(2000));
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let receiver = state.events.subscribe();
 
@@ -648,24 +649,27 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                 if let Some(bytes) = ctx.pending.pop_front() {
                     return Some((Ok::<Bytes, Error>(bytes), ctx));
                 }
+                let mut refresh = false;
                 tokio::select! {
                     _ = ctx.interval.tick() => {}
                     result = ctx.receiver.recv() => {
                         match result {
-                            Ok(HubEvent::OutputsChanged) => {}
+                            Ok(HubEvent::OutputsChanged) => refresh = true,
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::QueueChanged) => {}
-                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
                     }
                 }
 
-                let outputs = normalize_outputs_response(ctx.state.output_controller.list_outputs(&ctx.state));
-                let json = serde_json::to_string(&outputs).unwrap_or_else(|_| "null".to_string());
-                if ctx.last_outputs.as_deref() != Some(json.as_str()) {
-                    ctx.last_outputs = Some(json.clone());
-                    ctx.pending.push_back(sse_event("outputs", &json));
+                if refresh {
+                    let outputs = normalize_outputs_response(ctx.state.output_controller.list_outputs(&ctx.state));
+                    let json = serde_json::to_string(&outputs).unwrap_or_else(|_| "null".to_string());
+                    if ctx.last_outputs.as_deref() != Some(json.as_str()) {
+                        ctx.last_outputs = Some(json.clone());
+                        ctx.pending.push_back(sse_event("outputs", &json));
+                    }
                 }
 
                 if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {

@@ -249,10 +249,17 @@ impl OutputController {
     /// Dispatch the next queued track if available.
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
+        state.playback_manager.status().set_manual_advance_in_flight(true);
         match state.playback_manager.queue_next() {
             NextDispatchResult::Dispatched => Ok(true),
-            NextDispatchResult::Empty => Ok(false),
-            NextDispatchResult::Failed => Err(OutputControllerError::PlayerOffline),
+            NextDispatchResult::Empty => {
+                state.playback_manager.status().set_manual_advance_in_flight(false);
+                Ok(false)
+            }
+            NextDispatchResult::Failed => {
+                state.playback_manager.status().set_manual_advance_in_flight(false);
+                Err(OutputControllerError::PlayerOffline)
+            }
         }
     }
 

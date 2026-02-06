@@ -26,10 +26,14 @@ pub(crate) struct AutoAdvanceInputs {
     pub user_paused: bool,
     pub seek_in_flight: bool,
     pub auto_advance_in_flight: bool,
+    pub manual_advance_in_flight: bool,
     pub now_playing: bool,
 }
 
 fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
+    if inputs.manual_advance_in_flight {
+        return false;
+    }
     let ended = inputs.last_duration_ms.is_some()
         && inputs.remote_duration_ms.is_none()
         && inputs.remote_elapsed_ms.is_none()
@@ -198,12 +202,26 @@ impl QueueService {
         transport: &dyn PlaybackTransport,
         inputs: AutoAdvanceInputs,
     ) -> bool {
+        tracing::info!(
+            last_duration_ms = ?inputs.last_duration_ms,
+            remote_duration_ms = ?inputs.remote_duration_ms,
+            remote_elapsed_ms = ?inputs.remote_elapsed_ms,
+            elapsed_ms = ?inputs.elapsed_ms,
+            duration_ms = ?inputs.duration_ms,
+            user_paused = inputs.user_paused,
+            seek_in_flight = inputs.seek_in_flight,
+            auto_advance_in_flight = inputs.auto_advance_in_flight,
+            manual_advance_in_flight = inputs.manual_advance_in_flight,
+            now_playing = inputs.now_playing,
+            "auto-advance check"
+        );
         let should_dispatch = should_auto_advance(&inputs);
 
         if !should_dispatch {
             return false;
         }
 
+        tracing::info!("auto-advance dispatching next track");
         matches!(
             self.dispatch_next(transport, true),
             NextDispatchResult::Dispatched
@@ -281,6 +299,7 @@ mod tests {
             user_paused: false,
             seek_in_flight: false,
             auto_advance_in_flight: false,
+            manual_advance_in_flight: false,
             now_playing: true,
         }
     }
@@ -400,5 +419,21 @@ mod tests {
             ..make_inputs()
         };
         assert!(!service.maybe_auto_advance(&transport, seek_inputs));
+    }
+
+    #[test]
+    fn maybe_auto_advance_respects_manual_next_in_flight() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+        let inputs = AutoAdvanceInputs {
+            last_duration_ms: Some(1000),
+            remote_duration_ms: None,
+            remote_elapsed_ms: None,
+            manual_advance_in_flight: true,
+            now_playing: true,
+            ..make_inputs()
+        };
+        assert!(!service.maybe_auto_advance(&transport, inputs));
     }
 }

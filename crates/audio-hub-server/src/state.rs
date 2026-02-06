@@ -58,6 +58,8 @@ pub struct PlayerStatus {
     pub auto_advance_in_flight: bool,
     /// Seek is in flight (prevents false end-of-track).
     pub seek_in_flight: bool,
+    /// Manual next is in flight (suppresses auto-advance).
+    pub manual_advance_in_flight: bool,
 }
 
 /// Shared application state for Actix handlers and background workers.

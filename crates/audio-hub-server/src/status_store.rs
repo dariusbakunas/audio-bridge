@@ -92,6 +92,7 @@ impl StatusStore {
             s.buffer_capacity_frames = None;
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
+            s.manual_advance_in_flight = false;
         }
         self.events.status_changed();
     }
@@ -123,6 +124,7 @@ impl StatusStore {
     ) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = Some(path);
+            s.manual_advance_in_flight = false;
             apply_playback_fields(
                 &mut s,
                 PlaybackFields {
@@ -153,6 +155,14 @@ impl StatusStore {
             s.now_playing = None;
             s.elapsed_ms = None;
             s.duration_ms = None;
+            s.manual_advance_in_flight = false;
+        }
+        self.events.status_changed();
+    }
+
+    pub fn set_manual_advance_in_flight(&self, value: bool) {
+        if let Ok(mut s) = self.inner.lock() {
+            s.manual_advance_in_flight = value;
         }
         self.events.status_changed();
     }
@@ -205,6 +215,9 @@ impl StatusStore {
             if should_clear_seek_in_flight(&s) {
                 s.seek_in_flight = false;
             }
+            if should_clear_manual_advance_in_flight(&s) {
+                s.manual_advance_in_flight = false;
+            }
 
             self.events.status_changed();
             return AutoAdvanceInputs {
@@ -216,6 +229,7 @@ impl StatusStore {
                 user_paused: s.user_paused,
                 seek_in_flight: s.seek_in_flight,
                 auto_advance_in_flight: s.auto_advance_in_flight,
+                manual_advance_in_flight: s.manual_advance_in_flight,
                 now_playing: s.now_playing.is_some(),
             };
         }
@@ -229,6 +243,7 @@ impl StatusStore {
             user_paused: false,
             seek_in_flight: false,
             auto_advance_in_flight: false,
+            manual_advance_in_flight: false,
             now_playing: false,
         }
     }
@@ -278,6 +293,10 @@ fn should_clear_seek_in_flight(state: &PlayerStatus) -> bool {
     state.seek_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
 }
 
+fn should_clear_manual_advance_in_flight(state: &PlayerStatus) -> bool {
+    state.manual_advance_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +340,17 @@ mod tests {
         assert_eq!(status.elapsed_ms, Some(0));
         assert!(status.user_paused);
         assert!(status.paused);
+    }
+
+    #[test]
+    fn on_play_does_not_clear_manual_advance_in_flight() {
+        let store = make_store();
+        if let Ok(mut status) = store.inner().lock() {
+            status.manual_advance_in_flight = true;
+        }
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        let status = store.inner().lock().unwrap();
+        assert!(status.manual_advance_in_flight);
     }
 
     #[test]
@@ -403,6 +433,21 @@ mod tests {
         store.apply_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(!status.seek_in_flight);
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_clears_manual_advance_when_ready() {
+        let store = make_store();
+        store.set_manual_advance_in_flight(true);
+        let remote = BridgeStatus {
+            elapsed_ms: Some(10),
+            duration_ms: Some(100),
+            ..make_bridge_status()
+        };
+
+        store.apply_remote_and_inputs(&remote, None);
+        let status = store.inner().lock().unwrap();
+        assert!(!status.manual_advance_in_flight);
     }
 
     #[test]
