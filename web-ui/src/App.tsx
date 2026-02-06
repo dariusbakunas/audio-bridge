@@ -135,6 +135,7 @@ export default function App() {
   const [libraryDir, setLibraryDir] = useState<string | null>(null);
   const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
   const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
+  const [selectedTrackPath, setSelectedTrackPath] = useState<string | null>(null);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -143,6 +144,15 @@ export default function App() {
     () => outputs.find((output) => output.id === activeOutputId) ?? null,
     [outputs, activeOutputId]
   );
+  const canTogglePlayback = Boolean(
+    activeOutputId && (status?.now_playing || selectedTrackPath)
+  );
+  const showPlayIcon = !status?.now_playing || status?.paused;
+  const playButtonTitle = !activeOutputId
+    ? "Select an output to control playback."
+    : !status?.now_playing && !selectedTrackPath
+      ? "Select a track to play."
+      : undefined;
 
   useEffect(() => {
     let mounted = true;
@@ -238,6 +248,7 @@ export default function App() {
         if (!mounted) return;
         setLibraryDir(response.dir);
         setLibraryEntries(sortLibraryEntries(response.entries));
+        setSelectedTrackPath(null);
         setError(null);
       } catch (err) {
         if (!mounted) return;
@@ -298,6 +309,16 @@ export default function App() {
       await postJson("/queue", { paths: [path] });
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  async function handlePrimaryAction() {
+    if (status?.now_playing) {
+      await handlePause();
+      return;
+    }
+    if (selectedTrackPath) {
+      await handlePlay(selectedTrackPath);
     }
   }
 
@@ -371,7 +392,14 @@ export default function App() {
                   );
                 }
                 return (
-                  <div key={entry.path} className="library-row track">
+                  <button
+                    key={entry.path}
+                    type="button"
+                    className={`library-row track${
+                      selectedTrackPath === entry.path ? " selected" : ""
+                    }`}
+                    onClick={() => setSelectedTrackPath(entry.path)}
+                  >
                     <div>
                       <div className="library-title">{entry.file_name}</div>
                       <div className="muted small">
@@ -381,14 +409,26 @@ export default function App() {
                     </div>
                     <div className="library-actions-inline">
                       <span className="muted small">{formatMs(entry.duration_ms)}</span>
-                      <button className="btn ghost" onClick={() => handleQueue(entry.path)}>
+                      <button
+                        className="btn ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleQueue(entry.path);
+                        }}
+                      >
                         Queue
                       </button>
-                      <button className="btn" onClick={() => handlePlay(entry.path)}>
+                      <button
+                        className="btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handlePlay(entry.path);
+                        }}
+                      >
                         Play
                       </button>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             {!libraryLoading && libraryEntries.length === 0 ? (
@@ -504,8 +544,14 @@ export default function App() {
                 <polygon points="13,5 5,12 13,19" />
               </svg>
             </button>
-            <button className="icon-btn primary" onClick={handlePause} aria-label="Play or pause">
-              {status?.paused ? (
+            <button
+              className="icon-btn primary"
+              onClick={handlePrimaryAction}
+              aria-label="Play or pause"
+              disabled={!canTogglePlayback}
+              title={playButtonTitle}
+            >
+              {showPlayIcon ? (
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <polygon points="7,5 19,12 7,19" />
                 </svg>

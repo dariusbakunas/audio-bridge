@@ -230,7 +230,12 @@ p {
 }
 
 .library-row.track {
-  cursor: default;
+  cursor: pointer;
+}
+
+.library-row.track.selected {
+  border-color: rgba(255, 107, 53, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.2);
 }
 
 .library-title {
