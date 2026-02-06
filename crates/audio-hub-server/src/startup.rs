@@ -33,13 +33,13 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
     let bind = resolve_bind(args.bind, &cfg)?;
     let public_base_url = config::public_base_url_from_config(&cfg, bind)?;
     let media_dir = resolve_media_dir(args.media_dir, &cfg)?;
-    let web_ui_dist = locate_web_ui_dist();
     tracing::info!(
         bind = %bind,
         public_base_url = %public_base_url,
         media_dir = %media_dir.display(),
         "starting audio-hub-server"
     );
+    let web_ui_dist = locate_web_ui_dist();
     if let Some(dist) = web_ui_dist.as_ref() {
         tracing::info!(path = %dist.display(), "web ui static assets enabled");
     } else {
