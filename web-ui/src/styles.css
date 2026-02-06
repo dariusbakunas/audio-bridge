@@ -459,8 +459,8 @@ p {
 
 .player-controls {
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   gap: 16px;
   margin-bottom: 12px;
 }
@@ -488,6 +488,20 @@ p {
   height: 52px;
   background: var(--ink);
   color: #fff;
+  border: none;
+}
+
+.icon-btn.signal-btn {
+  color: var(--muted);
+  border: none;
+}
+
+.icon-btn.signal-btn.active {
+  color: var(--accent-2);
+}
+
+.icon-btn.queue-btn {
+  color: var(--muted);
   border: none;
 }
 

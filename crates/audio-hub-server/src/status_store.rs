@@ -190,6 +190,12 @@ impl StatusStore {
                     "bridge status update"
                 );
             }
+            if should_clear_now_playing(&s, remote) {
+                s.now_playing = None;
+                s.paused = false;
+                s.user_paused = false;
+                s.auto_advance_in_flight = false;
+            }
             apply_playback_fields(
                 &mut s,
                 PlaybackFields {
@@ -295,6 +301,13 @@ fn should_clear_seek_in_flight(state: &PlayerStatus) -> bool {
 
 fn should_clear_manual_advance_in_flight(state: &PlayerStatus) -> bool {
     state.manual_advance_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
+}
+
+fn should_clear_now_playing(state: &PlayerStatus, remote: &BridgeStatus) -> bool {
+    state.now_playing.is_some()
+        && remote.now_playing.is_none()
+        && remote.elapsed_ms.is_none()
+        && remote.duration_ms.is_none()
 }
 
 #[cfg(test)]
@@ -467,5 +480,23 @@ mod tests {
         assert_eq!(inputs.duration_ms, Some(100));
         assert!(!inputs.user_paused);
         assert!(!inputs.seek_in_flight);
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_clears_now_playing_on_stop() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        let remote = BridgeStatus {
+            now_playing: None,
+            elapsed_ms: None,
+            duration_ms: None,
+            ..make_bridge_status()
+        };
+
+        store.apply_remote_and_inputs(&remote, None);
+        let status = store.inner().lock().unwrap();
+        assert!(status.now_playing.is_none());
+        assert!(!status.paused);
+        assert!(!status.user_paused);
     }
 }

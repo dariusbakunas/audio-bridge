@@ -141,6 +141,8 @@ export default function App() {
     top: number;
     right: number;
   } | null>(null);
+  const [queueOpen, setQueueOpen] = useState<boolean>(false);
+  const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -153,6 +155,7 @@ export default function App() {
     activeOutputId && (status?.now_playing || selectedTrackPath)
   );
   const showPlayIcon = !status?.now_playing || status?.paused;
+  const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const playButtonTitle = !activeOutputId
     ? "Select an output to control playback."
     : !status?.now_playing && !selectedTrackPath
@@ -204,6 +207,12 @@ export default function App() {
       document.removeEventListener("click", handleDocumentClick);
     };
   }, [trackMenuPath]);
+
+  useEffect(() => {
+    if (!isPlaying && signalOpen) {
+      setSignalOpen(false);
+    }
+  }, [isPlaying, signalOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -546,106 +555,35 @@ export default function App() {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-header">
-            <span>Queue</span>
-            <span className="pill">{queue.length} items</span>
-          </div>
-          <div className="queue-list">
-            {queue.map((item, index) => (
-              <div key={`${item.kind}-${index}`} className="queue-row">
-                {item.kind === "track" ? (
-                  <>
-                    <div>
-                      <div className="queue-title">{item.file_name}</div>
-                      <div className="muted small">
-                        {item.artist ?? "Unknown artist"}
-                        {item.album ? ` - ${item.album}` : ""}
-                      </div>
-                    </div>
-                    <div className="queue-meta">
-                      <span>{item.format}</span>
-                      <span>{formatMs(item.duration_ms)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <span className="muted">Missing: {item.path}</span>
-                )}
-              </div>
-            ))}
-            {queue.length === 0 ? (
-              <p className="muted">Queue is empty. Add tracks from the TUI for now.</p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <span>Signal</span>
-            <span className="pill">{activeOutput?.name ?? "No output"}</span>
-          </div>
-          <div className="signal-grid">
-            <div>
-              <div className="signal-label">Source</div>
-              <div className="signal-value">
-                {status?.source_codec ?? status?.format ?? "—"}
-                {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
-              </div>
-            </div>
-            <div>
-              <div className="signal-label">Sample rate</div>
-              <div className="signal-value">{formatHz(status?.sample_rate)}</div>
-            </div>
-            <div>
-              <div className="signal-label">Output rate</div>
-              <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
-            </div>
-            <div>
-              <div className="signal-label">Resample</div>
-              <div className="signal-value">
-                {status?.resampling ? "Enabled" : "Direct"}
-                {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
-              </div>
-            </div>
-            <div>
-              <div className="signal-label">Output format</div>
-              <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
-            </div>
-            <div>
-              <div className="signal-label">Channels</div>
-              <div className="signal-value">{status?.channels ?? "—"}</div>
-            </div>
-            <div>
-              <div className="signal-label">Bitrate</div>
-              <div className="signal-value">
-                {status?.bitrate_kbps ? `${status.bitrate_kbps} kbps` : "—"}
-              </div>
-            </div>
-            <div>
-              <div className="signal-label">Buffer</div>
-              <div className="signal-value">
-                {status?.buffered_frames && status?.buffer_capacity_frames
-                  ? `${status.buffered_frames} / ${status.buffer_capacity_frames} frames`
-                  : "—"}
-              </div>
-            </div>
-          </div>
-          <div className="muted small updated">
-            Updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
-          </div>
-        </div>
-      </section>
+        </section>
 
       <div className="player-bar">
         <div className="player-left">
-          <div className="album-art">Artwork</div>
           <div>
-            <div className="track-title">{status?.title ?? status?.now_playing ?? "Idle"}</div>
-            <div className="muted small">{status?.artist ?? "Unknown artist"}</div>
+            <div className="track-title">
+              {status?.title ?? status?.now_playing ?? "Nothing playing"}
+            </div>
+            <div className="muted small">
+              {status?.artist ?? (status?.now_playing ? "Unknown artist" : "Select a track to start")}
+            </div>
           </div>
         </div>
         <div className="player-middle">
           <div className="player-controls">
+            <button
+              className={`icon-btn signal-btn${isPlaying ? " active" : ""}`}
+              aria-label="Signal details"
+              onClick={() => setSignalOpen(true)}
+              disabled={!isPlaying}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="10" width="2" height="4" rx="1" />
+                <rect x="7" y="7" width="2" height="10" rx="1" />
+                <rect x="11" y="4" width="2" height="16" rx="1" />
+                <rect x="15" y="7" width="2" height="10" rx="1" />
+                <rect x="19" y="10" width="2" height="4" rx="1" />
+              </svg>
+            </button>
             <button className="icon-btn" aria-label="Previous" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="3" y="5" width="2" height="14" rx="1" />
@@ -681,6 +619,17 @@ export default function App() {
                 <rect x="19" y="5" width="2" height="14" rx="1" />
                 <polygon points="3,5 11,12 3,19" />
                 <polygon points="11,5 19,12 11,19" />
+              </svg>
+            </button>
+            <button
+              className="icon-btn queue-btn"
+              aria-label="Queue"
+              onClick={() => setQueueOpen(true)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="6" width="16" height="2" rx="1" />
+                <rect x="4" y="11" width="16" height="2" rx="1" />
+                <rect x="4" y="16" width="10" height="2" rx="1" />
               </svg>
             </button>
           </div>
@@ -742,6 +691,113 @@ export default function App() {
               ))}
               {outputs.length === 0 ? (
                 <p className="muted">No outputs reported. Check provider discovery.</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {signalOpen ? (
+        <div className="modal" onClick={() => setSignalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="card-header">
+              <span>Signal</span>
+              <div className="card-actions">
+                <span className="pill">{activeOutput?.name ?? "No output"}</span>
+                <button className="btn ghost small" onClick={() => setSignalOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="signal-grid">
+              <div>
+                <div className="signal-label">Source</div>
+                <div className="signal-value">
+                  {status?.source_codec ?? status?.format ?? "—"}
+                  {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
+                </div>
+              </div>
+              <div>
+                <div className="signal-label">Sample rate</div>
+                <div className="signal-value">{formatHz(status?.sample_rate)}</div>
+              </div>
+              <div>
+                <div className="signal-label">Output rate</div>
+                <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
+              </div>
+              <div>
+                <div className="signal-label">Resample</div>
+                <div className="signal-value">
+                  {status?.resampling ? "Enabled" : "Direct"}
+                  {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
+                </div>
+              </div>
+              <div>
+                <div className="signal-label">Output format</div>
+                <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
+              </div>
+              <div>
+                <div className="signal-label">Channels</div>
+                <div className="signal-value">{status?.channels ?? "—"}</div>
+              </div>
+              <div>
+                <div className="signal-label">Bitrate</div>
+                <div className="signal-value">
+                  {status?.bitrate_kbps ? `${status.bitrate_kbps} kbps` : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="signal-label">Buffer</div>
+                <div className="signal-value">
+                  {status?.buffered_frames && status?.buffer_capacity_frames
+                    ? `${status.buffered_frames} / ${status.buffer_capacity_frames} frames`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+            <div className="muted small updated">
+              Updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {queueOpen ? (
+        <div className="modal" onClick={() => setQueueOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="card-header">
+              <span>Queue</span>
+              <div className="card-actions">
+                <span className="pill">{queue.length} items</span>
+                <button className="btn ghost small" onClick={() => setQueueOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="queue-list">
+              {queue.map((item, index) => (
+                <div key={`${item.kind}-${index}`} className="queue-row">
+                  {item.kind === "track" ? (
+                    <>
+                      <div>
+                        <div className="queue-title">{item.file_name}</div>
+                        <div className="muted small">
+                          {item.artist ?? "Unknown artist"}
+                          {item.album ? ` - ${item.album}` : ""}
+                        </div>
+                      </div>
+                      <div className="queue-meta">
+                        <span>{item.format}</span>
+                        <span>{formatMs(item.duration_ms)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="muted">Missing: {item.path}</span>
+                  )}
+                </div>
+              ))}
+              {queue.length === 0 ? (
+                <p className="muted">Queue is empty. Add tracks from the TUI for now.</p>
               ) : null}
             </div>
           </div>
