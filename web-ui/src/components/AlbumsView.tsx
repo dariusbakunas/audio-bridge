@@ -38,7 +38,11 @@ export default function AlbumsView({
       {error ? <p className="muted">{error}</p> : null}
       {!loading && !error ? (
         <div className="album-grid">
-          {albums.map((album) => (
+          {albums.map((album) => {
+            const coverSrc = album.cover_art_url
+              ? `${album.cover_art_url}${album.cover_art_path ? `?v=${encodeURIComponent(album.cover_art_path)}` : ""}`
+              : placeholder(album.title, album.artist);
+            return (
             <div key={album.id} className="album-card">
               <div
                 className="album-card-link"
@@ -53,12 +57,7 @@ export default function AlbumsView({
                 }}
               >
                 <div className="album-cover-frame">
-                  <img
-                    className="album-cover"
-                    src={album.cover_art_url ?? placeholder(album.title, album.artist)}
-                    alt={album.title}
-                    loading="lazy"
-                  />
+                  <img className="album-cover" src={coverSrc} alt={album.title} loading="lazy" />
                 <button
                   className={`album-play${
                     activeAlbumId === album.id && isPlaying ? " is-active" : ""
@@ -103,7 +102,8 @@ export default function AlbumsView({
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
           {albums.length === 0 ? <p className="muted">No albums found.</p> : null}
         </div>
       ) : null}

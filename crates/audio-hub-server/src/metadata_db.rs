@@ -292,20 +292,36 @@ impl MetadataDb {
         } else {
             None
         };
-        let album_artist_id = if let Some(name) = record
-            .album_artist
-            .as_deref()
-            .or(record.artist.as_deref())
-        {
-            find_artist_id(&tx, name)?
-        } else {
-            None
-        };
-        let album_id = if let Some(title) = record.album.as_deref() {
+        let album_id = tx
+            .query_row(
+                "SELECT album_id FROM tracks WHERE path = ?1",
+                params![record.path],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch album id for track")?;
+        let album_id = if album_id.is_some() {
+            album_id
+        } else if let Some(title) = record.album.as_deref() {
+            let album_artist_id = if let Some(name) = record
+                .album_artist
+                .as_deref()
+                .or(record.artist.as_deref())
+            {
+                find_artist_id(&tx, name)?
+            } else {
+                None
+            };
             find_album_id(&tx, title, album_artist_id)?
         } else {
             None
         };
+        tracing::info!(
+            path = %record.path,
+            album_id = ?album_id,
+            album = ?record.album,
+            "apply musicbrainz (track) resolved album id"
+        );
 
         if let (Some(artist_id), Some(artist_mbid)) = (artist_id, mb.artist_mbid.as_deref()) {
             if override_existing {
@@ -332,17 +348,19 @@ impl MetadataDb {
 
         if let (Some(album_id), Some(album_mbid)) = (album_id, mb.album_mbid.as_deref()) {
             if override_existing {
-                tx.execute(
+                let updated = tx.execute(
                     "UPDATE albums SET mbid = ?1, cover_art_path = NULL, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2",
                     params![album_mbid, album_id],
                 )
                 .context("update album mbid")?;
+                tracing::info!(album_id, updated, "apply musicbrainz (track) updated album");
             } else {
-                tx.execute(
+                let updated = tx.execute(
                     "UPDATE albums SET mbid = ?1, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
                     params![album_mbid, album_id],
                 )
                 .context("update album mbid")?;
+                tracing::info!(album_id, updated, "apply musicbrainz (track) updated album");
             }
             if let Some(year) = mb.release_year {
                 if override_existing {
@@ -424,17 +442,19 @@ impl MetadataDb {
 
         if let Some(album_mbid) = mb.album_mbid.as_deref() {
             if override_existing {
-                tx.execute(
+                let updated = tx.execute(
                     "UPDATE albums SET mbid = ?1, cover_art_path = NULL, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2",
                     params![album_mbid, album_id],
                 )
                 .context("update album mbid")?;
+                tracing::info!(album_id, updated, "apply musicbrainz (album) updated album");
             } else {
-                tx.execute(
+                let updated = tx.execute(
                     "UPDATE albums SET mbid = ?1, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
                     params![album_mbid, album_id],
                 )
                 .context("update album mbid")?;
+                tracing::info!(album_id, updated, "apply musicbrainz (album) updated album");
             }
         }
 

@@ -294,9 +294,20 @@ fn fetch_and_store_cover(
         album_id: candidate.album_id,
         mbid: candidate.mbid.clone(),
     });
+    tracing::info!(
+        album_id = candidate.album_id,
+        mbid = %candidate.mbid,
+        "cover art fetch start"
+    );
     let (mime_type, data) = match client.fetch_front(&candidate.mbid) {
         Ok(result) => result,
         Err(err) => {
+            tracing::info!(
+                album_id = candidate.album_id,
+                mbid = %candidate.mbid,
+                error = %err,
+                "cover art fetch failed"
+            );
             if let Ok(Some(next)) = db.advance_cover_candidate(candidate.album_id) {
                 tracing::debug!(
                     album_id = candidate.album_id,
@@ -321,6 +332,11 @@ fn fetch_and_store_cover(
         }
     };
     if data.is_empty() {
+        tracing::info!(
+            album_id = candidate.album_id,
+            mbid = %candidate.mbid,
+            "cover art fetch empty response"
+        );
         let attempts = db.increment_cover_art_fail(candidate.album_id, "empty response")?;
         events.metadata_event(MetadataEvent::CoverArtFetchFailure {
             album_id: candidate.album_id,
@@ -334,11 +350,22 @@ fn fetch_and_store_cover(
     let relative_path = store_cover_art(root, &hint, &mime_type, &data)?;
     let updated = db.set_album_cover_by_id_if_empty(candidate.album_id, &relative_path)?;
     if updated {
+        tracing::info!(
+            album_id = candidate.album_id,
+            cover_path = %relative_path,
+            "cover art stored"
+        );
         events.metadata_event(MetadataEvent::CoverArtFetchSuccess {
             album_id: candidate.album_id,
             cover_path: relative_path,
         });
         events.library_changed();
+    } else {
+        tracing::info!(
+            album_id = candidate.album_id,
+            cover_path = %relative_path,
+            "cover art fetched but album already has cover"
+        );
     }
     Ok(())
 }

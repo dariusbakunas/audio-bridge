@@ -60,7 +60,11 @@ export default function AlbumDetailView({
             <div className="album-cover-frame large">
               <img
                 className="album-cover large"
-                src={album?.cover_art_url ?? placeholder(album?.title, album?.artist)}
+                src={
+                  album?.cover_art_url
+                    ? `${album.cover_art_url}${album.cover_art_path ? `?v=${encodeURIComponent(album.cover_art_path)}` : ""}`
+                    : placeholder(album?.title, album?.artist)
+                }
                 alt={album?.title ?? "Album art"}
               />
               <button

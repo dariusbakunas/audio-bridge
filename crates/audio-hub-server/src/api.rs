@@ -880,6 +880,15 @@ pub async fn musicbrainz_match_apply(
             release_year,
             override_existing,
         } => {
+            tracing::info!(
+                path = %path,
+                recording_mbid = %recording_mbid,
+                artist_mbid = ?artist_mbid,
+                album_mbid = ?album_mbid,
+                release_year = ?release_year,
+                override_existing = ?override_existing,
+                "manual musicbrainz match apply (track)"
+            );
             let record = match state.metadata_db.track_record_by_path(&path) {
                 Ok(Some(record)) => record,
                 Ok(None) => return HttpResponse::NotFound().finish(),
@@ -902,6 +911,11 @@ pub async fn musicbrainz_match_apply(
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
             }
+            tracing::info!(
+                path = %record.path,
+                album = ?record.album,
+                "manual musicbrainz match applied (track)"
+            );
             state.events.metadata_event(crate::events::MetadataEvent::MusicBrainzLookupSuccess {
                 path: record.path.clone(),
                 recording_mbid: mb.recording_mbid.clone(),
@@ -917,6 +931,14 @@ pub async fn musicbrainz_match_apply(
             release_year,
             override_existing,
         } => {
+            tracing::info!(
+                album_id,
+                album_mbid = %album_mbid,
+                artist_mbid = ?artist_mbid,
+                release_year = ?release_year,
+                override_existing = ?override_existing,
+                "manual musicbrainz match apply (album)"
+            );
             let mb = MusicBrainzMatch {
                 recording_mbid: None,
                 artist_mbid,
@@ -934,6 +956,7 @@ pub async fn musicbrainz_match_apply(
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
             }
+            tracing::info!(album_id, "manual musicbrainz match applied (album)");
             state.metadata_wake.notify();
         }
     }
