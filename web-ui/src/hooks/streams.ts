@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { apiUrl } from "../api";
-import { LogEvent, MetadataEvent, OutputsResponse, QueueResponse } from "../types";
+import { LogEvent, MetadataEvent, OutputsResponse, QueueResponse, StatusResponse } from "../types";
 
 interface OutputsStreamOptions {
   onEvent: (data: OutputsResponse) => void;
@@ -22,6 +22,12 @@ interface LogsStreamOptions {
 
 interface QueueStreamOptions {
   onEvent: (items: QueueResponse["items"]) => void;
+  onError: () => void;
+}
+
+interface StatusStreamOptions {
+  activeOutputId: string | null;
+  onEvent: (data: StatusResponse) => void;
   onError: () => void;
 }
 
@@ -140,4 +146,33 @@ export function useQueueStream({ onEvent, onError }: QueueStreamOptions) {
       stream.close();
     };
   }, []);
+}
+
+export function useStatusStream({ activeOutputId, onEvent, onError }: StatusStreamOptions) {
+  const onEventRef = useRef(onEvent);
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+    onErrorRef.current = onError;
+  }, [onEvent, onError]);
+
+  useEffect(() => {
+    if (!activeOutputId) return;
+    let mounted = true;
+    const streamUrl = apiUrl(`/outputs/${encodeURIComponent(activeOutputId)}/status/stream`);
+    const stream = new EventSource(streamUrl);
+    stream.addEventListener("status", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as StatusResponse;
+      onEventRef.current(data);
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      onErrorRef.current();
+    };
+    return () => {
+      mounted = false;
+      stream.close();
+    };
+  }, [activeOutputId]);
 }

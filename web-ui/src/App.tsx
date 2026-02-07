@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { apiUrl, fetchJson, postJson } from "./api";
+import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
+import {apiUrl, fetchJson, postJson} from "./api";
 import {
   AlbumListResponse,
   AlbumSummary,
@@ -21,8 +21,14 @@ import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
 import SettingsView from "./components/SettingsView";
 import SignalModal from "./components/SignalModal";
-import { useLogsStream, useMetadataStream, useOutputsStream, useQueueStream } from "./hooks/streams";
-import { usePlaybackActions } from "./hooks/usePlaybackActions";
+import {
+  useLogsStream,
+  useMetadataStream,
+  useOutputsStream,
+  useQueueStream,
+  useStatusStream
+} from "./hooks/streams";
+import {usePlaybackActions} from "./hooks/usePlaybackActions";
 
 interface MetadataEventEntry {
   id: number;
@@ -41,13 +47,13 @@ const MAX_LOG_EVENTS = 300;
 function albumPlaceholder(title?: string | null, artist?: string | null): string {
   const source = title?.trim() || artist?.trim() || "";
   const initials = source
-    .split(/\s+/)
-    .map((part) => part.replace(/[^A-Za-z0-9]/g, ""))
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+      .split(/\s+/)
+      .map((part) => part.replace(/[^A-Za-z0-9]/g, ""))
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
   const label = initials || "NA";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#50555b"/><stop offset="100%" stop-color="#3f444a"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#ffffff" text-anchor="start">${label}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -101,7 +107,7 @@ function sortLibraryEntries(entries: LibraryEntry[]): LibraryEntry[] {
 function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
   switch (event.kind) {
     case "music_brainz_batch":
-      return { title: "MusicBrainz batch", detail: `${event.count} candidates` };
+      return {title: "MusicBrainz batch", detail: `${event.count} candidates`};
     case "music_brainz_lookup_start":
       return {
         title: "MusicBrainz lookup started",
@@ -118,20 +124,20 @@ function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: 
         detail: `${event.title} — ${event.artist}${event.album ? ` (${event.album})` : ""}`
       };
     case "music_brainz_lookup_failure":
-      return { title: "MusicBrainz lookup failed", detail: event.error };
+      return {title: "MusicBrainz lookup failed", detail: event.error};
     case "cover_art_batch":
-      return { title: "Cover art batch", detail: `${event.count} albums` };
+      return {title: "Cover art batch", detail: `${event.count} albums`};
     case "cover_art_fetch_start":
-      return { title: "Cover art fetch started", detail: `album ${event.album_id}` };
+      return {title: "Cover art fetch started", detail: `album ${event.album_id}`};
     case "cover_art_fetch_success":
-      return { title: "Cover art fetched", detail: `album ${event.album_id}` };
+      return {title: "Cover art fetched", detail: `album ${event.album_id}`};
     case "cover_art_fetch_failure":
       return {
         title: "Cover art fetch failed",
         detail: `${event.error} (attempt ${event.attempts})`
       };
     default:
-      return { title: "Metadata event" };
+      return {title: "Metadata event"};
   }
 }
 
@@ -200,26 +206,26 @@ export default function App() {
     setTrackMenuPosition(null);
   }, []);
   const toggleTrackMenu = useCallback(
-    (path: string, target: Element) => {
-      if (trackMenuPath === path) {
-        closeTrackMenu();
-        return;
-      }
-      const rect = target.getBoundingClientRect();
-      setTrackMenuPosition({
-        top: rect.bottom + 6,
-        right: window.innerWidth - rect.right
-      });
-      setTrackMenuPath(path);
-    },
-    [trackMenuPath, closeTrackMenu]
+      (path: string, target: Element) => {
+        if (trackMenuPath === path) {
+          closeTrackMenu();
+          return;
+        }
+        const rect = target.getBoundingClientRect();
+        setTrackMenuPosition({
+          top: rect.bottom + 6,
+          right: window.innerWidth - rect.right
+        });
+        setTrackMenuPath(path);
+      },
+      [trackMenuPath, closeTrackMenu]
   );
   const runTrackMenuAction = useCallback(
-    (action: (path: string) => void | Promise<void>, path: string) => {
-      action(path);
-      closeTrackMenu();
-    },
-    [closeTrackMenu]
+      (action: (path: string) => void | Promise<void>, path: string) => {
+        action(path);
+        closeTrackMenu();
+      },
+      [closeTrackMenu]
   );
   const handleClearLogs = useCallback(async () => {
     setLogEvents([]);
@@ -240,11 +246,11 @@ export default function App() {
   }, []);
 
   const activeOutput = useMemo(
-    () => outputs.find((output) => output.id === activeOutputId) ?? null,
-    [outputs, activeOutputId]
+      () => outputs.find((output) => output.id === activeOutputId) ?? null,
+      [outputs, activeOutputId]
   );
   const canTogglePlayback = Boolean(
-    activeOutputId && (status?.now_playing || selectedTrackPath)
+      activeOutputId && (status?.now_playing || selectedTrackPath)
   );
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
@@ -255,20 +261,20 @@ export default function App() {
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
   const viewTitle = settingsOpen
-    ? "Settings"
-    : albumViewId !== null
-      ? "Album"
-      : browserView === "albums"
-        ? "Albums"
-        : "Folders";
+      ? "Settings"
+      : albumViewId !== null
+          ? "Album"
+          : browserView === "albums"
+              ? "Albums"
+              : "Folders";
   const playButtonTitle = !activeOutputId
-    ? "Select an output to control playback."
-    : !status?.now_playing && !selectedTrackPath
-      ? "Select a track to play."
-    : undefined;
+      ? "Select an output to control playback."
+      : !status?.now_playing && !selectedTrackPath
+          ? "Select a track to play."
+          : undefined;
   const selectedAlbum = useMemo(
-    () => albums.find((album) => album.id === albumViewId) ?? null,
-    [albums, albumViewId]
+      () => albums.find((album) => album.id === albumViewId) ?? null,
+      [albums, albumViewId]
   );
   const activeAlbumId = useMemo(() => {
     const albumKey = normalizeMatch(status?.album);
@@ -285,6 +291,7 @@ export default function App() {
 
   useEffect(() => {
     if (!trackMenuPath) return;
+
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target as Element | null;
       if (target?.closest('[data-track-menu="true"]')) {
@@ -292,6 +299,7 @@ export default function App() {
       }
       closeTrackMenu();
     }
+
     document.addEventListener("click", handleDocumentClick);
     return () => {
       document.removeEventListener("click", handleDocumentClick);
@@ -307,8 +315,8 @@ export default function App() {
   useOutputsStream({
     onEvent: (data) => {
       const activeId = data.outputs.some((output) => output.id === data.active_id)
-        ? data.active_id
-        : null;
+          ? data.active_id
+          : null;
       setOutputs(data.outputs);
       setActiveOutputId(activeId);
       setError(null);
@@ -356,12 +364,12 @@ export default function App() {
     enabled: settingsOpen,
     onSnapshot: (items) => {
       const entries = items
-        .map((entry) => ({
-          id: (logIdRef.current += 1),
-          event: entry
-        }))
-        .reverse()
-        .slice(0, MAX_LOG_EVENTS);
+          .map((entry) => ({
+            id: (logIdRef.current += 1),
+            event: entry
+          }))
+          .reverse()
+          .slice(0, MAX_LOG_EVENTS);
       setLogEvents(entries);
       setLogsError(null);
     },
@@ -375,31 +383,19 @@ export default function App() {
     onError: () => setLogsError("Live logs disconnected.")
   });
 
-  useEffect(() => {
-    if (!activeOutputId) {
-      setStatus(null);
-      return;
-    }
-    let mounted = true;
-    const streamUrl = apiUrl(`/outputs/${encodeURIComponent(activeOutputId)}/status/stream`);
-
-    const stream = new EventSource(streamUrl);
-    stream.addEventListener("status", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as StatusResponse;
+  useStatusStream({
+    activeOutputId,
+    onEvent: (data: SetStateAction<StatusResponse | null>) => {
       setStatus(data);
       setUpdatedAt(new Date());
       setError(null);
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      setError("Live status disconnected.");
-    };
-
-    return () => {
-      mounted = false;
-      stream.close();
-    };
+    },
+    onError: () => setError("Live status disconnected.")
+  });
+  useEffect(() => {
+    if (!activeOutputId) {
+      setStatus(null);
+    }
   }, [activeOutputId]);
 
   useEffect(() => {
