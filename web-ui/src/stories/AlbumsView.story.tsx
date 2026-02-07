@@ -1,7 +1,9 @@
 import type { AlbumSummary } from "../types";
 import AlbumsView from "../components/AlbumsView";
 import { action } from "@storybook/addon-actions";
+// @ts-ignore
 import cover1 from "./covers/cover-1.png";
+// @ts-ignore
 import cover2 from "./covers/cover-2.png";
 import "../styles.css";
 
@@ -88,6 +90,7 @@ const Template = (args: AlbumsViewArgs) => (
 );
 
 export const Default = Template.bind({});
+// @ts-ignore
 Default.args = {
   loading: false,
   error: "",

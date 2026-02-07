@@ -1,6 +1,7 @@
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
 
+// @ts-ignore
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export function apiUrl(path: string): string {
