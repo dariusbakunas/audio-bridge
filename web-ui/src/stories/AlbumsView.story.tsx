@@ -48,25 +48,51 @@ const albums: AlbumSummary[] = [
 ];
 
 export default {
-  title: "Albums/AlbumsView"
+  title: "Albums/AlbumsView",
+  component: AlbumsView,
+  argTypes: {
+    loading: { control: "boolean" },
+    error: { control: "text" },
+    canPlay: { control: "boolean" },
+    activeAlbumId: { control: { type: "number", min: 0 } },
+    isPlaying: { control: "boolean" },
+    isPaused: { control: "boolean" }
+  }
 };
 
-export function Default() {
-  return (
-    <div style={{ padding: 24 }}>
-      <AlbumsView
-        albums={albums}
-        loading={false}
-        error={null}
-        placeholder={placeholder}
-        canPlay={true}
-        activeAlbumId={1}
-        isPlaying={true}
-        isPaused={false}
-        onSelectAlbum={action("select-album")}
-        onPlayAlbum={action("play-album")}
-        onPause={action("pause")}
-      />
-    </div>
-  );
-}
+type AlbumsViewArgs = {
+  loading: boolean;
+  error: string;
+  canPlay: boolean;
+  activeAlbumId: number;
+  isPlaying: boolean;
+  isPaused: boolean;
+};
+
+const Template = (args: AlbumsViewArgs) => (
+  <div style={{ padding: 24 }}>
+    <AlbumsView
+      albums={albums}
+      loading={args.loading}
+      error={args.error ? args.error : null}
+      placeholder={placeholder}
+      canPlay={args.canPlay}
+      activeAlbumId={args.activeAlbumId > 0 ? args.activeAlbumId : null}
+      isPlaying={args.isPlaying}
+      isPaused={args.isPaused}
+      onSelectAlbum={action("select-album")}
+      onPlayAlbum={action("play-album")}
+      onPause={action("pause")}
+    />
+  </div>
+);
+
+export const Default = Template.bind({});
+Default.args = {
+  loading: false,
+  error: "",
+  canPlay: true,
+  activeAlbumId: 1,
+  isPlaying: true,
+  isPaused: false
+};

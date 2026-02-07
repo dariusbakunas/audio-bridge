@@ -827,36 +827,34 @@ export default function App() {
         </main>
       </div>
 
-      <div className={settingsOpen ? "hidden" : ""}>
-        <PlayerBar
-          status={status}
-          nowPlayingCover={nowPlayingCover}
-          nowPlayingCoverFailed={nowPlayingCoverFailed}
-          isPlaying={isPlaying}
-          canTogglePlayback={canTogglePlayback}
-          showPlayIcon={showPlayIcon}
-          playButtonTitle={playButtonTitle}
-          queueHasItems={Boolean(activeOutputId) && queue.length > 0}
-          activeOutput={activeOutput}
-          activeAlbumId={activeAlbumId}
-          uiBuildId={uiBuildId}
-          formatMs={formatMs}
-          placeholderCover={albumPlaceholder(status?.album, status?.artist)}
-          onCoverError={() => setNowPlayingCoverFailed(true)}
-          onAlbumNavigate={(albumId) =>
-            navigateTo({
-              view: "album",
-              albumId,
-              browserView
-            })
-          }
-          onPrimaryAction={handlePrimaryAction}
-          onNext={handleNext}
-          onSignalOpen={() => setSignalOpen(true)}
-          onQueueOpen={() => setQueueOpen(true)}
-          onSelectOutput={() => setOutputsOpen(true)}
-        />
-      </div>
+      <PlayerBar
+        status={status}
+        nowPlayingCover={nowPlayingCover}
+        nowPlayingCoverFailed={nowPlayingCoverFailed}
+        isPlaying={isPlaying}
+        canTogglePlayback={canTogglePlayback}
+        showPlayIcon={showPlayIcon}
+        playButtonTitle={playButtonTitle}
+        queueHasItems={Boolean(activeOutputId) && queue.length > 0}
+        activeOutput={activeOutput}
+        activeAlbumId={activeAlbumId}
+        uiBuildId={uiBuildId}
+        formatMs={formatMs}
+        placeholderCover={albumPlaceholder(status?.album, status?.artist)}
+        onCoverError={() => setNowPlayingCoverFailed(true)}
+        onAlbumNavigate={(albumId) =>
+          navigateTo({
+            view: "album",
+            albumId,
+            browserView
+          })
+        }
+        onPrimaryAction={handlePrimaryAction}
+        onNext={handleNext}
+        onSignalOpen={() => setSignalOpen(true)}
+        onQueueOpen={() => setQueueOpen(true)}
+        onSelectOutput={() => setOutputsOpen(true)}
+      />
 
       <OutputsModal
         open={outputsOpen}

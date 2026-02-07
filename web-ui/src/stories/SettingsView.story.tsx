@@ -66,68 +66,62 @@ const metadataDetailLines = (event: MetadataEvent) => {
 };
 
 export default {
-  title: "Settings/SettingsView"
+  title: "Settings/SettingsView",
+  component: SettingsView,
+  argTypes: {
+    section: { control: { type: "radio" }, options: ["metadata", "logs"] },
+    logsError: { control: "text" },
+    rescanBusy: { control: "boolean" },
+    empty: { control: "boolean" }
+  }
 };
 
-export function Metadata() {
-  return (
-    <div style={{ padding: 24 }}>
-      <SettingsView
-        active={true}
-        section="metadata"
-        onSectionChange={action("section-change")}
-        metadataEvents={metadataEvents}
-        logEvents={logEvents}
-        logsError={null}
-        rescanBusy={false}
-        onClearMetadata={action("clear-metadata")}
-        onRescanLibrary={action("rescan-library")}
-        onClearLogs={action("clear-logs")}
-        describeMetadataEvent={describeMetadataEvent}
-        metadataDetailLines={metadataDetailLines}
-      />
-    </div>
-  );
-}
+type SettingsViewArgs = {
+  section: "metadata" | "logs";
+  logsError: string;
+  rescanBusy: boolean;
+  empty: boolean;
+};
 
-export function Logs() {
-  return (
-    <div style={{ padding: 24 }}>
-      <SettingsView
-        active={true}
-        section="logs"
-        onSectionChange={action("section-change")}
-        metadataEvents={metadataEvents}
-        logEvents={logEvents}
-        logsError={null}
-        rescanBusy={false}
-        onClearMetadata={action("clear-metadata")}
-        onRescanLibrary={action("rescan-library")}
-        onClearLogs={action("clear-logs")}
-        describeMetadataEvent={describeMetadataEvent}
-        metadataDetailLines={metadataDetailLines}
-      />
-    </div>
-  );
-}
+const Template = (args: SettingsViewArgs) => (
+  <div style={{ padding: 24 }}>
+    <SettingsView
+      active={true}
+      section={args.section}
+      onSectionChange={action("section-change")}
+      metadataEvents={args.empty ? [] : metadataEvents}
+      logEvents={args.empty ? [] : logEvents}
+      logsError={args.logsError || null}
+      rescanBusy={args.rescanBusy}
+      onClearMetadata={action("clear-metadata")}
+      onRescanLibrary={action("rescan-library")}
+      onClearLogs={action("clear-logs")}
+      describeMetadataEvent={describeMetadataEvent}
+      metadataDetailLines={metadataDetailLines}
+    />
+  </div>
+);
 
-export function LogsEmpty() {
-  return (
-    <div style={{ padding: 24 }}>
-      <SettingsView
-        active={true}
-        section="logs"
-        onSectionChange={action("section-change")}
-        metadataEvents={[]}
-        logEvents={[]}
-        logsError={"Stream disconnected."}
-        rescanBusy={false}
-        onClearMetadata={action("clear-metadata")}
-        onRescanLibrary={action("rescan-library")}
-        onClearLogs={action("clear-logs")}
-        describeMetadataEvent={describeMetadataEvent}
-        metadataDetailLines={metadataDetailLines}
-      />
-    </div>
-  );
-}
+export const Metadata = Template.bind({});
+Metadata.args = {
+  section: "metadata",
+  logsError: "",
+  rescanBusy: false,
+  empty: false
+};
+
+export const Logs = Template.bind({});
+Logs.args = {
+  section: "logs",
+  logsError: "",
+  rescanBusy: false,
+  empty: false
+};
+
+export const LogsEmpty = Template.bind({});
+LogsEmpty.args = {
+  section: "logs",
+  logsError: "Stream disconnected.",
+  rescanBusy: false,
+  empty: true
+};

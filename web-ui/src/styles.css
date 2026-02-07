@@ -111,7 +111,6 @@ body {
 }
 
 .settings-mode .grid,
-.settings-mode .player-bar,
 .settings-mode .hero {
   display: none;
 }

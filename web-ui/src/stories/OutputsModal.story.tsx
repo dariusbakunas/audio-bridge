@@ -38,31 +38,42 @@ const formatRateRange = (output: OutputInfo) => {
 };
 
 export default {
-  title: "Outputs/OutputsModal"
+  title: "Outputs/OutputsModal",
+  component: OutputsModal,
+  argTypes: {
+    open: { control: "boolean" },
+    activeOutputId: { control: "text" },
+    showEmpty: { control: "boolean" }
+  }
 };
 
-export function Default() {
-  return (
-    <OutputsModal
-      open={true}
-      outputs={outputs}
-      activeOutputId="bridge:living-room:default"
-      onClose={action("close")}
-      onSelectOutput={action("select-output")}
-      formatRateRange={formatRateRange}
-    />
-  );
-}
+type OutputsModalArgs = {
+  open: boolean;
+  activeOutputId: string;
+  showEmpty: boolean;
+};
 
-export function Empty() {
-  return (
-    <OutputsModal
-      open={true}
-      outputs={[]}
-      activeOutputId={null}
-      onClose={action("close")}
-      onSelectOutput={action("select-output")}
-      formatRateRange={formatRateRange}
-    />
-  );
-}
+const Template = (args: OutputsModalArgs) => (
+  <OutputsModal
+    open={args.open}
+    outputs={args.showEmpty ? [] : outputs}
+    activeOutputId={args.activeOutputId || null}
+    onClose={action("close")}
+    onSelectOutput={action("select-output")}
+    formatRateRange={formatRateRange}
+  />
+);
+
+export const Default = Template.bind({});
+Default.args = {
+  open: true,
+  activeOutputId: "bridge:living-room:default",
+  showEmpty: false
+};
+
+export const Empty = Template.bind({});
+Empty.args = {
+  open: true,
+  activeOutputId: "",
+  showEmpty: true
+};
