@@ -1,5 +1,6 @@
 import type { AlbumSummary } from "../types";
 import AlbumsView from "../components/AlbumsView";
+import { action } from "@storybook/addon-actions";
 import cover1 from "./covers/cover-1.png";
 import cover2 from "./covers/cover-2.png";
 import "../styles.css";
@@ -62,9 +63,9 @@ export function Default() {
         activeAlbumId={1}
         isPlaying={true}
         isPaused={false}
-        onSelectAlbum={() => undefined}
-        onPlayAlbum={() => undefined}
-        onPause={() => undefined}
+        onSelectAlbum={action("select-album")}
+        onPlayAlbum={action("play-album")}
+        onPause={action("pause")}
       />
     </div>
   );

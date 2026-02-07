@@ -836,7 +836,7 @@ export default function App() {
           canTogglePlayback={canTogglePlayback}
           showPlayIcon={showPlayIcon}
           playButtonTitle={playButtonTitle}
-          queueHasItems={queue.length > 0}
+          queueHasItems={Boolean(activeOutputId) && queue.length > 0}
           activeOutput={activeOutput}
           activeAlbumId={activeAlbumId}
           uiBuildId={uiBuildId}

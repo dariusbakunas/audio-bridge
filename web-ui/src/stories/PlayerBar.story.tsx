@@ -1,5 +1,6 @@
 import type { OutputInfo, StatusResponse } from "../types";
 import PlayerBar from "../components/PlayerBar";
+import { action } from "@storybook/addon-actions";
 import "../styles.css";
 
 const status: StatusResponse = {
@@ -35,7 +36,7 @@ export default {
   title: "Player/PlayerBar"
 };
 
-export function Default() {
+export function Playing() {
   return (
     <div style={{ paddingBottom: 120 }}>
       <PlayerBar
@@ -58,13 +59,153 @@ export function Default() {
           const seconds = totalSeconds % 60;
           return `${minutes}:${seconds.toString().padStart(2, "0")}`;
         }}
-        onCoverError={() => undefined}
-        onAlbumNavigate={() => undefined}
-        onPrimaryAction={() => undefined}
-        onNext={() => undefined}
-        onSignalOpen={() => undefined}
-        onQueueOpen={() => undefined}
-        onSelectOutput={() => undefined}
+        onCoverError={action("cover-error")}
+        onAlbumNavigate={action("navigate-album")}
+        onPrimaryAction={action("primary-action")}
+        onNext={action("next")}
+        onSignalOpen={action("signal-open")}
+        onQueueOpen={action("queue-open")}
+        onSelectOutput={action("select-output")}
+      />
+    </div>
+  );
+}
+
+export function Paused() {
+  return (
+    <div style={{ paddingBottom: 120 }}>
+      <PlayerBar
+        status={{ ...status, paused: true }}
+        nowPlayingCover={null}
+        nowPlayingCoverFailed={true}
+        placeholderCover={placeholderCover}
+        isPlaying={false}
+        canTogglePlayback={true}
+        showPlayIcon={true}
+        playButtonTitle={undefined}
+        queueHasItems={true}
+        activeOutput={activeOutput}
+        activeAlbumId={1}
+        uiBuildId="dev"
+        formatMs={(ms) => {
+          if (!ms && ms !== 0) return "--:--";
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }}
+        onCoverError={action("cover-error")}
+        onAlbumNavigate={action("navigate-album")}
+        onPrimaryAction={action("primary-action")}
+        onNext={action("next")}
+        onSignalOpen={action("signal-open")}
+        onQueueOpen={action("queue-open")}
+        onSelectOutput={action("select-output")}
+      />
+    </div>
+  );
+}
+
+export function NothingPlaying() {
+  return (
+    <div style={{ paddingBottom: 120 }}>
+      <PlayerBar
+        status={null}
+        nowPlayingCover={null}
+        nowPlayingCoverFailed={true}
+        placeholderCover={placeholderCover}
+        isPlaying={false}
+        canTogglePlayback={false}
+        showPlayIcon={true}
+        playButtonTitle="Select a track to play."
+        queueHasItems={false}
+        activeOutput={activeOutput}
+        activeAlbumId={null}
+        uiBuildId="dev"
+        formatMs={(ms) => {
+          if (!ms && ms !== 0) return "--:--";
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }}
+        onCoverError={action("cover-error")}
+        onAlbumNavigate={action("navigate-album")}
+        onPrimaryAction={action("primary-action")}
+        onNext={action("next")}
+        onSignalOpen={action("signal-open")}
+        onQueueOpen={action("queue-open")}
+        onSelectOutput={action("select-output")}
+      />
+    </div>
+  );
+}
+
+export function NoNextTrack() {
+  return (
+    <div style={{ paddingBottom: 120 }}>
+      <PlayerBar
+        status={status}
+        nowPlayingCover={null}
+        nowPlayingCoverFailed={true}
+        placeholderCover={placeholderCover}
+        isPlaying={true}
+        canTogglePlayback={true}
+        showPlayIcon={false}
+        playButtonTitle={undefined}
+        queueHasItems={false}
+        activeOutput={activeOutput}
+        activeAlbumId={1}
+        uiBuildId="dev"
+        formatMs={(ms) => {
+          if (!ms && ms !== 0) return "--:--";
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }}
+        onCoverError={action("cover-error")}
+        onAlbumNavigate={action("navigate-album")}
+        onPrimaryAction={action("primary-action")}
+        onNext={action("next")}
+        onSignalOpen={action("signal-open")}
+        onQueueOpen={action("queue-open")}
+        onSelectOutput={action("select-output")}
+      />
+    </div>
+  );
+}
+
+export function NoOutputSelected() {
+  return (
+    <div style={{ paddingBottom: 120 }}>
+      <PlayerBar
+        status={status}
+        nowPlayingCover={null}
+        nowPlayingCoverFailed={true}
+        placeholderCover={placeholderCover}
+        isPlaying={true}
+        canTogglePlayback={false}
+        showPlayIcon={false}
+        playButtonTitle="Select an output to control playback."
+        queueHasItems={false}
+        activeOutput={null}
+        activeAlbumId={1}
+        uiBuildId="dev"
+        formatMs={(ms) => {
+          if (!ms && ms !== 0) return "--:--";
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }}
+        onCoverError={action("cover-error")}
+        onAlbumNavigate={action("navigate-album")}
+        onPrimaryAction={action("primary-action")}
+        onNext={action("next")}
+        onSignalOpen={action("signal-open")}
+        onQueueOpen={action("queue-open")}
+        onSelectOutput={action("select-output")}
       />
     </div>
   );
