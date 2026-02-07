@@ -16,6 +16,7 @@ import {
 import AlbumDetailView from "./components/AlbumDetailView";
 import AlbumsView from "./components/AlbumsView";
 import FoldersView from "./components/FoldersView";
+import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
 import OutputsModal from "./components/OutputsModal";
 import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
@@ -40,6 +41,21 @@ interface LogEventEntry {
   id: number;
   event: LogEvent;
 }
+
+type MatchTarget =
+  | {
+      kind: "track";
+      path: string;
+      title: string;
+      artist: string;
+      album?: string | null;
+    }
+  | {
+      kind: "album";
+      albumId: number;
+      title: string;
+      artist: string;
+    };
 
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
@@ -198,6 +214,7 @@ export default function App() {
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
 
@@ -307,6 +324,64 @@ export default function App() {
     });
     return match?.id ?? null;
   }, [albums, status?.album, status?.artist]);
+
+  const openTrackMatchForLibrary = useCallback(
+    (path: string) => {
+      const entry = libraryEntries.find(
+        (item) => item.kind === "track" && item.path === path
+      );
+      const title = entry && entry.kind === "track" ? entry.file_name : path;
+      const artist =
+        entry && entry.kind === "track" ? entry.artist ?? "Unknown artist" : "Unknown artist";
+      const album = entry && entry.kind === "track" ? entry.album ?? "" : "";
+      setMatchTarget({
+        kind: "track",
+        path,
+        title,
+        artist,
+        album
+      });
+    },
+    [libraryEntries]
+  );
+
+  const openTrackMatchForAlbum = useCallback(
+    (path: string) => {
+      const track = albumTracks.find((item) => item.path === path);
+      const title = track?.title ?? track?.file_name ?? path;
+      const artist = track?.artist ?? "Unknown artist";
+      const album = track?.album ?? selectedAlbum?.title ?? "";
+      setMatchTarget({
+        kind: "track",
+        path,
+        title,
+        artist,
+        album
+      });
+    },
+    [albumTracks, selectedAlbum]
+  );
+
+  const openAlbumMatch = useCallback(() => {
+    if (!selectedAlbum) return;
+    setMatchTarget({
+      kind: "album",
+      albumId: selectedAlbum.id,
+      title: selectedAlbum.title,
+      artist: selectedAlbum.artist ?? "Unknown artist"
+    });
+  }, [selectedAlbum]);
+
+  const matchLabel = matchTarget
+    ? `${matchTarget.title}${matchTarget.artist ? ` — ${matchTarget.artist}` : ""}`
+    : "";
+  const matchDefaults = matchTarget
+    ? {
+        title: matchTarget.title,
+        artist: matchTarget.artist,
+        album: matchTarget.kind === "track" ? matchTarget.album ?? "" : ""
+      }
+    : { title: "", artist: "", album: "" };
 
   const applyViewState = useCallback((state: ViewState) => {
     applyingHistoryRef.current = true;
@@ -778,6 +853,7 @@ export default function App() {
                   onQueue={(path) => runTrackMenuAction(handleQueue, path)}
                   onPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
                   onRescanTrack={(path) => runTrackMenuAction(handleRescanTrack, path)}
+                  onFixMatch={(path) => runTrackMenuAction(openTrackMatchForLibrary, path)}
                 />
               ) : null}
             </section>
@@ -805,6 +881,8 @@ export default function App() {
               onMenuQueue={(path) => runTrackMenuAction(handleQueue, path)}
               onMenuPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
               onMenuRescan={(path) => runTrackMenuAction(handleRescanTrack, path)}
+              onFixAlbumMatch={openAlbumMatch}
+              onFixTrackMatch={(path) => runTrackMenuAction(openTrackMatchForAlbum, path)}
             />
           ) : null}
 
@@ -875,6 +953,16 @@ export default function App() {
         updatedAt={updatedAt}
         formatHz={formatHz}
         onClose={() => setSignalOpen(false)}
+      />
+
+      <MusicBrainzMatchModal
+        open={Boolean(matchTarget)}
+        kind={matchTarget?.kind ?? "track"}
+        targetLabel={matchLabel}
+        defaults={matchDefaults}
+        trackPath={matchTarget?.kind === "track" ? matchTarget.path : null}
+        albumId={matchTarget?.kind === "album" ? matchTarget.albumId : null}
+        onClose={() => setMatchTarget(null)}
       />
 
       <QueueModal

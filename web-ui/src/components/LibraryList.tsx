@@ -16,6 +16,7 @@ interface LibraryListProps {
   onQueue: (path: string) => void;
   onPlayNext: (path: string) => void;
   onRescan: (path: string) => void;
+  onFixMatch: (path: string) => void;
 }
 
 export default function LibraryList({
@@ -32,7 +33,8 @@ export default function LibraryList({
   onPlay,
   onQueue,
   onPlayNext,
-  onRescan
+  onRescan,
+  onFixMatch
 }: LibraryListProps) {
   return (
     <div className="library-list">
@@ -83,6 +85,7 @@ export default function LibraryList({
                   onPlay={() => onPlay(entry.path)}
                   onQueue={() => onQueue(entry.path)}
                   onPlayNext={() => onPlayNext(entry.path)}
+                  onFixMatch={() => onFixMatch(entry.path)}
                   onRescan={() => onRescan(entry.path)}
                 />
               </div>

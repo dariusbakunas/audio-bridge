@@ -117,6 +117,23 @@ export interface TrackListResponse {
   items: TrackSummary[];
 }
 
+export type MusicBrainzMatchKind = "track" | "album";
+
+export interface MusicBrainzMatchCandidate {
+  recording_mbid?: string | null;
+  release_mbid?: string | null;
+  artist_mbid?: string | null;
+  title: string;
+  artist: string;
+  release_title?: string | null;
+  score?: number | null;
+  year?: number | null;
+}
+
+export interface MusicBrainzMatchSearchResponse {
+  items: MusicBrainzMatchCandidate[];
+}
+
 export type MetadataEvent =
   | {
       kind: "music_brainz_batch";

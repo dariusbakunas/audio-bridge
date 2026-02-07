@@ -20,6 +20,7 @@ interface FoldersViewProps {
   onQueue: (path: string) => void;
   onPlayNext: (path: string) => void;
   onRescanTrack: (path: string) => void;
+  onFixMatch: (path: string) => void;
 }
 
 export default function FoldersView({
@@ -40,7 +41,8 @@ export default function FoldersView({
   onPlay,
   onQueue,
   onPlayNext,
-  onRescanTrack
+  onRescanTrack,
+  onFixMatch
 }: FoldersViewProps) {
   return (
     <div className="card">
@@ -79,6 +81,7 @@ export default function FoldersView({
         onQueue={onQueue}
         onPlayNext={onPlayNext}
         onRescan={onRescanTrack}
+        onFixMatch={onFixMatch}
       />
     </div>
   );

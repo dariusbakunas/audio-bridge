@@ -22,6 +22,8 @@ interface AlbumDetailViewProps {
   onMenuQueue: (path: string) => void;
   onMenuPlayNext: (path: string) => void;
   onMenuRescan: (path: string) => void;
+  onFixAlbumMatch: () => void;
+  onFixTrackMatch: (path: string) => void;
 }
 
 export default function AlbumDetailView({
@@ -44,7 +46,9 @@ export default function AlbumDetailView({
   onMenuPlay,
   onMenuQueue,
   onMenuPlayNext,
-  onMenuRescan
+  onMenuRescan,
+  onFixAlbumMatch,
+  onFixTrackMatch
 }: AlbumDetailViewProps) {
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
@@ -100,6 +104,11 @@ export default function AlbumDetailView({
                     ? "Cover: not cached"
                     : "Cover: unavailable"}
               </div>
+              <div className="album-meta-actions">
+                <button className="btn ghost small" onClick={onFixAlbumMatch} disabled={!album}>
+                  Fix MusicBrainz match
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -144,6 +153,7 @@ export default function AlbumDetailView({
                         onPlay={() => onMenuPlay(track.path)}
                         onQueue={() => onMenuQueue(track.path)}
                         onPlayNext={() => onMenuPlayNext(track.path)}
+                        onFixMatch={() => onFixTrackMatch(track.path)}
                         onRescan={() => onMenuRescan(track.path)}
                       />
                     </div>

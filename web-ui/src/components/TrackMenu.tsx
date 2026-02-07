@@ -10,6 +10,7 @@ interface TrackMenuProps {
   onQueue: () => void;
   onPlayNext: () => void;
   onRescan: () => void;
+  onFixMatch?: () => void;
 }
 
 export default function TrackMenu({
@@ -20,7 +21,8 @@ export default function TrackMenu({
   onPlay,
   onQueue,
   onPlayNext,
-  onRescan
+  onRescan,
+  onFixMatch
 }: TrackMenuProps) {
   return (
     <div className="track-menu-wrap" data-track-menu="true">
@@ -52,6 +54,11 @@ export default function TrackMenu({
           <button className="track-menu-item" disabled={!canPlay} onClick={onPlayNext}>
             Play next
           </button>
+          {onFixMatch ? (
+            <button className="track-menu-item" onClick={onFixMatch}>
+              Fix MusicBrainz match
+            </button>
+          ) : null}
           <button className="track-menu-item" onClick={onRescan}>
             Rescan metadata
           </button>

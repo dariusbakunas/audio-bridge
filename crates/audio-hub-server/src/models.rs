@@ -109,6 +109,88 @@ pub struct QueueResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicBrainzMatchKind {
+    Track,
+    Album,
+}
+
+/// Payload to search MusicBrainz for a manual match.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct MusicBrainzMatchSearchRequest {
+    /// Track title (for track search) or album title (for album search).
+    pub title: String,
+    /// Artist name used in the query.
+    pub artist: String,
+    /// Optional album name to refine track searches.
+    #[serde(default)]
+    pub album: Option<String>,
+    /// Search kind (track or album).
+    pub kind: MusicBrainzMatchKind,
+    /// Optional max number of results.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Single MusicBrainz candidate returned from search.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct MusicBrainzMatchCandidate {
+    pub recording_mbid: Option<String>,
+    pub release_mbid: Option<String>,
+    pub artist_mbid: Option<String>,
+    pub title: String,
+    pub artist: String,
+    pub release_title: Option<String>,
+    pub score: Option<i32>,
+    pub year: Option<i32>,
+}
+
+/// Response payload for MusicBrainz search results.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct MusicBrainzMatchSearchResponse {
+    pub items: Vec<MusicBrainzMatchCandidate>,
+}
+
+/// Payload to apply a MusicBrainz match to a track or album.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MusicBrainzMatchApplyRequest {
+    Track {
+        /// Absolute track path.
+        path: String,
+        /// Recording MBID to apply.
+        recording_mbid: String,
+        /// Optional artist MBID to apply.
+        #[serde(default)]
+        artist_mbid: Option<String>,
+        /// Optional album/release MBID to apply.
+        #[serde(default)]
+        album_mbid: Option<String>,
+        /// Optional release year.
+        #[serde(default)]
+        release_year: Option<i32>,
+        /// Whether to overwrite existing MBIDs.
+        #[serde(default)]
+        override_existing: Option<bool>,
+    },
+    Album {
+        /// Album id from the metadata DB.
+        album_id: i64,
+        /// Release MBID to apply.
+        album_mbid: String,
+        /// Optional artist MBID to apply.
+        #[serde(default)]
+        artist_mbid: Option<String>,
+        /// Optional release year.
+        #[serde(default)]
+        release_year: Option<i32>,
+        /// Whether to overwrite existing MBIDs.
+        #[serde(default)]
+        override_existing: Option<bool>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct ArtistListResponse {
     pub items: Vec<ArtistSummary>,
 }

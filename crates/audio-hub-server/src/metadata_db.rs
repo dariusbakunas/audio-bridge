@@ -230,6 +230,15 @@ impl MetadataDb {
         record: &TrackRecord,
         mb: &MusicBrainzMatch,
     ) -> Result<()> {
+        self.apply_musicbrainz_with_override(record, mb, false)
+    }
+
+    pub fn apply_musicbrainz_with_override(
+        &self,
+        record: &TrackRecord,
+        mb: &MusicBrainzMatch,
+        override_existing: bool,
+    ) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
 
@@ -245,11 +254,19 @@ impl MetadataDb {
         };
 
         if let (Some(artist_id), Some(artist_mbid)) = (artist_id, mb.artist_mbid.as_deref()) {
-            tx.execute(
-                "UPDATE artists SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
-                params![artist_mbid, artist_id],
-            )
-            .context("update artist mbid")?;
+            if override_existing {
+                tx.execute(
+                    "UPDATE artists SET mbid = ?1 WHERE id = ?2",
+                    params![artist_mbid, artist_id],
+                )
+                .context("update artist mbid")?;
+            } else {
+                tx.execute(
+                    "UPDATE artists SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                    params![artist_mbid, artist_id],
+                )
+                .context("update artist mbid")?;
+            }
             if let Some(sort_name) = mb.artist_sort_name.as_deref() {
                 tx.execute(
                     "UPDATE artists SET sort_name = ?1 WHERE id = ?2 AND sort_name IS NULL",
@@ -260,17 +277,33 @@ impl MetadataDb {
         }
 
         if let (Some(album_id), Some(album_mbid)) = (album_id, mb.album_mbid.as_deref()) {
-            tx.execute(
-                "UPDATE albums SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
-                params![album_mbid, album_id],
-            )
-            .context("update album mbid")?;
-            if let Some(year) = mb.release_year {
+            if override_existing {
                 tx.execute(
-                    "UPDATE albums SET year = ?1 WHERE id = ?2 AND year IS NULL",
-                    params![year, album_id],
+                    "UPDATE albums SET mbid = ?1, cover_art_path = NULL, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2",
+                    params![album_mbid, album_id],
                 )
-                .context("update album year")?;
+                .context("update album mbid")?;
+            } else {
+                tx.execute(
+                    "UPDATE albums SET mbid = ?1, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                    params![album_mbid, album_id],
+                )
+                .context("update album mbid")?;
+            }
+            if let Some(year) = mb.release_year {
+                if override_existing {
+                    tx.execute(
+                        "UPDATE albums SET year = ?1 WHERE id = ?2",
+                        params![year, album_id],
+                    )
+                    .context("update album year")?;
+                } else {
+                    tx.execute(
+                        "UPDATE albums SET year = ?1 WHERE id = ?2 AND year IS NULL",
+                        params![year, album_id],
+                    )
+                    .context("update album year")?;
+                }
             }
             if !mb.release_candidates.is_empty() {
                 let candidates = serde_json::to_string(&mb.release_candidates)?;
@@ -283,15 +316,136 @@ impl MetadataDb {
         }
 
         if let Some(recording_mbid) = mb.recording_mbid.as_deref() {
-            tx.execute(
-                "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2 AND (mbid IS NULL OR mbid = '')",
-                params![recording_mbid, record.path],
-            )
-            .context("update track mbid")?;
+            if override_existing {
+                tx.execute(
+                    "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2",
+                    params![recording_mbid, record.path],
+                )
+                .context("update track mbid")?;
+            } else {
+                tx.execute(
+                    "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2 AND (mbid IS NULL OR mbid = '')",
+                    params![recording_mbid, record.path],
+                )
+                .context("update track mbid")?;
+            }
         }
 
         tx.commit().context("commit metadata tx")?;
         Ok(())
+    }
+
+    pub fn apply_album_musicbrainz(
+        &self,
+        album_id: i64,
+        mb: &MusicBrainzMatch,
+        override_existing: bool,
+    ) -> Result<()> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+        let artist_id: Option<i64> = tx
+            .query_row(
+                "SELECT artist_id FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch album artist id")?;
+
+        if let (Some(artist_id), Some(artist_mbid)) = (artist_id, mb.artist_mbid.as_deref()) {
+            if override_existing {
+                tx.execute(
+                    "UPDATE artists SET mbid = ?1 WHERE id = ?2",
+                    params![artist_mbid, artist_id],
+                )
+                .context("update artist mbid")?;
+            } else {
+                tx.execute(
+                    "UPDATE artists SET mbid = ?1 WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                    params![artist_mbid, artist_id],
+                )
+                .context("update artist mbid")?;
+            }
+        }
+
+        if let Some(album_mbid) = mb.album_mbid.as_deref() {
+            if override_existing {
+                tx.execute(
+                    "UPDATE albums SET mbid = ?1, cover_art_path = NULL, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2",
+                    params![album_mbid, album_id],
+                )
+                .context("update album mbid")?;
+            } else {
+                tx.execute(
+                    "UPDATE albums SET mbid = ?1, caa_fail_count = NULL, caa_last_error = NULL, caa_release_candidates = NULL WHERE id = ?2 AND (mbid IS NULL OR mbid = '')",
+                    params![album_mbid, album_id],
+                )
+                .context("update album mbid")?;
+            }
+        }
+
+        if let Some(year) = mb.release_year {
+            if override_existing {
+                tx.execute(
+                    "UPDATE albums SET year = ?1 WHERE id = ?2",
+                    params![year, album_id],
+                )
+                .context("update album year")?;
+            } else {
+                tx.execute(
+                    "UPDATE albums SET year = ?1 WHERE id = ?2 AND year IS NULL",
+                    params![year, album_id],
+                )
+                .context("update album year")?;
+            }
+        }
+
+        tx.commit().context("commit metadata tx")?;
+        Ok(())
+    }
+
+    pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                r#"
+                SELECT t.path, t.file_name, t.title, ar.name, al.title,
+                       t.track_number, t.disc_number, al.year, t.duration_ms,
+                       t.sample_rate, t.format, t.mtime_ms, t.size_bytes
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.path = ?1
+                "#,
+                params![path],
+                |row| {
+                    Ok(TrackRecord {
+                        path: row.get(0)?,
+                        file_name: row.get(1)?,
+                        title: row.get(2)?,
+                        artist: row.get(3)?,
+                        album: row.get(4)?,
+                        track_number: row
+                            .get::<_, Option<i64>>(5)?
+                            .map(|v| v as u32),
+                        disc_number: row
+                            .get::<_, Option<i64>>(6)?
+                            .map(|v| v as u32),
+                        year: row.get(7)?,
+                        duration_ms: row
+                            .get::<_, Option<i64>>(8)?
+                            .map(|v| v as u64),
+                        sample_rate: row
+                            .get::<_, Option<i64>>(9)?
+                            .map(|v| v as u32),
+                        format: row.get(10)?,
+                        mtime_ms: row.get(11)?,
+                        size_bytes: row.get(12)?,
+                    })
+                },
+            )
+            .optional()
+            .context("fetch track record")
     }
 
     pub fn list_musicbrainz_candidates(

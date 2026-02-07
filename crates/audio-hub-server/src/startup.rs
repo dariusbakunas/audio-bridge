@@ -245,6 +245,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::artists_list)
             .service(api::albums_list)
             .service(api::tracks_list)
+            .service(api::musicbrainz_match_search)
+            .service(api::musicbrainz_match_apply)
             .service(api::art_for_track)
             .service(api::track_cover)
             .service(api::album_cover)

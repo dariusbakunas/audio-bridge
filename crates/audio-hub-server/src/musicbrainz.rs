@@ -35,6 +35,28 @@ pub struct MusicBrainzClient {
     agent: ureq::Agent,
 }
 
+#[derive(Debug, Clone)]
+pub struct MusicBrainzRecordingCandidate {
+    pub recording_mbid: String,
+    pub score: Option<i32>,
+    pub title: String,
+    pub artist_name: Option<String>,
+    pub artist_mbid: Option<String>,
+    pub release_title: Option<String>,
+    pub release_mbid: Option<String>,
+    pub year: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MusicBrainzReleaseCandidate {
+    pub release_mbid: String,
+    pub score: Option<i32>,
+    pub title: String,
+    pub artist_name: Option<String>,
+    pub artist_mbid: Option<String>,
+    pub year: Option<i32>,
+}
+
 impl MusicBrainzClient {
     pub fn new(cfg: &MusicBrainzConfig) -> Result<Option<Self>> {
         if !cfg.enabled.unwrap_or(false) {
@@ -131,6 +153,123 @@ impl MusicBrainzClient {
             release_year,
             release_candidates,
         }))
+    }
+
+    pub fn search_recordings(
+        &self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MusicBrainzRecordingCandidate>> {
+        let query = build_query(title, artist, album);
+        self.wait_rate_limit();
+
+        let url = format!("{}/recording", self.base_url);
+        let resp = self
+            .agent
+            .get(&url)
+            .query("fmt", "json")
+            .query("query", &query)
+            .query("limit", &limit.to_string())
+            .call()
+            .context("musicbrainz request failed")?;
+
+        let body_str = resp
+            .into_body()
+            .with_config()
+            .limit(1_000_000)
+            .read_to_string()
+            .context("musicbrainz response read failed")?;
+        let body: RecordingSearchResponse = serde_json::from_str(&body_str)
+            .context("musicbrainz response parse failed")?;
+
+        let mut results = body
+            .recordings
+            .into_iter()
+            .map(|rec| {
+                let (artist_mbid, artist_name) = primary_artist(rec.artist_credit.as_ref());
+                let (release_title, release_mbid, year) = rec
+                    .releases
+                    .as_ref()
+                    .and_then(|releases| releases.first())
+                    .map(|release| {
+                        (
+                            Some(release.title.clone()),
+                            Some(release.id.clone()),
+                            release
+                                .date
+                                .as_deref()
+                                .and_then(parse_year),
+                        )
+                    })
+                    .unwrap_or((None, None, None));
+                MusicBrainzRecordingCandidate {
+                    recording_mbid: rec.id,
+                    score: rec.score,
+                    title: rec.title,
+                    artist_name,
+                    artist_mbid,
+                    release_title,
+                    release_mbid,
+                    year,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        results.sort_by(|a, b| b.score.unwrap_or(0).cmp(&a.score.unwrap_or(0)));
+        Ok(results)
+    }
+
+    pub fn search_releases(
+        &self,
+        title: &str,
+        artist: &str,
+        limit: u32,
+    ) -> Result<Vec<MusicBrainzReleaseCandidate>> {
+        let query = build_release_query(title, artist);
+        self.wait_rate_limit();
+
+        let url = format!("{}/release", self.base_url);
+        let resp = self
+            .agent
+            .get(&url)
+            .query("fmt", "json")
+            .query("query", &query)
+            .query("limit", &limit.to_string())
+            .call()
+            .context("musicbrainz request failed")?;
+
+        let body_str = resp
+            .into_body()
+            .with_config()
+            .limit(1_000_000)
+            .read_to_string()
+            .context("musicbrainz response read failed")?;
+        let body: ReleaseSearchResponse = serde_json::from_str(&body_str)
+            .context("musicbrainz response parse failed")?;
+
+        let mut results = body
+            .releases
+            .into_iter()
+            .map(|release| {
+                let (artist_mbid, artist_name) = primary_artist(release.artist_credit.as_ref());
+                MusicBrainzReleaseCandidate {
+                    release_mbid: release.id,
+                    score: release.score,
+                    title: release.title,
+                    artist_name,
+                    artist_mbid,
+                    year: release
+                        .date
+                        .as_deref()
+                        .and_then(parse_year),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        results.sort_by(|a, b| b.score.unwrap_or(0).cmp(&a.score.unwrap_or(0)));
+        Ok(results)
     }
 
     pub fn user_agent(&self) -> &str {
@@ -334,6 +473,14 @@ fn build_query(title: &str, artist: &str, album: Option<&str>) -> String {
     parts.join(" AND ")
 }
 
+fn build_release_query(title: &str, artist: &str) -> String {
+    format!(
+        "release:\"{}\" AND artist:\"{}\"",
+        escape_query(title),
+        escape_query(artist)
+    )
+}
+
 fn escape_query(raw: &str) -> String {
     raw.replace('"', "\\\"")
 }
@@ -358,6 +505,21 @@ struct RecordingResult {
 }
 
 #[derive(Debug, Deserialize)]
+struct ReleaseSearchResponse {
+    releases: Vec<ReleaseResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseResult {
+    id: String,
+    score: Option<i32>,
+    title: String,
+    date: Option<String>,
+    #[serde(rename = "artist-credit")]
+    artist_credit: Option<Vec<ArtistCredit>>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ArtistCredit {
     artist: ArtistSummary,
 }
@@ -377,6 +539,20 @@ struct ReleaseSummary {
     date: Option<String>,
 }
 
+fn primary_artist(
+    credits: Option<&Vec<ArtistCredit>>,
+) -> (Option<String>, Option<String>) {
+    credits
+        .and_then(|items| items.first())
+        .map(|credit| {
+            (
+                Some(credit.artist.id.clone()),
+                Some(credit.artist.name.clone()),
+            )
+        })
+        .unwrap_or((None, None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +570,12 @@ mod tests {
     fn build_query_escapes_quotes() {
         let query = build_query("Track \"One\"", "Artist", None);
         assert_eq!(query, "recording:\"Track \\\"One\\\"\" AND artist:\"Artist\"");
+    }
+
+    #[test]
+    fn build_release_query_escapes_quotes() {
+        let query = build_release_query("Album \"One\"", "Artist");
+        assert_eq!(query, "release:\"Album \\\"One\\\"\" AND artist:\"Artist\"");
     }
 
     #[test]

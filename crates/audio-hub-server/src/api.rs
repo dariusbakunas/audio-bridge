@@ -21,10 +21,16 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::cover_art::apply_cover_art;
 use crate::library::{probe_track, scan_library_with_meta};
+use crate::musicbrainz::MusicBrainzMatch;
 use crate::models::{
     AlbumListResponse,
     ArtistListResponse,
     LibraryResponse,
+    MusicBrainzMatchApplyRequest,
+    MusicBrainzMatchCandidate,
+    MusicBrainzMatchKind,
+    MusicBrainzMatchSearchRequest,
+    MusicBrainzMatchSearchResponse,
     PlayRequest,
     QueueMode,
     QueueAddRequest,
@@ -738,6 +744,159 @@ pub async fn tracks_list(
             HttpResponse::InternalServerError().finish()
         }
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/metadata/match/search",
+    request_body = MusicBrainzMatchSearchRequest,
+    responses(
+        (status = 200, description = "MusicBrainz search results", body = MusicBrainzMatchSearchResponse),
+        (status = 400, description = "Bad request")
+    )
+)]
+#[post("/metadata/match/search")]
+/// Search MusicBrainz to manually match a track or album.
+pub async fn musicbrainz_match_search(
+    state: web::Data<AppState>,
+    body: web::Json<MusicBrainzMatchSearchRequest>,
+) -> impl Responder {
+    let Some(client) = state.musicbrainz.as_ref() else {
+        return HttpResponse::BadRequest().body("musicbrainz is disabled");
+    };
+    let title = body.title.trim();
+    let artist = body.artist.trim();
+    if title.is_empty() || artist.is_empty() {
+        return HttpResponse::BadRequest().body("title and artist are required");
+    }
+    let limit = body.limit.unwrap_or(10).clamp(1, 25);
+    let results = match body.kind {
+        MusicBrainzMatchKind::Track => {
+            match client.search_recordings(title, artist, body.album.as_deref(), limit) {
+                Ok(items) => items
+                    .into_iter()
+                    .map(|item| MusicBrainzMatchCandidate {
+                        recording_mbid: Some(item.recording_mbid),
+                        release_mbid: item.release_mbid,
+                        artist_mbid: item.artist_mbid,
+                        title: item.title,
+                        artist: item.artist_name.unwrap_or_else(|| artist.to_string()),
+                        release_title: item.release_title,
+                        score: item.score,
+                        year: item.year,
+                    })
+                    .collect::<Vec<_>>(),
+                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+            }
+        }
+        MusicBrainzMatchKind::Album => {
+            match client.search_releases(title, artist, limit) {
+                Ok(items) => items
+                    .into_iter()
+                    .map(|item| MusicBrainzMatchCandidate {
+                        recording_mbid: None,
+                        release_mbid: Some(item.release_mbid),
+                        artist_mbid: item.artist_mbid,
+                        title: item.title,
+                        artist: item.artist_name.unwrap_or_else(|| artist.to_string()),
+                        release_title: None,
+                        score: item.score,
+                        year: item.year,
+                    })
+                    .collect::<Vec<_>>(),
+                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+            }
+        }
+    };
+    HttpResponse::Ok().json(MusicBrainzMatchSearchResponse { items: results })
+}
+
+#[utoipa::path(
+    post,
+    path = "/metadata/match/apply",
+    request_body = MusicBrainzMatchApplyRequest,
+    responses(
+        (status = 200, description = "MusicBrainz match applied"),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Target not found")
+    )
+)]
+#[post("/metadata/match/apply")]
+/// Apply a MusicBrainz match to a track or album.
+pub async fn musicbrainz_match_apply(
+    state: web::Data<AppState>,
+    body: web::Json<MusicBrainzMatchApplyRequest>,
+) -> impl Responder {
+    let Some(_) = state.musicbrainz.as_ref() else {
+        return HttpResponse::BadRequest().body("musicbrainz is disabled");
+    };
+    match body.into_inner() {
+        MusicBrainzMatchApplyRequest::Track {
+            path,
+            recording_mbid,
+            artist_mbid,
+            album_mbid,
+            release_year,
+            override_existing,
+        } => {
+            let record = match state.metadata_db.track_record_by_path(&path) {
+                Ok(Some(record)) => record,
+                Ok(None) => return HttpResponse::NotFound().finish(),
+                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+            };
+            let mb = MusicBrainzMatch {
+                recording_mbid: Some(recording_mbid),
+                artist_mbid,
+                artist_name: None,
+                artist_sort_name: None,
+                album_mbid,
+                album_title: None,
+                release_year,
+                release_candidates: Vec::new(),
+            };
+            let override_existing = override_existing.unwrap_or(true);
+            if let Err(err) = state
+                .metadata_db
+                .apply_musicbrainz_with_override(&record, &mb, override_existing)
+            {
+                return HttpResponse::InternalServerError().body(err.to_string());
+            }
+            state.events.metadata_event(crate::events::MetadataEvent::MusicBrainzLookupSuccess {
+                path: record.path.clone(),
+                recording_mbid: mb.recording_mbid.clone(),
+                artist_mbid: mb.artist_mbid.clone(),
+                album_mbid: mb.album_mbid.clone(),
+            });
+            state.metadata_wake.notify();
+        }
+        MusicBrainzMatchApplyRequest::Album {
+            album_id,
+            album_mbid,
+            artist_mbid,
+            release_year,
+            override_existing,
+        } => {
+            let mb = MusicBrainzMatch {
+                recording_mbid: None,
+                artist_mbid,
+                artist_name: None,
+                artist_sort_name: None,
+                album_mbid: Some(album_mbid),
+                album_title: None,
+                release_year,
+                release_candidates: Vec::new(),
+            };
+            let override_existing = override_existing.unwrap_or(true);
+            if let Err(err) = state
+                .metadata_db
+                .apply_album_musicbrainz(album_id, &mb, override_existing)
+            {
+                return HttpResponse::InternalServerError().body(err.to_string());
+            }
+            state.metadata_wake.notify();
+        }
+    }
+    HttpResponse::Ok().finish()
 }
 
 #[utoipa::path(
