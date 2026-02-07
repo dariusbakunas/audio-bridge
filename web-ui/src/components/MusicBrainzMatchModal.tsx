@@ -49,7 +49,7 @@ export default function MusicBrainzMatchModal({
     setResults([]);
     setSelectedIndex(null);
     setError(null);
-  }, [open, defaults, kind]);
+  }, [open, defaults.title, defaults.artist, defaults.album, kind]);
 
   const canSearch = Boolean(title.trim() && artist.trim());
   const selected = selectedIndex === null ? null : results[selectedIndex] ?? null;

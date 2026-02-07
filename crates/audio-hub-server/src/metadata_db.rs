@@ -135,30 +135,67 @@ impl MetadataDb {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
 
-        let existing: Option<(i64, i64)> = tx
+        let existing: Option<(i64, i64, Option<i64>, Option<i64>, Option<String>, Option<String>, Option<String>)> = tx
             .query_row(
-                "SELECT mtime_ms, size_bytes FROM tracks WHERE path = ?1",
+                r#"
+                SELECT t.mtime_ms,
+                       t.size_bytes,
+                       t.artist_id,
+                       t.album_id,
+                       t.mbid,
+                       ar.mbid,
+                       al.mbid
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.path = ?1
+                "#,
                 params![record.path],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                )),
             )
             .optional()
             .context("lookup existing track")?;
-        if let Some((mtime_ms, size_bytes)) = existing {
+        let (existing_artist_id, existing_album_id, keep_links) = if let Some((
+            mtime_ms,
+            size_bytes,
+            artist_id,
+            album_id,
+            track_mbid,
+            artist_mbid,
+            album_mbid,
+        )) = existing
+        {
             if mtime_ms == record.mtime_ms && size_bytes == record.size_bytes {
                 return tx.commit().context("commit metadata tx");
             }
-        }
-
-        let artist_id = if let Some(name) = record.artist.as_deref() {
-            Some(upsert_artist(&tx, name)?)
+            let keep_links = !is_blank(&track_mbid) || !is_blank(&artist_mbid) || !is_blank(&album_mbid);
+            (artist_id, album_id, keep_links)
         } else {
-            None
+            (None, None, false)
         };
 
-        let album_id = if let Some(title) = record.album.as_deref() {
-            Some(upsert_album(&tx, title, artist_id, record.year)?)
+        let (artist_id, album_id) = if keep_links {
+            (existing_artist_id, existing_album_id)
         } else {
-            None
+            let artist_id = if let Some(name) = record.artist.as_deref() {
+                Some(upsert_artist(&tx, name)?)
+            } else {
+                None
+            };
+            let album_id = if let Some(title) = record.album.as_deref() {
+                Some(upsert_album(&tx, title, artist_id, record.year)?)
+            } else {
+                None
+            };
+            (artist_id, album_id)
         };
 
         tx.execute(
