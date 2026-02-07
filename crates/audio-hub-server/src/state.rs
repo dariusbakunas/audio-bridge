@@ -11,7 +11,7 @@ use crossbeam_channel::Sender;
 
 use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
-use crate::events::EventBus;
+use crate::events::{EventBus, LogBus};
 use crate::library::LibraryIndex;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
@@ -116,6 +116,8 @@ pub struct AppState {
     pub output_controller: OutputController,
     /// Event bus for UI subscriptions.
     pub events: EventBus,
+    /// Log stream for UI subscriptions.
+    pub log_bus: Arc<LogBus>,
 }
 
 impl AppState {
@@ -129,6 +131,7 @@ impl AppState {
         playback_manager: PlaybackManager,
         device_selection: DeviceSelectionState,
         events: EventBus,
+        log_bus: Arc<LogBus>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
@@ -141,6 +144,7 @@ impl AppState {
             device_selection,
             output_controller: OutputController::default(),
             events,
+            log_bus,
         }
     }
 }

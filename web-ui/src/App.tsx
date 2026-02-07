@@ -1,47 +1,28 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { apiUrl, fetchJson, postJson } from "./api";
 import {
   AlbumListResponse,
   AlbumSummary,
   LibraryEntry,
   LibraryResponse,
+  LogEvent,
   MetadataEvent,
   OutputInfo,
+  StatusResponse,
   OutputsResponse,
   QueueItem,
   QueueResponse,
   TrackListResponse,
   TrackSummary
 } from "./types";
-import LibraryList from "./components/LibraryList";
-import Modal from "./components/Modal";
-import PlayerControls from "./components/PlayerControls";
-import QueueList from "./components/QueueList";
-
-interface StatusResponse {
-  now_playing?: string | null;
-  paused?: boolean | null;
-  elapsed_ms?: number | null;
-  duration_ms?: number | null;
-  source_codec?: string | null;
-  source_bit_depth?: number | null;
-  container?: string | null;
-  output_sample_format?: string | null;
-  resampling?: boolean | null;
-  resample_from_hz?: number | null;
-  resample_to_hz?: number | null;
-  sample_rate?: number | null;
-  output_sample_rate?: number | null;
-  channels?: number | null;
-  output_device?: string | null;
-  title?: string | null;
-  artist?: string | null;
-  album?: string | null;
-  format?: string | null;
-  bitrate_kbps?: number | null;
-  buffered_frames?: number | null;
-  buffer_capacity_frames?: number | null;
-}
+import AlbumDetailView from "./components/AlbumDetailView";
+import AlbumsView from "./components/AlbumsView";
+import LibraryView from "./components/LibraryView";
+import OutputsModal from "./components/OutputsModal";
+import PlayerBar from "./components/PlayerBar";
+import QueueModal from "./components/QueueModal";
+import SettingsView from "./components/SettingsView";
+import SignalModal from "./components/SignalModal";
 
 interface MetadataEventEntry {
   id: number;
@@ -49,7 +30,13 @@ interface MetadataEventEntry {
   event: MetadataEvent;
 }
 
+interface LogEventEntry {
+  id: number;
+  event: LogEvent;
+}
+
 const MAX_METADATA_EVENTS = 200;
+const MAX_LOG_EVENTS = 300;
 const ALBUM_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><rect width='100%25' height='100%25' fill='%23e9e4d8'/><rect x='12' y='12' width='216' height='216' rx='28' fill='%23fff9ef' stroke='%23d7cbb7' stroke-width='4'/><text x='50%25' y='54%25' font-family='Space Grotesk, sans-serif' font-size='24' fill='%239c7f63' text-anchor='middle'>No Art</text></svg>";
 
 function formatMs(ms?: number | null): string {
@@ -172,6 +159,8 @@ export default function App() {
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
+  const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
+  const [logsError, setLogsError] = useState<string | null>(null);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumsLoading, setAlbumsLoading] = useState<boolean>(false);
   const [albumsError, setAlbumsError] = useState<string | null>(null);
@@ -184,6 +173,52 @@ export default function App() {
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const logIdRef = useRef(0);
+  const metadataIdRef = useRef(0);
+
+  const closeTrackMenu = useCallback(() => {
+    setTrackMenuPath(null);
+    setTrackMenuPosition(null);
+  }, []);
+  const toggleTrackMenu = useCallback(
+    (path: string, target: Element) => {
+      if (trackMenuPath === path) {
+        closeTrackMenu();
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      setTrackMenuPosition({
+        top: rect.bottom + 6,
+        right: window.innerWidth - rect.right
+      });
+      setTrackMenuPath(path);
+    },
+    [trackMenuPath, closeTrackMenu]
+  );
+  const runTrackMenuAction = useCallback(
+    (action: (path: string) => void | Promise<void>, path: string) => {
+      action(path);
+      closeTrackMenu();
+    },
+    [closeTrackMenu]
+  );
+  const handleClearLogs = useCallback(async () => {
+    setLogEvents([]);
+    try {
+      await postJson<{ cleared_at_ms: number }>("/logs/clear");
+      setLogsError(null);
+    } catch (err) {
+      setLogsError((err as Error).message);
+    }
+  }, []);
+  const handleNavigateUp = useCallback(() => {
+    if (!libraryDir) return;
+    const parent = parentDir(libraryDir);
+    if (parent) setLibraryDir(parent);
+  }, [libraryDir]);
+  const handleBackToRoot = useCallback(() => {
+    setLibraryDir(null);
+  }, []);
 
   const activeOutput = useMemo(
     () => outputs.find((output) => output.id === activeOutputId) ?? null,
@@ -247,14 +282,13 @@ export default function App() {
       if (target?.closest('[data-track-menu="true"]')) {
         return;
       }
-      setTrackMenuPath(null);
-      setTrackMenuPosition(null);
+      closeTrackMenu();
     }
     document.addEventListener("click", handleDocumentClick);
     return () => {
       document.removeEventListener("click", handleDocumentClick);
     };
-  }, [trackMenuPath]);
+  }, [trackMenuPath, closeTrackMenu]);
 
   useEffect(() => {
     if (!isPlaying && signalOpen) {
@@ -320,7 +354,7 @@ export default function App() {
       const data = JSON.parse((event as MessageEvent).data) as MetadataEvent;
       setMetadataEvents((prev) => {
         const entry: MetadataEventEntry = {
-          id: Date.now() + Math.floor(Math.random() * 1000),
+          id: (metadataIdRef.current += 1),
           time: new Date(),
           event: data
         };
@@ -330,6 +364,42 @@ export default function App() {
     stream.onerror = () => {
       if (!mounted) return;
       setError("Live metadata updates disconnected.");
+    };
+    return () => {
+      mounted = false;
+      stream.close();
+    };
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let mounted = true;
+    const stream = new EventSource(apiUrl("/logs/stream"));
+    stream.addEventListener("logs", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as LogEvent[];
+      const entries = data
+        .map((entry) => ({
+          id: (logIdRef.current += 1),
+          event: entry
+        }))
+        .reverse()
+        .slice(0, MAX_LOG_EVENTS);
+      setLogEvents(entries);
+      setLogsError(null);
+    });
+    stream.addEventListener("log", (event) => {
+      if (!mounted) return;
+      const data = JSON.parse((event as MessageEvent).data) as LogEvent;
+      const entry: LogEventEntry = {
+        id: (logIdRef.current += 1),
+        event: data
+      };
+      setLogEvents((prev) => [entry, ...prev].slice(0, MAX_LOG_EVENTS));
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setLogsError("Live logs disconnected.");
     };
     return () => {
       mounted = false;
@@ -416,8 +486,7 @@ export default function App() {
         setLibraryDir(response.dir);
         setLibraryEntries(sortLibraryEntries(response.entries));
         setSelectedTrackPath(null);
-        setTrackMenuPath(null);
-        setTrackMenuPosition(null);
+        closeTrackMenu();
         setError(null);
       } catch (err) {
         if (!mounted) return;
@@ -430,7 +499,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, [libraryDir]);
+  }, [libraryDir, closeTrackMenu]);
 
   const loadAlbums = useCallback(async () => {
     setAlbumsLoading(true);
@@ -642,423 +711,117 @@ export default function App() {
           {!settingsOpen && albumViewId === null ? (
             <section className="grid">
               {browserView === "albums" ? (
-                <div className="card">
-                  <div className="card-header">
-                    <span>Albums</span>
-                    <div className="card-actions">
-                      <span className="pill">{albums.length} albums</span>
-                    </div>
-                  </div>
-                  {albumsLoading ? <p className="muted">Loading albums...</p> : null}
-                  {albumsError ? <p className="muted">{albumsError}</p> : null}
-                  {!albumsLoading && !albumsError ? (
-                    <div className="album-grid">
-                      {albums.map((album) => (
-                        <button
-                          key={album.id}
-                          className="album-card"
-                          onClick={() => setAlbumViewId(album.id)}
-                        >
-                          <img
-                            className="album-cover"
-                            src={album.cover_art_url ?? ALBUM_PLACEHOLDER}
-                            alt={album.title}
-                            loading="lazy"
-                          />
-                          <div className="album-card-info">
-                            <div className="album-title">{album.title}</div>
-                            <div className="muted small">{album.artist ?? "Unknown artist"}</div>
-                          </div>
-                        </button>
-                      ))}
-                      {albums.length === 0 ? <p className="muted">No albums found.</p> : null}
-                    </div>
-                  ) : null}
-                </div>
+                <AlbumsView
+                  albums={albums}
+                  loading={albumsLoading}
+                  error={albumsError}
+                  placeholder={ALBUM_PLACEHOLDER}
+                  onSelectAlbum={setAlbumViewId}
+                />
               ) : null}
 
               {browserView === "library" ? (
-                <div className="card">
-                  <div className="card-header">
-                    <span>Library</span>
-                    <div className="card-actions">
-                      <span className="pill">{libraryEntries.length} items</span>
-                      <button className="btn ghost small" onClick={handleRescan}>
-                        Rescan
-                      </button>
-                    </div>
-                  </div>
-                  <div className="library-path">
-                    <span className="muted small">Path</span>
-                    <span className="mono">{libraryDir ?? "Loading..."}</span>
-                  </div>
-                  <div className="library-actions">
-                    <button
-                      className="btn ghost"
-                      disabled={!libraryDir || !parentDir(libraryDir)}
-                      onClick={() => {
-                        if (libraryDir) {
-                          const parent = parentDir(libraryDir);
-                          if (parent) setLibraryDir(parent);
-                        }
-                      }}
-                    >
-                      Up one level
-                    </button>
-                    <button
-                      className="btn ghost"
-                      onClick={() => setLibraryDir(null)}
-                      disabled={!libraryDir}
-                    >
-                      Back to root
-                    </button>
-                  </div>
-                  <LibraryList
-                    entries={libraryEntries}
-                    loading={libraryLoading}
-                    selectedTrackPath={selectedTrackPath}
-                    trackMenuPath={trackMenuPath}
-                    trackMenuPosition={trackMenuPosition}
-                    canPlay={Boolean(activeOutputId)}
-                    formatMs={formatMs}
-                    onSelectDir={setLibraryDir}
-                    onSelectTrack={setSelectedTrackPath}
-                    onToggleMenu={(path, target) => {
-                      if (trackMenuPath === path) {
-                        setTrackMenuPath(null);
-                        setTrackMenuPosition(null);
-                        return;
-                      }
-                      const rect = target.getBoundingClientRect();
-                      setTrackMenuPosition({
-                        top: rect.bottom + 6,
-                        right: window.innerWidth - rect.right
-                      });
-                      setTrackMenuPath(path);
-                    }}
-                    onPlay={(path) => {
-                      handlePlay(path);
-                      setTrackMenuPath(null);
-                      setTrackMenuPosition(null);
-                    }}
-                    onQueue={(path) => {
-                      handleQueue(path);
-                      setTrackMenuPath(null);
-                      setTrackMenuPosition(null);
-                    }}
-                    onPlayNext={(path) => {
-                      handlePlayNext(path);
-                      setTrackMenuPath(null);
-                      setTrackMenuPosition(null);
-                    }}
-                    onRescan={(path) => {
-                      handleRescanTrack(path);
-                      setTrackMenuPath(null);
-                      setTrackMenuPosition(null);
-                    }}
-                  />
-                </div>
+                <LibraryView
+                  entries={libraryEntries}
+                  dir={libraryDir}
+                  loading={libraryLoading}
+                  selectedTrackPath={selectedTrackPath}
+                  trackMenuPath={trackMenuPath}
+                  trackMenuPosition={trackMenuPosition}
+                  canPlay={Boolean(activeOutputId)}
+                  formatMs={formatMs}
+                  onRescan={handleRescan}
+                  onNavigateUp={handleNavigateUp}
+                  onBackToRoot={handleBackToRoot}
+                  onSelectDir={setLibraryDir}
+                  onSelectTrack={setSelectedTrackPath}
+                  onToggleMenu={toggleTrackMenu}
+                  onPlay={(path) => runTrackMenuAction(handlePlay, path)}
+                  onQueue={(path) => runTrackMenuAction(handleQueue, path)}
+                  onPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
+                  onRescanTrack={(path) => runTrackMenuAction(handleRescanTrack, path)}
+                />
               ) : null}
             </section>
           ) : null}
 
           {albumViewId !== null && !settingsOpen ? (
-            <section className="album-view">
-              <div className="album-header">
-                <button className="btn ghost small" onClick={() => setAlbumViewId(null)}>
-                  Back to albums
-                </button>
-              </div>
-              <div className="card album-detail">
-                <div className="album-detail-top">
-                  <div className="album-detail-left">
-                    <img
-                      className="album-cover large"
-                      src={selectedAlbum?.cover_art_url ?? ALBUM_PLACEHOLDER}
-                      alt={selectedAlbum?.title ?? "Album art"}
-                    />
-                  </div>
-                  <div className="album-detail-right">
-                    <div className="album-meta">
-                      <div className="eyebrow">Album</div>
-                      <h2>{selectedAlbum?.title ?? "Unknown album"}</h2>
-                      <div className="muted">{selectedAlbum?.artist ?? "Unknown artist"}</div>
-                      <div className="muted small">
-                        {selectedAlbum?.year ? `${selectedAlbum.year} · ` : ""}
-                        {selectedAlbum?.track_count ?? albumTracks.length} tracks
-                      </div>
-                      <div className="muted small">
-                        {selectedAlbum?.mbid ? `MBID: ${selectedAlbum.mbid}` : "MBID: —"}
-                      </div>
-                      <div className="muted small">
-                        {selectedAlbum?.cover_art_url
-                          ? "Cover: cached"
-                          : selectedAlbum?.mbid
-                            ? "Cover: not cached"
-                            : "Cover: unavailable"}
-                      </div>
-                      <button
-                        className="btn ghost small"
-                        onClick={handlePlayAlbum}
-                        disabled={!activeOutputId || albumTracks.length === 0}
-                      >
-                        Play album
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="album-tracklist">
-                  {albumTracksLoading ? <p className="muted">Loading tracks...</p> : null}
-                  {albumTracksError ? <p className="muted">{albumTracksError}</p> : null}
-                  {!albumTracksLoading && !albumTracksError ? (
-                    <div className="album-tracks">
-                      {albumTracks.map((track) => (
-                        <div key={track.id} className="album-track-row">
-                          <div>
-                            <div className="album-track-title">
-                              {track.track_number ? `${track.track_number}. ` : ""}
-                              {track.title ?? track.file_name}
-                            </div>
-                            <div className="muted small">{track.artist ?? "Unknown artist"}</div>
-                          </div>
-                          <div className="album-track-actions">
-                            <span className="muted small">{formatMs(track.duration_ms)}</span>
-                            <button
-                              className="btn ghost small"
-                              onClick={() => handlePlayAlbumTrack(track)}
-                              disabled={!activeOutputId}
-                            >
-                              Play
-                            </button>
-                            <button
-                              className="btn ghost small"
-                              onClick={() => handleQueueAlbumTrack(track)}
-                            >
-                              Queue
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {albumTracks.length === 0 ? (
-                        <div className="muted small">No tracks found for this album.</div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </section>
+            <AlbumDetailView
+              album={selectedAlbum}
+              tracks={albumTracks}
+              loading={albumTracksLoading}
+              error={albumTracksError}
+              placeholder={ALBUM_PLACEHOLDER}
+              canPlay={Boolean(activeOutputId) && albumTracks.length > 0}
+              formatMs={formatMs}
+              onBack={() => setAlbumViewId(null)}
+              onPlayAlbum={handlePlayAlbum}
+              onPlayTrack={handlePlayAlbumTrack}
+              onQueueTrack={handleQueueAlbumTrack}
+            />
           ) : null}
 
-          <section className={`settings-screen ${settingsOpen ? "active" : ""}`}>
-            <div className="card">
-              <div className="card-header">
-                <span>Metadata jobs</span>
-                <div className="card-actions">
-                  <button className="btn ghost small" onClick={() => setMetadataEvents([])}>
-                    Clear
-                  </button>
-                  <span className="pill">{metadataEvents.length} events</span>
-                </div>
-              </div>
-              <div className="settings-panel">
-                <div className="muted small">Live MusicBrainz and cover art updates.</div>
-                <div className="settings-actions">
-                  <button
-                    className="btn ghost small"
-                    onClick={handleRescanLibrary}
-                    disabled={rescanBusy}
-                  >
-                    {rescanBusy ? "Rescanning..." : "Rescan library"}
-                  </button>
-                </div>
-                <div className="settings-list">
-                  {metadataEvents.map((entry) => {
-                    const info = describeMetadataEvent(entry.event);
-                    const extraLines = metadataDetailLines(entry.event);
-                    return (
-                      <div key={entry.id} className="settings-row">
-                        <div>
-                          <div className="settings-title">{info.title}</div>
-                          <div className="muted small">{info.detail ?? "—"}</div>
-                          {extraLines.map((line) => (
-                            <div key={line} className="muted small">
-                              {line}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="muted small">{entry.time.toLocaleTimeString()}</div>
-                      </div>
-                    );
-                  })}
-                  {metadataEvents.length === 0 ? (
-                    <div className="muted small">No metadata events yet.</div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </section>
+          <SettingsView
+            active={settingsOpen}
+            metadataEvents={metadataEvents}
+            logEvents={logEvents}
+            logsError={logsError}
+            rescanBusy={rescanBusy}
+            onClearMetadata={() => setMetadataEvents([])}
+            onRescanLibrary={handleRescanLibrary}
+            onClearLogs={handleClearLogs}
+            describeMetadataEvent={describeMetadataEvent}
+            metadataDetailLines={metadataDetailLines}
+          />
         </main>
       </div>
 
-      <div className={`player-bar ${settingsOpen ? "hidden" : ""}`}>
-        <div className="player-left">
-          {status?.title || status?.now_playing ? (
-            <div className="album-art">
-              {nowPlayingCover && !nowPlayingCoverFailed ? (
-                <img
-                  className="album-art-image"
-                  src={nowPlayingCover}
-                  alt={status?.album ?? status?.title ?? "Album art"}
-                  onError={() => setNowPlayingCoverFailed(true)}
-                />
-              ) : (
-                <span>Artwork</span>
-              )}
-            </div>
-          ) : null}
-          <div>
-            <div className="track-title">
-              {status?.title ?? status?.now_playing ?? "Nothing playing"}
-            </div>
-            <div className="muted small">
-              {status?.artist ?? (status?.now_playing ? "Unknown artist" : "Select a track to start")}
-            </div>
-          </div>
-        </div>
-        <div className="player-middle">
-          <PlayerControls
-            isPlaying={isPlaying}
-            canTogglePlayback={canTogglePlayback}
-            showPlayIcon={showPlayIcon}
-            playButtonTitle={playButtonTitle}
-            queueHasItems={queue.length > 0}
-            onPrimaryAction={handlePrimaryAction}
-            onNext={handleNext}
-            onSignalOpen={() => setSignalOpen(true)}
-            onQueueOpen={() => setQueueOpen(true)}
-          />
-          <div className="progress">
-            <div className="progress-track"></div>
-            <div
-              className="progress-fill"
-              style={{
-                width:
-                  status?.duration_ms && status?.elapsed_ms
-                    ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
-                    : "0%"
-              }}
-            ></div>
-          </div>
-          <div className="meta-row">
-            <span>{formatMs(status?.elapsed_ms)} / {formatMs(status?.duration_ms)}</span>
-            <span>{status?.format ?? "—"}</span>
-          </div>
-        </div>
-        <div className="player-right">
-          <div className="output-chip">
-            <span className="muted small">Output</span>
-            <span>{activeOutput?.name ?? "No output"}</span>
-          </div>
-          <button className="btn ghost small" onClick={() => setOutputsOpen(true)}>
-            Select output
-          </button>
-          <div className="muted small build-footer">UI build: {uiBuildId}</div>
-        </div>
+      <div className={settingsOpen ? "hidden" : ""}>
+        <PlayerBar
+          status={status}
+          nowPlayingCover={nowPlayingCover}
+          nowPlayingCoverFailed={nowPlayingCoverFailed}
+          isPlaying={isPlaying}
+          canTogglePlayback={canTogglePlayback}
+          showPlayIcon={showPlayIcon}
+          playButtonTitle={playButtonTitle}
+          queueHasItems={queue.length > 0}
+          activeOutput={activeOutput}
+          uiBuildId={uiBuildId}
+          formatMs={formatMs}
+          onCoverError={() => setNowPlayingCoverFailed(true)}
+          onPrimaryAction={handlePrimaryAction}
+          onNext={handleNext}
+          onSignalOpen={() => setSignalOpen(true)}
+          onQueueOpen={() => setQueueOpen(true)}
+          onSelectOutput={() => setOutputsOpen(true)}
+        />
       </div>
 
-      <Modal
+      <OutputsModal
         open={outputsOpen}
-        title="Outputs"
+        outputs={outputs}
+        activeOutputId={activeOutputId}
         onClose={() => setOutputsOpen(false)}
-        headerRight={<span className="pill">{outputs.length} devices</span>}
-      >
-        <div className="output-list">
-          {outputs.map((output) => (
-            <button
-              key={output.id}
-              className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
-              onClick={() => handleSelectOutput(output.id)}
-            >
-              <div>
-                <div className="output-title">{output.name}</div>
-                <div className="muted small">
-                  {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
-                </div>
-              </div>
-              <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
-            </button>
-          ))}
-          {outputs.length === 0 ? (
-            <p className="muted">No outputs reported. Check provider discovery.</p>
-          ) : null}
-        </div>
-      </Modal>
+        onSelectOutput={handleSelectOutput}
+        formatRateRange={formatRateRange}
+      />
 
-      <Modal
+      <SignalModal
         open={signalOpen}
-        title="Signal"
+        status={status}
+        activeOutput={activeOutput}
+        updatedAt={updatedAt}
+        formatHz={formatHz}
         onClose={() => setSignalOpen(false)}
-        headerRight={<span className="pill">{activeOutput?.name ?? "No output"}</span>}
-      >
-        <div className="signal-grid">
-          <div>
-            <div className="signal-label">Source</div>
-            <div className="signal-value">
-              {status?.source_codec ?? status?.format ?? "—"}
-              {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
-            </div>
-          </div>
-          <div>
-            <div className="signal-label">Sample rate</div>
-            <div className="signal-value">{formatHz(status?.sample_rate)}</div>
-          </div>
-          <div>
-            <div className="signal-label">Output rate</div>
-            <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
-          </div>
-          <div>
-            <div className="signal-label">Resample</div>
-            <div className="signal-value">
-              {status?.resampling ? "Enabled" : "Direct"}
-              {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
-            </div>
-          </div>
-          <div>
-            <div className="signal-label">Output format</div>
-            <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
-          </div>
-          <div>
-            <div className="signal-label">Channels</div>
-            <div className="signal-value">{status?.channels ?? "—"}</div>
-          </div>
-          <div>
-            <div className="signal-label">Bitrate</div>
-            <div className="signal-value">
-              {status?.bitrate_kbps ? `${status.bitrate_kbps} kbps` : "—"}
-            </div>
-          </div>
-          <div>
-            <div className="signal-label">Buffer</div>
-            <div className="signal-value">
-              {status?.buffered_frames && status?.buffer_capacity_frames
-                ? `${status.buffered_frames} / ${status.buffer_capacity_frames} frames`
-                : "—"}
-            </div>
-          </div>
-        </div>
-        <div className="muted small updated">
-          Updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
-        </div>
-      </Modal>
+      />
 
-      <Modal
+      <QueueModal
         open={queueOpen}
-        title="Queue"
+        items={queue}
         onClose={() => setQueueOpen(false)}
-        headerRight={<span className="pill">{queue.length} items</span>}
-      >
-        <QueueList items={queue} formatMs={formatMs} />
-      </Modal>
+        formatMs={formatMs}
+      />
 
     </div>
   );

@@ -748,6 +748,12 @@ p {
   gap: 14px;
 }
 
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .settings-header {
   display: flex;
   align-items: center;
@@ -775,6 +781,64 @@ p {
   border-radius: 16px;
   background: var(--bg-accent);
   border: 1px solid var(--border);
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 80px 60px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.log-level {
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.log-level.log-info {
+  color: var(--accent-2);
+}
+
+.log-level.log-warn,
+.log-level.log-warning {
+  color: #d97706;
+}
+
+.log-level.log-error {
+  color: #d64545;
+}
+
+.log-level.log-debug {
+  color: #6b7280;
+}
+
+.log-level.log-trace {
+  color: #9ca3af;
+}
+
+.log-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-target {
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .settings-actions {

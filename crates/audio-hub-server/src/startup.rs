@@ -27,12 +27,13 @@ use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
 use crate::library::scan_library_with_meta;
 use crate::metadata_db::MetadataDb;
 use crate::musicbrainz::{MusicBrainzClient, spawn_enrichment_loop};
+use crate::events::LogBus;
 use crate::state::MetadataWake;
 use crate::openapi;
 use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderState, PlayerStatus, QueueState};
 
 /// Build server state and start the Actix HTTP server.
-pub(crate) async fn run(args: crate::Args) -> Result<()> {
+pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> Result<()> {
     let cfg = load_config(args.config.as_ref())?;
     let bind = resolve_bind(args.bind, &cfg)?;
     let public_base_url = config::public_base_url_from_config(&cfg, bind)?;
@@ -190,6 +191,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
         playback_manager,
         device_selection,
         events,
+        log_bus,
     ));
     if let Some(client) = state.musicbrainz.as_ref() {
         spawn_enrichment_loop(
@@ -246,6 +248,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::art_for_track)
             .service(api::track_cover)
             .service(api::album_cover)
+            .service(api::logs_clear)
             .service(api::status_for_output)
             .service(api::status_stream)
             .service(api::providers_list)
@@ -254,6 +257,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::outputs_stream)
             .service(api::metadata_stream)
             .service(api::albums_stream)
+            .service(api::logs_stream)
             .service(api::outputs_select);
 
         if let Some(dist) = web_ui_dist.clone() {
@@ -289,7 +293,13 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
 
 /// Return true when the request path should be logged.
 fn should_log_path(path: &str) -> bool {
-    if path == "/queue" || path == "/stream" || path == "/queue/stream" || path.ends_with("/status/stream") {
+    if path == "/queue"
+        || path == "/stream"
+        || path == "/queue/stream"
+        || path == "/logs/stream"
+        || path == "/logs/clear"
+        || path.ends_with("/status/stream")
+    {
         return false;
     }
     if path.starts_with("/outputs/") && path != "/outputs/select" {

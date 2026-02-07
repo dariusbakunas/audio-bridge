@@ -7,6 +7,31 @@ export interface OutputInfo {
   supported_rates?: { min_hz: number; max_hz: number } | null;
 }
 
+export interface StatusResponse {
+  now_playing?: string | null;
+  paused?: boolean | null;
+  elapsed_ms?: number | null;
+  duration_ms?: number | null;
+  source_codec?: string | null;
+  source_bit_depth?: number | null;
+  container?: string | null;
+  output_sample_format?: string | null;
+  resampling?: boolean | null;
+  resample_from_hz?: number | null;
+  resample_to_hz?: number | null;
+  sample_rate?: number | null;
+  output_sample_rate?: number | null;
+  channels?: number | null;
+  output_device?: string | null;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  format?: string | null;
+  bitrate_kbps?: number | null;
+  buffered_frames?: number | null;
+  buffer_capacity_frames?: number | null;
+}
+
 export interface OutputsResponse {
   active_id: string | null;
   outputs: OutputInfo[];
@@ -148,3 +173,10 @@ export type MetadataEvent =
       error: string;
       attempts: number;
     };
+
+export interface LogEvent {
+  level: string;
+  target: string;
+  message: string;
+  timestamp_ms: number;
+}

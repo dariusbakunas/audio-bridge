@@ -28,7 +28,10 @@ mod state;
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 use std::path::PathBuf;
+
+use crate::events::{LogBus, LogLayer};
 
 const VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -59,10 +62,15 @@ pub(crate) struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("info,actix_web=info,audio_server=info")
-        }))
+    let log_bus = std::sync::Arc::new(LogBus::new(500));
+    let log_layer = LogLayer::new(log_bus.clone());
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,actix_web=info,audio_server=info"));
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(log_layer)
         .init();
 
     tracing::info!(
@@ -73,5 +81,5 @@ async fn main() -> Result<()> {
         "audio-hub-server starting"
     );
 
-    startup::run(args).await
+    startup::run(args, log_bus).await
 }

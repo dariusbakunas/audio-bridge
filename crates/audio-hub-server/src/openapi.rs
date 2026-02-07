@@ -31,6 +31,7 @@ use crate::models;
         api::art_for_track,
         api::track_cover,
         api::album_cover,
+        api::logs_clear,
         api::status_for_output,
         api::status_stream,
         api::providers_list,
@@ -39,6 +40,7 @@ use crate::models;
         api::outputs_stream,
         api::metadata_stream,
         api::albums_stream,
+        api::logs_stream,
         api::outputs_select,
     ),
     components(
@@ -70,6 +72,8 @@ use crate::models;
             api::ArtQuery,
             api::CoverPath,
             crate::events::MetadataEvent,
+            crate::events::LogEvent,
+            api::LogsClearResponse,
         )
     ),
     tags(

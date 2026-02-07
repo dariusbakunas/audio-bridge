@@ -12,7 +12,7 @@ use actix_web::http::{header, StatusCode};
 use actix_web::body::SizedStream;
 use actix_web::web::Bytes;
 use futures_util::stream::unfold;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use tokio_util::io::ReaderStream;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -36,7 +36,7 @@ use crate::models::{
     ProvidersResponse,
     TrackListResponse,
 };
-use crate::events::HubEvent;
+use crate::events::{HubEvent, LogEvent};
 use crate::state::AppState;
 
 /// Query parameters for library listing.
@@ -94,6 +94,29 @@ pub struct TrackListQuery {
     pub limit: Option<i64>,
     #[serde(default)]
     pub offset: Option<i64>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct LogsClearResponse {
+    pub cleared_at_ms: i64,
+}
+
+#[utoipa::path(
+    post,
+    path = "/logs/clear",
+    responses(
+        (status = 200, description = "Log buffer cleared", body = LogsClearResponse)
+    )
+)]
+#[post("/logs/clear")]
+/// Clear the in-memory log buffer.
+pub async fn logs_clear(state: web::Data<AppState>) -> impl Responder {
+    state.log_bus.clear();
+    let cleared_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    HttpResponse::Ok().json(LogsClearResponse { cleared_at_ms })
 }
 
 #[utoipa::path(
@@ -818,6 +841,12 @@ struct MetadataStreamState {
     last_ping: Instant,
 }
 
+struct LogsStreamState {
+    receiver: tokio::sync::broadcast::Receiver<LogEvent>,
+    pending: VecDeque<Bytes>,
+    last_ping: Instant,
+}
+
 struct AlbumsStreamState {
     receiver: tokio::sync::broadcast::Receiver<HubEvent>,
     pending: VecDeque<Bytes>,
@@ -1151,6 +1180,62 @@ pub async fn albums_stream(state: web::Data<AppState>) -> impl Responder {
                             Err(RecvError::Lagged(_)) => {
                                 ctx.pending.push_back(sse_event("albums", "{}"));
                             }
+                            Err(RecvError::Closed) => return None,
+                        }
+                    }
+                }
+
+                if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {
+                    ctx.last_ping = Instant::now();
+                    ctx.pending.push_back(Bytes::from(": ping\n\n"));
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/logs/stream",
+    responses(
+        (status = 200, description = "Server log event stream")
+    )
+)]
+#[get("/logs/stream")]
+/// Stream server logs via server-sent events.
+pub async fn logs_stream(state: web::Data<AppState>) -> impl Responder {
+    let initial = state.log_bus.snapshot();
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "[]".to_string());
+    let mut pending = VecDeque::new();
+    pending.push_back(sse_event("logs", &initial_json));
+
+    let receiver = state.log_bus.subscribe();
+    let stream = unfold(
+        LogsStreamState {
+            receiver,
+            pending,
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+                tokio::select! {
+                    result = ctx.receiver.recv() => {
+                        match result {
+                            Ok(event) => {
+                                let json = serde_json::to_string(&event)
+                                    .unwrap_or_else(|_| "null".to_string());
+                                ctx.pending.push_back(sse_event("log", &json));
+                            }
+                            Err(RecvError::Lagged(_)) => {}
                             Err(RecvError::Closed) => return None,
                         }
                     }
