@@ -1,7 +1,7 @@
 import { LibraryEntry } from "../types";
 import LibraryList from "./LibraryList";
 
-interface LibraryViewProps {
+interface FoldersViewProps {
   entries: LibraryEntry[];
   dir: string | null;
   loading: boolean;
@@ -22,7 +22,7 @@ interface LibraryViewProps {
   onRescanTrack: (path: string) => void;
 }
 
-export default function LibraryView({
+export default function FoldersView({
   entries,
   dir,
   loading,
@@ -41,11 +41,10 @@ export default function LibraryView({
   onQueue,
   onPlayNext,
   onRescanTrack
-}: LibraryViewProps) {
+}: FoldersViewProps) {
   return (
     <div className="card">
-      <div className="card-header">
-        <span>Library</span>
+      <div className="card-header actions-only">
         <div className="card-actions">
           <span className="pill">{entries.length} items</span>
           <button className="btn ghost small" onClick={onRescan}>

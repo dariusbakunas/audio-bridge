@@ -5,7 +5,7 @@ interface AlbumDetailViewProps {
   tracks: TrackSummary[];
   loading: boolean;
   error: string | null;
-  placeholder: string;
+  placeholder: (title?: string | null, artist?: string | null) => string;
   canPlay: boolean;
   formatMs: (ms?: number | null) => string;
   onBack: () => void;
@@ -39,7 +39,7 @@ export default function AlbumDetailView({
           <div className="album-detail-left">
             <img
               className="album-cover large"
-              src={album?.cover_art_url ?? placeholder}
+              src={album?.cover_art_url ?? placeholder(album?.title, album?.artist)}
               alt={album?.title ?? "Album art"}
             />
           </div>

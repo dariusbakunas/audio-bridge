@@ -17,7 +17,7 @@ import {
 } from "./types";
 import AlbumDetailView from "./components/AlbumDetailView";
 import AlbumsView from "./components/AlbumsView";
-import LibraryView from "./components/LibraryView";
+import FoldersView from "./components/FoldersView";
 import OutputsModal from "./components/OutputsModal";
 import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
@@ -37,7 +37,21 @@ interface LogEventEntry {
 
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
-const ALBUM_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><rect width='100%25' height='100%25' fill='%23e9e4d8'/><rect x='12' y='12' width='216' height='216' rx='28' fill='%23fff9ef' stroke='%23d7cbb7' stroke-width='4'/><text x='50%25' y='54%25' font-family='Space Grotesk, sans-serif' font-size='24' fill='%239c7f63' text-anchor='middle'>No Art</text></svg>";
+
+function albumPlaceholder(title?: string | null, artist?: string | null): string {
+  const source = title?.trim() || artist?.trim() || "";
+  const initials = source
+    .split(/\s+/)
+    .map((part) => part.replace(/[^A-Za-z0-9]/g, ""))
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const label = initials || "NA";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#50555b"/><stop offset="100%" stop-color="#3f444a"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#ffffff" text-anchor="start">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
 
 function formatMs(ms?: number | null): string {
   if (!ms && ms !== 0) return "--:--";
@@ -58,6 +72,10 @@ function formatHz(hz?: number | null): string {
 function formatRateRange(output: OutputInfo): string {
   if (!output.supported_rates) return "rate range unknown";
   return `${formatHz(output.supported_rates.min_hz)} - ${formatHz(output.supported_rates.max_hz)}`;
+}
+
+function normalizeMatch(value?: string | null): string {
+  return value?.trim().toLowerCase() ?? "";
 }
 
 function parentDir(path: string): string | null {
@@ -158,6 +176,7 @@ export default function App() {
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [settingsSection, setSettingsSection] = useState<"metadata" | "logs">("metadata");
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -235,6 +254,13 @@ export default function App() {
     }
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
+  const viewTitle = settingsOpen
+    ? "Settings"
+    : albumViewId !== null
+      ? "Album"
+      : browserView === "albums"
+        ? "Albums"
+        : "Folders";
   const playButtonTitle = !activeOutputId
     ? "Select an output to control playback."
     : !status?.now_playing && !selectedTrackPath
@@ -244,6 +270,18 @@ export default function App() {
     () => albums.find((album) => album.id === albumViewId) ?? null,
     [albums, albumViewId]
   );
+  const activeAlbumId = useMemo(() => {
+    const albumKey = normalizeMatch(status?.album);
+    if (!albumKey) return null;
+    const artistKey = normalizeMatch(status?.artist);
+    const match = albums.find((album) => {
+      if (normalizeMatch(album.title) !== albumKey) return false;
+      if (!artistKey) return true;
+      if (!album.artist) return true;
+      return normalizeMatch(album.artist) === artistKey;
+    });
+    return match?.id ?? null;
+  }, [albums, status?.album, status?.artist]);
 
   useEffect(() => {
     let mounted = true;
@@ -606,6 +644,25 @@ export default function App() {
     await handlePlay(track.path);
   }
 
+  async function handlePlayAlbumById(albumId: number) {
+    if (!activeOutputId) return;
+    try {
+      const response = await fetchJson<TrackListResponse>(
+        `/tracks?album_id=${albumId}&limit=500`
+      );
+      const paths = response.items.map((track) => track.path).filter(Boolean);
+      if (!paths.length) return;
+      const [first, ...rest] = paths;
+      await postJson("/queue/clear");
+      if (rest.length > 0) {
+        await postJson("/queue", { paths: rest });
+      }
+      await postJson("/play", { path: first, queue_mode: "keep" });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function handleQueueAlbumTrack(track: TrackSummary) {
     if (!track.path) return;
     await handleQueue(track.path);
@@ -658,53 +715,75 @@ export default function App() {
       <div className="layout">
         <aside className="side-nav">
           <div className="nav-brand">
-            <span className="eyebrow">Audio Hub</span>
-            <button
-              className="icon-btn settings-btn"
-              onClick={() => setSettingsOpen(!settingsOpen)}
-              aria-label="Settings"
-              title="Settings"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 8.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm9.25 3.25c0-.5-.03-1-.1-1.48l2.02-1.57a.75.75 0 0 0 .17-.96l-1.92-3.32a.75.75 0 0 0-.91-.34l-2.38.96a9.5 9.5 0 0 0-2.56-1.48l-.36-2.52A.75.75 0 0 0 14.41 1h-3.82a.75.75 0 0 0-.74.64l-.36 2.52a9.5 9.5 0 0 0-2.56 1.48l-2.38-.96a.75.75 0 0 0-.91.34L1.72 8.34a.75.75 0 0 0 .17.96l2.02 1.57c-.07.48-.1.98-.1 1.48s.03 1 .1 1.48l-2.02 1.57a.75.75 0 0 0-.17.96l1.92 3.32a.75.75 0 0 0 .91.34l2.38-.96a9.5 9.5 0 0 0 2.56 1.48l.36 2.52a.75.75 0 0 0 .74.64h3.82a.75.75 0 0 0 .74-.64l.36-2.52a9.5 9.5 0 0 0 2.56-1.48l2.38.96a.75.75 0 0 0 .91-.34l1.92-3.32a.75.75 0 0 0-.17-.96l-2.02-1.57c.07-.48.1-.98.1-1.48Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </button>
+            <div>
+              <div className="nav-title">Audio Hub</div>
+              <div className="nav-subtitle">Lossless control with a live signal view.</div>
+            </div>
           </div>
           <div className="nav-section">
             <div className="nav-label">Library</div>
             <button
-              className={`nav-button ${browserView === "albums" ? "active" : ""}`}
+              className={`nav-button ${browserView === "albums" && !settingsOpen ? "active" : ""}`}
               onClick={() => {
                 setAlbumViewId(null);
                 setBrowserView("albums");
                 setSettingsOpen(false);
               }}
             >
-              Albums
+              <span className="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M4 4h16v12H4zM7 8h10v2H7zm0 4h6v2H7zM8 18h8v2H8z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>Albums</span>
             </button>
             <button
-              className={`nav-button ${browserView === "library" ? "active" : ""}`}
+              className={`nav-button ${browserView === "library" && !settingsOpen ? "active" : ""}`}
               onClick={() => {
                 setAlbumViewId(null);
                 setBrowserView("library");
                 setSettingsOpen(false);
               }}
             >
-              Library
+              <span className="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M3 7.5h7l2 2H21a1 1 0 0 1 1 1v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 4 17.5V8.5a1 1 0 0 1 1-1Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>Folders</span>
+            </button>
+          </div>
+          <div className="nav-section">
+            <div className="nav-label">System</div>
+            <button
+              className={`nav-button ${settingsOpen ? "active" : ""}`}
+              onClick={() => {
+                setSettingsSection("metadata");
+                setSettingsOpen(true);
+              }}
+            >
+              <span className="nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M12 8.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm9.25 3.25c0-.5-.03-1-.1-1.48l2.02-1.57a.75.75 0 0 0 .17-.96l-1.92-3.32a.75.75 0 0 0-.91-.34l-2.38.96a9.5 9.5 0 0 0-2.56-1.48l-.36-2.52A.75.75 0 0 0 14.41 1h-3.82a.75.75 0 0 0-.74.64l-.36 2.52a9.5 9.5 0 0 0-2.56 1.48l-2.38-.96a.75.75 0 0 0-.91.34L1.72 8.34a.75.75 0 0 0 .17.96l2.02 1.57c-.07.48-.1.98-.1 1.48s.03 1 .1 1.48l-2.02 1.57a.75.75 0 0 0-.17.96l1.92 3.32a.75.75 0 0 0 .91.34l2.38-.96a9.5 9.5 0 0 0 2.56 1.48l.36 2.52a.75.75 0 0 0 .74.64h3.82a.75.75 0 0 0 .74-.64l.36-2.52a9.5 9.5 0 0 0 2.56-1.48l2.38.96a.75.75 0 0 0 .91-.34l1.92-3.32a.75.75 0 0 0-.17-.96l-2.02-1.57c.07-.48.1-.98.1-1.48Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>Settings</span>
             </button>
           </div>
         </aside>
 
         <main className="main">
-          <header className={`hero ${settingsOpen ? "hidden" : ""}`}>
-            <h1>Lossless control with a live signal view.</h1>
-            <p>
-              A focused dashboard for your playback pipeline. Keep an eye on output state, signal
-              metadata, and the queue without opening the TUI.
-            </p>
+          <header className="view-header">
+            <h1>{viewTitle}</h1>
             {error ? <div className="alert">{error}</div> : null}
           </header>
 
@@ -715,13 +794,18 @@ export default function App() {
                   albums={albums}
                   loading={albumsLoading}
                   error={albumsError}
-                  placeholder={ALBUM_PLACEHOLDER}
+                  placeholder={albumPlaceholder}
+                  canPlay={Boolean(activeOutputId)}
+                  activeAlbumId={activeAlbumId}
+                  isPlaying={isPlaying}
                   onSelectAlbum={setAlbumViewId}
+                  onPlayAlbum={handlePlayAlbumById}
+                  onPause={handlePause}
                 />
               ) : null}
 
               {browserView === "library" ? (
-                <LibraryView
+                <FoldersView
                   entries={libraryEntries}
                   dir={libraryDir}
                   loading={libraryLoading}
@@ -751,7 +835,7 @@ export default function App() {
               tracks={albumTracks}
               loading={albumTracksLoading}
               error={albumTracksError}
-              placeholder={ALBUM_PLACEHOLDER}
+              placeholder={albumPlaceholder}
               canPlay={Boolean(activeOutputId) && albumTracks.length > 0}
               formatMs={formatMs}
               onBack={() => setAlbumViewId(null)}
@@ -763,6 +847,8 @@ export default function App() {
 
           <SettingsView
             active={settingsOpen}
+            section={settingsSection}
+            onSectionChange={setSettingsSection}
             metadataEvents={metadataEvents}
             logEvents={logEvents}
             logsError={logsError}
