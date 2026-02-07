@@ -9,9 +9,7 @@ import {
   MetadataEvent,
   OutputInfo,
   StatusResponse,
-  OutputsResponse,
   QueueItem,
-  QueueResponse,
   TrackListResponse,
   TrackSummary
 } from "./types";
@@ -23,6 +21,8 @@ import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
 import SettingsView from "./components/SettingsView";
 import SignalModal from "./components/SignalModal";
+import { useLogsStream, useMetadataStream, useOutputsStream, useQueueStream } from "./hooks/streams";
+import { usePlaybackActions } from "./hooks/usePlaybackActions";
 
 interface MetadataEventEntry {
   id: number;
@@ -284,36 +284,6 @@ export default function App() {
   }, [albums, status?.album, status?.artist]);
 
   useEffect(() => {
-    let mounted = true;
-    async function loadOutputs() {
-      try {
-        const response = await fetchJson<OutputsResponse>("/outputs");
-        if (!mounted) return;
-        const activeId = response.outputs.some((output) => output.id === response.active_id)
-          ? response.active_id
-          : null;
-        setOutputs(response.outputs);
-        setActiveOutputId(activeId);
-        setError(null);
-      } catch (err) {
-        if (!mounted) return;
-        setError((err as Error).message);
-      }
-    }
-    loadOutputs();
-    if (!outputsOpen) {
-      return () => {
-        mounted = false;
-      };
-    }
-    const timer = setInterval(loadOutputs, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [outputsOpen]);
-
-  useEffect(() => {
     if (!trackMenuPath) return;
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target as Element | null;
@@ -334,89 +304,58 @@ export default function App() {
     }
   }, [isPlaying, signalOpen]);
 
-  useEffect(() => {
-    let mounted = true;
-    const stream = new EventSource(apiUrl("/outputs/stream"));
-    stream.addEventListener("outputs", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as OutputsResponse;
+  useOutputsStream({
+    onEvent: (data) => {
       const activeId = data.outputs.some((output) => output.id === data.active_id)
         ? data.active_id
         : null;
       setOutputs(data.outputs);
       setActiveOutputId(activeId);
       setError(null);
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      setError("Live outputs disconnected.");
-    };
-    return () => {
-      mounted = false;
-      stream.close();
-    };
-  }, []);
+    },
+    onError: () => setError("Live outputs disconnected.")
+  });
 
-  async function handleRescanLibrary() {
-    if (rescanBusy) return;
-    setRescanBusy(true);
-    try {
-      await postJson("/library/rescan");
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setRescanBusy(false);
-    }
-  }
+  const {
+    handleRescanLibrary,
+    handleRescanTrack,
+    handlePause,
+    handleNext,
+    handleRescan,
+    handleSelectOutput,
+    handlePlay,
+    handlePlayAlbumTrack,
+    handlePlayAlbumById,
+    handleQueueAlbumTrack,
+    handlePlayAlbum,
+    handleQueue,
+    handlePlayNext
+  } = usePlaybackActions({
+    activeOutputId,
+    albumTracks,
+    rescanBusy,
+    setError,
+    setActiveOutputId,
+    setRescanBusy
+  });
 
-  async function handleRescanTrack(path: string) {
-    if (rescanBusy) return;
-    setRescanBusy(true);
-    try {
-      await postJson("/library/rescan/track", { path });
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setRescanBusy(false);
-    }
-  }
+  useMetadataStream({
+    enabled: settingsOpen,
+    onEvent: (event) => {
+      const entry: MetadataEventEntry = {
+        id: (metadataIdRef.current += 1),
+        time: new Date(),
+        event
+      };
+      setMetadataEvents((prev) => [entry, ...prev].slice(0, MAX_METADATA_EVENTS));
+    },
+    onError: () => setError("Live metadata updates disconnected.")
+  });
 
-  useEffect(() => {
-    if (!settingsOpen) return;
-    let mounted = true;
-    const stream = new EventSource(apiUrl("/metadata/stream"));
-    stream.addEventListener("metadata", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as MetadataEvent;
-      setMetadataEvents((prev) => {
-        const entry: MetadataEventEntry = {
-          id: (metadataIdRef.current += 1),
-          time: new Date(),
-          event: data
-        };
-        return [entry, ...prev].slice(0, MAX_METADATA_EVENTS);
-      });
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      setError("Live metadata updates disconnected.");
-    };
-    return () => {
-      mounted = false;
-      stream.close();
-    };
-  }, [settingsOpen]);
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    let mounted = true;
-    const stream = new EventSource(apiUrl("/logs/stream"));
-    stream.addEventListener("logs", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as LogEvent[];
-      const entries = data
+  useLogsStream({
+    enabled: settingsOpen,
+    onSnapshot: (items) => {
+      const entries = items
         .map((entry) => ({
           id: (logIdRef.current += 1),
           event: entry
@@ -425,25 +364,16 @@ export default function App() {
         .slice(0, MAX_LOG_EVENTS);
       setLogEvents(entries);
       setLogsError(null);
-    });
-    stream.addEventListener("log", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as LogEvent;
-      const entry: LogEventEntry = {
+    },
+    onEvent: (entry) => {
+      const row: LogEventEntry = {
         id: (logIdRef.current += 1),
-        event: data
+        event: entry
       };
-      setLogEvents((prev) => [entry, ...prev].slice(0, MAX_LOG_EVENTS));
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      setLogsError("Live logs disconnected.");
-    };
-    return () => {
-      mounted = false;
-      stream.close();
-    };
-  }, [settingsOpen]);
+      setLogEvents((prev) => [row, ...prev].slice(0, MAX_LOG_EVENTS));
+    },
+    onError: () => setLogsError("Live logs disconnected.")
+  });
 
   useEffect(() => {
     if (!activeOutputId) {
@@ -483,24 +413,13 @@ export default function App() {
     setNowPlayingCoverFailed(false);
   }, [status?.now_playing]);
 
-  useEffect(() => {
-    let mounted = true;
-    const stream = new EventSource(apiUrl("/queue/stream"));
-    stream.addEventListener("queue", (event) => {
-      if (!mounted) return;
-      const data = JSON.parse((event as MessageEvent).data) as QueueResponse;
-      setQueue(data.items ?? []);
+  useQueueStream({
+    onEvent: (items) => {
+      setQueue(items ?? []);
       setError(null);
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      setError("Live queue disconnected.");
-    };
-    return () => {
-      mounted = false;
-      stream.close();
-    };
-  }, []);
+    },
+    onError: () => setError("Live queue disconnected.")
+  });
 
   useEffect(() => {
     if (!outputsOpen) return;
@@ -597,108 +516,6 @@ export default function App() {
       mounted = false;
     };
   }, [albumViewId]);
-
-  async function handlePause() {
-    try {
-      await postJson("/pause");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleNext() {
-    try {
-      await postJson("/queue/next");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleRescan() {
-    try {
-      await postJson("/library/rescan");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleSelectOutput(id: string) {
-    try {
-      await postJson("/outputs/select", { id });
-      setActiveOutputId(id);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handlePlay(path: string) {
-    try {
-      await postJson("/play", { path, queue_mode: "keep" });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handlePlayAlbumTrack(track: TrackSummary) {
-    if (!track.path) return;
-    await handlePlay(track.path);
-  }
-
-  async function handlePlayAlbumById(albumId: number) {
-    if (!activeOutputId) return;
-    try {
-      const response = await fetchJson<TrackListResponse>(
-        `/tracks?album_id=${albumId}&limit=500`
-      );
-      const paths = response.items.map((track) => track.path).filter(Boolean);
-      if (!paths.length) return;
-      const [first, ...rest] = paths;
-      await postJson("/queue/clear");
-      if (rest.length > 0) {
-        await postJson("/queue", { paths: rest });
-      }
-      await postJson("/play", { path: first, queue_mode: "keep" });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleQueueAlbumTrack(track: TrackSummary) {
-    if (!track.path) return;
-    await handleQueue(track.path);
-  }
-
-  async function handlePlayAlbum() {
-    if (!albumTracks.length) return;
-    const paths = albumTracks.map((track) => track.path).filter(Boolean);
-    if (!paths.length) return;
-    const [first, ...rest] = paths;
-    try {
-      await postJson("/queue/clear");
-      if (rest.length > 0) {
-        await postJson("/queue", { paths: rest });
-      }
-      await postJson("/play", { path: first, queue_mode: "keep" });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleQueue(path: string) {
-    try {
-      await postJson("/queue", { paths: [path] });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handlePlayNext(path: string) {
-    try {
-      await postJson("/queue/next/add", { paths: [path] });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
 
   async function handlePrimaryAction() {
     if (status?.now_playing) {
