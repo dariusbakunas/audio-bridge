@@ -24,6 +24,7 @@ pub struct MusicBrainzMatch {
     pub album_mbid: Option<String>,
     pub album_title: Option<String>,
     pub release_year: Option<i32>,
+    pub release_candidates: Vec<String>,
 }
 
 pub struct MusicBrainzClient {
@@ -102,21 +103,23 @@ impl MusicBrainzClient {
             })
             .unwrap_or((None, None, None));
 
-        let (album_mbid, album_title, release_year) = best
+        let (album_mbid, album_title, release_year, release_candidates) = best
             .releases
             .as_ref()
-            .and_then(|releases| releases.first())
-            .map(|release| {
-                (
-                    Some(release.id.clone()),
-                    Some(release.title.clone()),
-                    release
-                        .date
-                        .as_deref()
-                        .and_then(parse_year),
-                )
+            .map(|releases| {
+                let mut ids: Vec<String> = releases.iter().map(|r| r.id.clone()).collect();
+                let mut seen = std::collections::HashSet::new();
+                ids.retain(|id| seen.insert(id.clone()));
+                let first = ids.first().cloned();
+                let year = releases
+                    .first()
+                    .and_then(|release| release.date.as_deref())
+                    .and_then(parse_year);
+                let title = releases.first().map(|release| release.title.clone());
+                let rest = ids.into_iter().skip(1).collect::<Vec<_>>();
+                (first, title, year, rest)
             })
-            .unwrap_or((None, None, None));
+            .unwrap_or((None, None, None, Vec::new()));
 
         Ok(MusicBrainzLookup::Match(MusicBrainzMatch {
             recording_mbid: Some(best.id),
@@ -126,6 +129,7 @@ impl MusicBrainzClient {
             album_mbid,
             album_title,
             release_year,
+            release_candidates,
         }))
     }
 

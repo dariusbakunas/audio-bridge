@@ -38,6 +38,7 @@ use crate::models;
         api::outputs_list,
         api::outputs_stream,
         api::metadata_stream,
+        api::albums_stream,
         api::outputs_select,
     ),
     components(

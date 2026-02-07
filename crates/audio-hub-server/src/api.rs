@@ -223,15 +223,18 @@ pub async fn stream_track(
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     tracing::info!(root = %root.display(), "rescan requested");
-    if let Err(err) = state.metadata_db.clear_musicbrainz_no_match_all() {
-        tracing::warn!(error = %err, "clear musicbrainz no match failed");
+    if let Err(err) = state.metadata_db.clear_library() {
+        tracing::warn!(error = %err, "metadata clear failed");
     }
     match scan_library_with_meta(&root, |path, file_name, _ext, meta, fs_meta| {
         let record = crate::metadata_db::TrackRecord {
             path: path.to_string_lossy().to_string(),
             file_name: file_name.to_string(),
             title: meta.title.clone(),
-            artist: meta.artist.clone(),
+            artist: meta
+                .album_artist
+                .clone()
+                .or_else(|| meta.artist.clone()),
             album: meta.album.clone(),
             track_number: meta.track_number,
             disc_number: meta.disc_number,
@@ -256,6 +259,7 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     }) {
         Ok(new_index) => {
             *state.library.write().unwrap() = new_index;
+            state.events.library_changed();
             state.metadata_wake.notify();
             HttpResponse::Ok().finish()
         }
@@ -338,6 +342,7 @@ pub async fn rescan_track(
     if let Ok(mut index) = state.library.write() {
         index.update_track_meta(&full_path, &meta);
     }
+    state.events.library_changed();
     state.metadata_wake.notify();
     HttpResponse::Ok().finish()
 }
@@ -813,6 +818,12 @@ struct MetadataStreamState {
     last_ping: Instant,
 }
 
+struct AlbumsStreamState {
+    receiver: tokio::sync::broadcast::Receiver<HubEvent>,
+    pending: VecDeque<Bytes>,
+    last_ping: Instant,
+}
+
 #[utoipa::path(
     get,
     path = "/outputs/{id}/status/stream",
@@ -866,6 +877,7 @@ pub async fn status_stream(
                             Ok(HubEvent::QueueChanged) => {}
                             Ok(HubEvent::OutputsChanged) => {}
                             Ok(HubEvent::Metadata(_)) => {}
+                            Ok(HubEvent::LibraryChanged) => {}
                             Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
@@ -951,6 +963,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::OutputsChanged) => {}
                             Ok(HubEvent::Metadata(_)) => {}
+                            Ok(HubEvent::LibraryChanged) => {}
                             Err(RecvError::Lagged(_)) => {
                                 let queue = ctx.state.output_controller.queue_list(&ctx.state);
                                 let json = serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
@@ -1019,6 +1032,7 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                             Ok(HubEvent::StatusChanged) => {}
                             Ok(HubEvent::QueueChanged) => {}
                             Ok(HubEvent::Metadata(_)) => {}
+                            Ok(HubEvent::LibraryChanged) => {}
                             Err(RecvError::Lagged(_)) => refresh = true,
                             Err(RecvError::Closed) => return None,
                         }
@@ -1083,6 +1097,60 @@ pub async fn metadata_stream(state: web::Data<AppState>) -> impl Responder {
                             }
                             Ok(_) => {}
                             Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Closed) => return None,
+                        }
+                    }
+                }
+
+                if ctx.pending.is_empty() && ctx.last_ping.elapsed() >= Duration::from_secs(15) {
+                    ctx.last_ping = Instant::now();
+                    ctx.pending.push_back(Bytes::from(": ping\n\n"));
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/albums/stream",
+    responses(
+        (status = 200, description = "Album change event stream")
+    )
+)]
+#[get("/albums/stream")]
+/// Stream album change notifications via server-sent events.
+pub async fn albums_stream(state: web::Data<AppState>) -> impl Responder {
+    let receiver = state.events.subscribe();
+    let mut pending = VecDeque::new();
+
+    let stream = unfold(
+        AlbumsStreamState {
+            receiver,
+            pending,
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+                tokio::select! {
+                    result = ctx.receiver.recv() => {
+                        match result {
+                            Ok(HubEvent::LibraryChanged) => {
+                                ctx.pending.push_back(sse_event("albums", "{}"));
+                            }
+                            Ok(_) => {}
+                            Err(RecvError::Lagged(_)) => {
+                                ctx.pending.push_back(sse_event("albums", "{}"));
+                            }
                             Err(RecvError::Closed) => return None,
                         }
                     }

@@ -65,7 +65,10 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             path: path.to_string_lossy().to_string(),
             file_name: file_name.to_string(),
             title: meta.title.clone(),
-            artist: meta.artist.clone(),
+            artist: meta
+                .album_artist
+                .clone()
+                .or_else(|| meta.artist.clone()),
             album: meta.album.clone(),
             track_number: meta.track_number,
             disc_number: meta.disc_number,
@@ -250,6 +253,7 @@ pub(crate) async fn run(args: crate::Args) -> Result<()> {
             .service(api::outputs_list)
             .service(api::outputs_stream)
             .service(api::metadata_stream)
+            .service(api::albums_stream)
             .service(api::outputs_select);
 
         if let Some(dist) = web_ui_dist.clone() {

@@ -3,8 +3,8 @@
 :root {
   color-scheme: light;
   font-family: "Space Grotesk", system-ui, sans-serif;
-  --bg: #f4f1ec;
-  --bg-accent: #e9e4d8;
+  --bg: #ffffff;
+  --bg-accent: #f3f3f3;
   --ink: #121212;
   --muted: #4f4f4f;
   --accent: #ff6b35;
@@ -20,40 +20,65 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top left, #fff9ef 0%, #f4f1ec 35%, #e7e0d1 100%);
+  background: var(--bg);
   color: var(--ink);
 }
 
 .app {
   min-height: 100vh;
-  padding: 48px clamp(20px, 5vw, 72px) 180px;
+  padding: 0 0 180px;
   position: relative;
 }
 
-.app::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(120deg, rgba(255, 107, 53, 0.08), rgba(45, 108, 223, 0.08));
-  pointer-events: none;
+.layout {
+  display: block;
+  min-height: 100vh;
 }
 
-.hero {
-  position: relative;
-  z-index: 1;
+.side-nav {
+  border-right: 1px solid var(--border);
+  padding: 32px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 240px;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  z-index: 2;
 }
 
-.top-bar {
+.nav-brand {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
 }
 
-.top-actions {
+.nav-actions {
   display: flex;
   gap: 12px;
+}
+
+.icon-btn.settings-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.icon-btn.settings-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .hidden {
@@ -64,7 +89,7 @@ body {
   display: none;
   position: relative;
   z-index: 1;
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .settings-screen.active {
@@ -73,8 +98,46 @@ body {
 
 .settings-mode .grid,
 .settings-mode .player-bar,
-.settings-mode .hero-left {
+.settings-mode .hero {
   display: none;
+}
+
+.main {
+  padding: 32px clamp(20px, 5vw, 56px);
+  overflow: auto;
+  height: 100vh;
+  margin-left: 240px;
+  width: calc(100% - 240px);
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nav-label {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.nav-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-button.active {
+  background: var(--bg-accent);
+  border-color: var(--border);
 }
 
 .eyebrow {
@@ -90,6 +153,10 @@ body {
 h1 {
   font-size: clamp(2.4rem, 3vw, 3.4rem);
   margin: 16px 0 12px;
+}
+
+.hero {
+  margin-bottom: 24px;
 }
 
 p {
@@ -142,11 +209,11 @@ p {
 }
 
 .card {
-  background: var(--card);
-  border-radius: 24px;
-  padding: 20px 22px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
   position: relative;
   z-index: 1;
 }
@@ -210,12 +277,118 @@ p {
 }
 
 .grid {
-  margin-top: 40px;
+  margin-top: 24px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
   position: relative;
   z-index: 1;
+}
+
+.album-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.album-card {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.album-card-info {
+  min-height: 44px;
+}
+
+.album-cover {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 0;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.album-cover.large {
+  max-width: 280px;
+}
+
+.album-title {
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.album-view {
+  margin-top: 32px;
+}
+
+.album-header {
+  margin-bottom: 16px;
+}
+
+.album-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.album-detail-top {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+  gap: 24px;
+  align-items: center;
+}
+
+.album-detail-left {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.album-detail-right {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.album-tracklist {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.album-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.album-track-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-accent);
+}
+
+.album-track-title {
+  font-weight: 600;
+}
+
+.album-track-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .output-list,
@@ -480,6 +653,13 @@ p {
   text-transform: uppercase;
   letter-spacing: 0.2em;
   color: var(--ink);
+  overflow: hidden;
+}
+
+.album-art-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .track-title {
@@ -639,6 +819,10 @@ p {
   .controls {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .album-detail-top {
+    grid-template-columns: 1fr;
   }
 
   .queue-row {

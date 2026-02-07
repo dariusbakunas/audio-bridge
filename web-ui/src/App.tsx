@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { apiUrl, fetchJson, postJson } from "./api";
 import {
+  AlbumListResponse,
+  AlbumSummary,
   LibraryEntry,
   LibraryResponse,
   MetadataEvent,
   OutputInfo,
   OutputsResponse,
   QueueItem,
-  QueueResponse
+  QueueResponse,
+  TrackListResponse,
+  TrackSummary
 } from "./types";
 import LibraryList from "./components/LibraryList";
 import Modal from "./components/Modal";
@@ -46,6 +50,7 @@ interface MetadataEventEntry {
 }
 
 const MAX_METADATA_EVENTS = 200;
+const ALBUM_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><rect width='100%25' height='100%25' fill='%23e9e4d8'/><rect x='12' y='12' width='216' height='216' rx='28' fill='%23fff9ef' stroke='%23d7cbb7' stroke-width='4'/><text x='50%25' y='54%25' font-family='Space Grotesk, sans-serif' font-size='24' fill='%239c7f63' text-anchor='middle'>No Art</text></svg>";
 
 function formatMs(ms?: number | null): string {
   if (!ms && ms !== 0) return "--:--";
@@ -167,6 +172,16 @@ export default function App() {
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
+  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+  const [albumsLoading, setAlbumsLoading] = useState<boolean>(false);
+  const [albumsError, setAlbumsError] = useState<string | null>(null);
+  const [albumViewId, setAlbumViewId] = useState<number | null>(null);
+  const [albumTracks, setAlbumTracks] = useState<TrackSummary[]>([]);
+  const [albumTracksLoading, setAlbumTracksLoading] = useState<boolean>(false);
+  const [albumTracksError, setAlbumTracksError] = useState<string | null>(null);
+  const [browserView, setBrowserView] = useState<"library" | "albums">("albums");
+  const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
+  const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
@@ -189,7 +204,11 @@ export default function App() {
     ? "Select an output to control playback."
     : !status?.now_playing && !selectedTrackPath
       ? "Select a track to play."
-      : undefined;
+    : undefined;
+  const selectedAlbum = useMemo(
+    () => albums.find((album) => album.id === albumViewId) ?? null,
+    [albums, albumViewId]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -346,6 +365,17 @@ export default function App() {
   }, [activeOutputId]);
 
   useEffect(() => {
+    const path = status?.now_playing ?? null;
+    if (!path) {
+      setNowPlayingCover(null);
+      setNowPlayingCoverFailed(false);
+      return;
+    }
+    setNowPlayingCover(apiUrl(`/art?path=${encodeURIComponent(path)}`));
+    setNowPlayingCoverFailed(false);
+  }, [status?.now_playing]);
+
+  useEffect(() => {
     let mounted = true;
     const stream = new EventSource(apiUrl("/queue/stream"));
     stream.addEventListener("queue", (event) => {
@@ -402,6 +432,65 @@ export default function App() {
     };
   }, [libraryDir]);
 
+  const loadAlbums = useCallback(async () => {
+    setAlbumsLoading(true);
+    try {
+      const response = await fetchJson<AlbumListResponse>("/albums?limit=200");
+      setAlbums(response.items ?? []);
+      setAlbumsError(null);
+    } catch (err) {
+      setAlbumsError((err as Error).message);
+    } finally {
+      setAlbumsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAlbums();
+  }, [loadAlbums]);
+
+  useEffect(() => {
+    let mounted = true;
+    const stream = new EventSource(apiUrl("/albums/stream"));
+    stream.addEventListener("albums", () => {
+      if (!mounted) return;
+      loadAlbums();
+    });
+    stream.onerror = () => {
+      if (!mounted) return;
+      setAlbumsError("Live albums disconnected.");
+    };
+    return () => {
+      mounted = false;
+      stream.close();
+    };
+  }, [loadAlbums]);
+
+  useEffect(() => {
+    if (albumViewId === null) return;
+    let mounted = true;
+    async function loadAlbumTracks() {
+      setAlbumTracksLoading(true);
+      try {
+        const response = await fetchJson<TrackListResponse>(
+          `/tracks?album_id=${albumViewId}&limit=500`
+        );
+        if (!mounted) return;
+        setAlbumTracks(response.items ?? []);
+        setAlbumTracksError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setAlbumTracksError((err as Error).message);
+      } finally {
+        if (mounted) setAlbumTracksLoading(false);
+      }
+    }
+    loadAlbumTracks();
+    return () => {
+      mounted = false;
+    };
+  }, [albumViewId]);
+
   async function handlePause() {
     try {
       await postJson("/pause");
@@ -443,6 +532,32 @@ export default function App() {
     }
   }
 
+  async function handlePlayAlbumTrack(track: TrackSummary) {
+    if (!track.path) return;
+    await handlePlay(track.path);
+  }
+
+  async function handleQueueAlbumTrack(track: TrackSummary) {
+    if (!track.path) return;
+    await handleQueue(track.path);
+  }
+
+  async function handlePlayAlbum() {
+    if (!albumTracks.length) return;
+    const paths = albumTracks.map((track) => track.path).filter(Boolean);
+    if (!paths.length) return;
+    const [first, ...rest] = paths;
+    try {
+      await postJson("/queue/clear");
+      if (rest.length > 0) {
+        await postJson("/queue", { paths: rest });
+      }
+      await postJson("/play", { path: first, queue_mode: "keep" });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function handleQueue(path: string) {
     try {
       await postJson("/queue", { paths: [path] });
@@ -471,113 +586,335 @@ export default function App() {
 
   return (
     <div className={`app ${settingsOpen ? "settings-mode" : ""}`}>
-      <header className="hero">
-        <div className="top-bar">
-          <span className="eyebrow">Audio Hub</span>
-          <div className="top-actions">
-            <button className="btn ghost small" onClick={() => setSettingsOpen(!settingsOpen)}>
-              {settingsOpen ? "Back to player" : "Settings"}
+      <div className="layout">
+        <aside className="side-nav">
+          <div className="nav-brand">
+            <span className="eyebrow">Audio Hub</span>
+            <button
+              className="icon-btn settings-btn"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              aria-label="Settings"
+              title="Settings"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 8.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm9.25 3.25c0-.5-.03-1-.1-1.48l2.02-1.57a.75.75 0 0 0 .17-.96l-1.92-3.32a.75.75 0 0 0-.91-.34l-2.38.96a9.5 9.5 0 0 0-2.56-1.48l-.36-2.52A.75.75 0 0 0 14.41 1h-3.82a.75.75 0 0 0-.74.64l-.36 2.52a9.5 9.5 0 0 0-2.56 1.48l-2.38-.96a.75.75 0 0 0-.91.34L1.72 8.34a.75.75 0 0 0 .17.96l2.02 1.57c-.07.48-.1.98-.1 1.48s.03 1 .1 1.48l-2.02 1.57a.75.75 0 0 0-.17.96l1.92 3.32a.75.75 0 0 0 .91.34l2.38-.96a9.5 9.5 0 0 0 2.56 1.48l.36 2.52a.75.75 0 0 0 .74.64h3.82a.75.75 0 0 0 .74-.64l.36-2.52a9.5 9.5 0 0 0 2.56-1.48l2.38.96a.75.75 0 0 0 .91-.34l1.92-3.32a.75.75 0 0 0-.17-.96l-2.02-1.57c.07-.48.1-.98.1-1.48Z"
+                  fill="currentColor"
+                />
+              </svg>
             </button>
           </div>
-        </div>
-        <div className={`hero-left ${settingsOpen ? "hidden" : ""}`}>
-          <h1>Lossless control with a live signal view.</h1>
-          <p>
-            A focused dashboard for your playback pipeline. Keep an eye on output state, signal
-            metadata, and the queue without opening the TUI.
-          </p>
-          {error ? <div className="alert">{error}</div> : null}
-        </div>
-      </header>
-
-      <section className={`grid ${settingsOpen ? "hidden" : ""}`}>
-        <div className="card">
-          <div className="card-header">
-            <span>Library</span>
-            <div className="card-actions">
-              <span className="pill">{libraryEntries.length} items</span>
-              <button className="btn ghost small" onClick={handleRescan}>
-                Rescan
-              </button>
-            </div>
-          </div>
-          <div className="library-path">
-            <span className="muted small">Path</span>
-            <span className="mono">{libraryDir ?? "Loading..."}</span>
-          </div>
-          <div className="library-actions">
+          <div className="nav-section">
+            <div className="nav-label">Library</div>
             <button
-              className="btn ghost"
-              disabled={!libraryDir || !parentDir(libraryDir)}
+              className={`nav-button ${browserView === "albums" ? "active" : ""}`}
               onClick={() => {
-                if (libraryDir) {
-                  const parent = parentDir(libraryDir);
-                  if (parent) setLibraryDir(parent);
-                }
+                setAlbumViewId(null);
+                setBrowserView("albums");
+                setSettingsOpen(false);
               }}
             >
-              Up one level
+              Albums
             </button>
             <button
-              className="btn ghost"
-              onClick={() => setLibraryDir(null)}
-              disabled={!libraryDir}
+              className={`nav-button ${browserView === "library" ? "active" : ""}`}
+              onClick={() => {
+                setAlbumViewId(null);
+                setBrowserView("library");
+                setSettingsOpen(false);
+              }}
             >
-              Back to root
+              Library
             </button>
           </div>
-          <LibraryList
-            entries={libraryEntries}
-            loading={libraryLoading}
-            selectedTrackPath={selectedTrackPath}
-            trackMenuPath={trackMenuPath}
-            trackMenuPosition={trackMenuPosition}
-            canPlay={Boolean(activeOutputId)}
-            formatMs={formatMs}
-            onSelectDir={setLibraryDir}
-            onSelectTrack={setSelectedTrackPath}
-            onToggleMenu={(path, target) => {
-              if (trackMenuPath === path) {
-                setTrackMenuPath(null);
-                setTrackMenuPosition(null);
-                return;
-              }
-              const rect = target.getBoundingClientRect();
-              setTrackMenuPosition({
-                top: rect.bottom + 6,
-                right: window.innerWidth - rect.right
-              });
-              setTrackMenuPath(path);
-            }}
-            onPlay={(path) => {
-              handlePlay(path);
-              setTrackMenuPath(null);
-              setTrackMenuPosition(null);
-            }}
-            onQueue={(path) => {
-              handleQueue(path);
-              setTrackMenuPath(null);
-              setTrackMenuPosition(null);
-            }}
-            onPlayNext={(path) => {
-              handlePlayNext(path);
-              setTrackMenuPath(null);
-              setTrackMenuPosition(null);
-            }}
-            onRescan={(path) => {
-              handleRescanTrack(path);
-              setTrackMenuPath(null);
-              setTrackMenuPosition(null);
-            }}
-          />
-        </div>
+        </aside>
 
-      </section>
+        <main className="main">
+          <header className={`hero ${settingsOpen ? "hidden" : ""}`}>
+            <h1>Lossless control with a live signal view.</h1>
+            <p>
+              A focused dashboard for your playback pipeline. Keep an eye on output state, signal
+              metadata, and the queue without opening the TUI.
+            </p>
+            {error ? <div className="alert">{error}</div> : null}
+          </header>
+
+          {!settingsOpen && albumViewId === null ? (
+            <section className="grid">
+              {browserView === "albums" ? (
+                <div className="card">
+                  <div className="card-header">
+                    <span>Albums</span>
+                    <div className="card-actions">
+                      <span className="pill">{albums.length} albums</span>
+                    </div>
+                  </div>
+                  {albumsLoading ? <p className="muted">Loading albums...</p> : null}
+                  {albumsError ? <p className="muted">{albumsError}</p> : null}
+                  {!albumsLoading && !albumsError ? (
+                    <div className="album-grid">
+                      {albums.map((album) => (
+                        <button
+                          key={album.id}
+                          className="album-card"
+                          onClick={() => setAlbumViewId(album.id)}
+                        >
+                          <img
+                            className="album-cover"
+                            src={album.cover_art_url ?? ALBUM_PLACEHOLDER}
+                            alt={album.title}
+                            loading="lazy"
+                          />
+                          <div className="album-card-info">
+                            <div className="album-title">{album.title}</div>
+                            <div className="muted small">{album.artist ?? "Unknown artist"}</div>
+                          </div>
+                        </button>
+                      ))}
+                      {albums.length === 0 ? <p className="muted">No albums found.</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {browserView === "library" ? (
+                <div className="card">
+                  <div className="card-header">
+                    <span>Library</span>
+                    <div className="card-actions">
+                      <span className="pill">{libraryEntries.length} items</span>
+                      <button className="btn ghost small" onClick={handleRescan}>
+                        Rescan
+                      </button>
+                    </div>
+                  </div>
+                  <div className="library-path">
+                    <span className="muted small">Path</span>
+                    <span className="mono">{libraryDir ?? "Loading..."}</span>
+                  </div>
+                  <div className="library-actions">
+                    <button
+                      className="btn ghost"
+                      disabled={!libraryDir || !parentDir(libraryDir)}
+                      onClick={() => {
+                        if (libraryDir) {
+                          const parent = parentDir(libraryDir);
+                          if (parent) setLibraryDir(parent);
+                        }
+                      }}
+                    >
+                      Up one level
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setLibraryDir(null)}
+                      disabled={!libraryDir}
+                    >
+                      Back to root
+                    </button>
+                  </div>
+                  <LibraryList
+                    entries={libraryEntries}
+                    loading={libraryLoading}
+                    selectedTrackPath={selectedTrackPath}
+                    trackMenuPath={trackMenuPath}
+                    trackMenuPosition={trackMenuPosition}
+                    canPlay={Boolean(activeOutputId)}
+                    formatMs={formatMs}
+                    onSelectDir={setLibraryDir}
+                    onSelectTrack={setSelectedTrackPath}
+                    onToggleMenu={(path, target) => {
+                      if (trackMenuPath === path) {
+                        setTrackMenuPath(null);
+                        setTrackMenuPosition(null);
+                        return;
+                      }
+                      const rect = target.getBoundingClientRect();
+                      setTrackMenuPosition({
+                        top: rect.bottom + 6,
+                        right: window.innerWidth - rect.right
+                      });
+                      setTrackMenuPath(path);
+                    }}
+                    onPlay={(path) => {
+                      handlePlay(path);
+                      setTrackMenuPath(null);
+                      setTrackMenuPosition(null);
+                    }}
+                    onQueue={(path) => {
+                      handleQueue(path);
+                      setTrackMenuPath(null);
+                      setTrackMenuPosition(null);
+                    }}
+                    onPlayNext={(path) => {
+                      handlePlayNext(path);
+                      setTrackMenuPath(null);
+                      setTrackMenuPosition(null);
+                    }}
+                    onRescan={(path) => {
+                      handleRescanTrack(path);
+                      setTrackMenuPath(null);
+                      setTrackMenuPosition(null);
+                    }}
+                  />
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {albumViewId !== null && !settingsOpen ? (
+            <section className="album-view">
+              <div className="album-header">
+                <button className="btn ghost small" onClick={() => setAlbumViewId(null)}>
+                  Back to albums
+                </button>
+              </div>
+              <div className="card album-detail">
+                <div className="album-detail-top">
+                  <div className="album-detail-left">
+                    <img
+                      className="album-cover large"
+                      src={selectedAlbum?.cover_art_url ?? ALBUM_PLACEHOLDER}
+                      alt={selectedAlbum?.title ?? "Album art"}
+                    />
+                  </div>
+                  <div className="album-detail-right">
+                    <div className="album-meta">
+                      <div className="eyebrow">Album</div>
+                      <h2>{selectedAlbum?.title ?? "Unknown album"}</h2>
+                      <div className="muted">{selectedAlbum?.artist ?? "Unknown artist"}</div>
+                      <div className="muted small">
+                        {selectedAlbum?.year ? `${selectedAlbum.year} · ` : ""}
+                        {selectedAlbum?.track_count ?? albumTracks.length} tracks
+                      </div>
+                      <div className="muted small">
+                        {selectedAlbum?.mbid ? `MBID: ${selectedAlbum.mbid}` : "MBID: —"}
+                      </div>
+                      <div className="muted small">
+                        {selectedAlbum?.cover_art_url
+                          ? "Cover: cached"
+                          : selectedAlbum?.mbid
+                            ? "Cover: not cached"
+                            : "Cover: unavailable"}
+                      </div>
+                      <button
+                        className="btn ghost small"
+                        onClick={handlePlayAlbum}
+                        disabled={!activeOutputId || albumTracks.length === 0}
+                      >
+                        Play album
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="album-tracklist">
+                  {albumTracksLoading ? <p className="muted">Loading tracks...</p> : null}
+                  {albumTracksError ? <p className="muted">{albumTracksError}</p> : null}
+                  {!albumTracksLoading && !albumTracksError ? (
+                    <div className="album-tracks">
+                      {albumTracks.map((track) => (
+                        <div key={track.id} className="album-track-row">
+                          <div>
+                            <div className="album-track-title">
+                              {track.track_number ? `${track.track_number}. ` : ""}
+                              {track.title ?? track.file_name}
+                            </div>
+                            <div className="muted small">{track.artist ?? "Unknown artist"}</div>
+                          </div>
+                          <div className="album-track-actions">
+                            <span className="muted small">{formatMs(track.duration_ms)}</span>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => handlePlayAlbumTrack(track)}
+                              disabled={!activeOutputId}
+                            >
+                              Play
+                            </button>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => handleQueueAlbumTrack(track)}
+                            >
+                              Queue
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {albumTracks.length === 0 ? (
+                        <div className="muted small">No tracks found for this album.</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <section className={`settings-screen ${settingsOpen ? "active" : ""}`}>
+            <div className="card">
+              <div className="card-header">
+                <span>Metadata jobs</span>
+                <div className="card-actions">
+                  <button className="btn ghost small" onClick={() => setMetadataEvents([])}>
+                    Clear
+                  </button>
+                  <span className="pill">{metadataEvents.length} events</span>
+                </div>
+              </div>
+              <div className="settings-panel">
+                <div className="muted small">Live MusicBrainz and cover art updates.</div>
+                <div className="settings-actions">
+                  <button
+                    className="btn ghost small"
+                    onClick={handleRescanLibrary}
+                    disabled={rescanBusy}
+                  >
+                    {rescanBusy ? "Rescanning..." : "Rescan library"}
+                  </button>
+                </div>
+                <div className="settings-list">
+                  {metadataEvents.map((entry) => {
+                    const info = describeMetadataEvent(entry.event);
+                    const extraLines = metadataDetailLines(entry.event);
+                    return (
+                      <div key={entry.id} className="settings-row">
+                        <div>
+                          <div className="settings-title">{info.title}</div>
+                          <div className="muted small">{info.detail ?? "—"}</div>
+                          {extraLines.map((line) => (
+                            <div key={line} className="muted small">
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="muted small">{entry.time.toLocaleTimeString()}</div>
+                      </div>
+                    );
+                  })}
+                  {metadataEvents.length === 0 ? (
+                    <div className="muted small">No metadata events yet.</div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
 
       <div className={`player-bar ${settingsOpen ? "hidden" : ""}`}>
         <div className="player-left">
           {status?.title || status?.now_playing ? (
-            <div className="album-art">Artwork</div>
+            <div className="album-art">
+              {nowPlayingCover && !nowPlayingCoverFailed ? (
+                <img
+                  className="album-art-image"
+                  src={nowPlayingCover}
+                  alt={status?.album ?? status?.title ?? "Album art"}
+                  onError={() => setNowPlayingCoverFailed(true)}
+                />
+              ) : (
+                <span>Artwork</span>
+              )}
+            </div>
           ) : null}
           <div>
             <div className="track-title">
@@ -723,54 +1060,6 @@ export default function App() {
         <QueueList items={queue} formatMs={formatMs} />
       </Modal>
 
-      <section className={`settings-screen ${settingsOpen ? "active" : ""}`}>
-        <div className="card">
-          <div className="card-header">
-            <span>Metadata jobs</span>
-            <div className="card-actions">
-              <button className="btn ghost small" onClick={() => setMetadataEvents([])}>
-                Clear
-              </button>
-              <span className="pill">{metadataEvents.length} events</span>
-            </div>
-          </div>
-          <div className="settings-panel">
-            <div className="muted small">Live MusicBrainz and cover art updates.</div>
-            <div className="settings-actions">
-              <button
-                className="btn ghost small"
-                onClick={handleRescanLibrary}
-                disabled={rescanBusy}
-              >
-                {rescanBusy ? "Rescanning..." : "Rescan library"}
-              </button>
-            </div>
-            <div className="settings-list">
-              {metadataEvents.map((entry) => {
-                const info = describeMetadataEvent(entry.event);
-                const extraLines = metadataDetailLines(entry.event);
-                return (
-                  <div key={entry.id} className="settings-row">
-                    <div>
-                      <div className="settings-title">{info.title}</div>
-                      <div className="muted small">{info.detail ?? "—"}</div>
-                      {extraLines.map((line) => (
-                        <div key={line} className="muted small">
-                          {line}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="muted small">{entry.time.toLocaleTimeString()}</div>
-                  </div>
-                );
-              })}
-              {metadataEvents.length === 0 ? (
-                <div className="muted small">No metadata events yet.</div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

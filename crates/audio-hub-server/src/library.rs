@@ -205,6 +205,8 @@ pub struct TrackMeta {
     pub sample_rate: Option<u32>,
     pub album: Option<String>,
     pub artist: Option<String>,
+    pub album_artist: Option<String>,
+    pub compilation: bool,
     pub title: Option<String>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
@@ -267,6 +269,16 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
                         meta.album = Some(tag.value.to_string());
                     }
                 }
+                Some(symphonia::core::meta::StandardTagKey::AlbumArtist) => {
+                    if meta.album_artist.is_none() {
+                        meta.album_artist = Some(tag.value.to_string());
+                    }
+                }
+                Some(symphonia::core::meta::StandardTagKey::Compilation) => {
+                    if !meta.compilation {
+                        meta.compilation = parse_bool_tag(&tag.value.to_string());
+                    }
+                }
                 Some(symphonia::core::meta::StandardTagKey::Artist) => {
                     if meta.artist.is_none() {
                         meta.artist = Some(tag.value.to_string());
@@ -300,6 +312,12 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
         }
     }
 
+    if meta.compilation {
+        meta.album_artist = Some("Various Artists".to_string());
+    } else if meta.album_artist.is_none() {
+        meta.album_artist = meta.artist.clone();
+    }
+
     meta
 }
 
@@ -325,6 +343,13 @@ fn parse_i32_tag(raw: &str) -> Option<i32> {
     raw.split('-')
         .next()
         .and_then(|s| s.trim().parse::<i32>().ok())
+}
+
+fn parse_bool_tag(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y"
+    )
 }
 
 fn select_cover_art(rev: &symphonia::core::meta::MetadataRevision) -> Option<CoverArt> {

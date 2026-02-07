@@ -114,6 +114,7 @@ impl QueueService {
             added += 1;
         }
         if added > 0 {
+            tracing::debug!(added, total = queue.items.len(), "queue add paths");
             self.events.queue_changed();
         }
         added
@@ -131,6 +132,7 @@ impl QueueService {
             added += 1;
         }
         if added > 0 {
+            tracing::debug!(added, total = queue.items.len(), "queue add next paths");
             self.events.queue_changed();
         }
         added
@@ -151,6 +153,7 @@ impl QueueService {
     pub(crate) fn clear(&self) {
         let mut queue = self.queue.lock().unwrap();
         if !queue.items.is_empty() {
+            tracing::debug!(count = queue.items.len(), "queue cleared");
             queue.items.clear();
             self.events.queue_changed();
         }
@@ -168,9 +171,16 @@ impl QueueService {
                 Err(_) => return NextDispatchResult::Failed,
             };
             if q.items.is_empty() {
+                tracing::debug!("queue dispatch requested but queue is empty");
                 None
             } else {
                 let path = q.items.remove(0);
+                tracing::info!(
+                    path = %path.display(),
+                    remaining = q.items.len(),
+                    auto_advance = mark_auto_advance,
+                    "queue dispatching next track"
+                );
                 self.events.queue_changed();
                 Some(path)
             }

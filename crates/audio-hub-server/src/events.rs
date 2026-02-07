@@ -51,6 +51,7 @@ pub enum HubEvent {
     QueueChanged,
     StatusChanged,
     OutputsChanged,
+    LibraryChanged,
     Metadata(MetadataEvent),
 }
 
@@ -84,6 +85,11 @@ impl EventBus {
     /// Notify subscribers that outputs or selection have changed.
     pub fn outputs_changed(&self) {
         let _ = self.sender.send(HubEvent::OutputsChanged);
+    }
+
+    /// Notify subscribers that the library index changed.
+    pub fn library_changed(&self) {
+        let _ = self.sender.send(HubEvent::LibraryChanged);
     }
 
     /// Notify subscribers about metadata/background jobs.

@@ -1,6 +1,7 @@
 //! Cover art extraction + caching helpers.
 
 use std::collections::hash_map::DefaultHasher;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -58,6 +59,10 @@ pub fn apply_cover_art(
         Some(artist) => format!("{}-{}", artist, album),
         None => album.to_string(),
     };
+    if let Some(existing) = find_cached_cover(root, &hint) {
+        let _ = db.set_album_cover_if_empty(album, artist, &existing)?;
+        return Ok(());
+    }
     let relative_path = store_cover_art(root, &hint, &cover.mime_type, &cover.data)?;
     let _ = db.set_album_cover_if_empty(album, artist, &relative_path)?;
     Ok(())
@@ -81,6 +86,20 @@ fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
         return Ok(Some(CoverArt { mime_type, data }));
     }
     Ok(None)
+}
+
+fn find_cached_cover(root: &Path, hint: &str) -> Option<String> {
+    let slug = slugify(hint);
+    let art_dir = root.join(COVER_CACHE_DIR);
+    let entries = fs::read_dir(&art_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with(&format!("{slug}-")) {
+            let relative = PathBuf::from(COVER_CACHE_DIR).join(name);
+            return Some(relative.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 pub fn store_cover_art(
@@ -278,6 +297,14 @@ fn fetch_and_store_cover(
     let (mime_type, data) = match client.fetch_front(&candidate.mbid) {
         Ok(result) => result,
         Err(err) => {
+            if let Ok(Some(next)) = db.advance_cover_candidate(candidate.album_id) {
+                tracing::debug!(
+                    album_id = candidate.album_id,
+                    next_mbid = %next,
+                    "cover art advancing to next release candidate"
+                );
+                return Ok(());
+            }
             tracing::debug!(
                 error = %err,
                 album_id = candidate.album_id,
@@ -311,6 +338,7 @@ fn fetch_and_store_cover(
             album_id: candidate.album_id,
             cover_path: relative_path,
         });
+        events.library_changed();
     }
     Ok(())
 }

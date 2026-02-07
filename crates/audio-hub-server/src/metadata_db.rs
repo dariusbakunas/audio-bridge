@@ -8,9 +8,10 @@ use anyhow::{Context, Result};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value;
 
 use crate::musicbrainz::MusicBrainzMatch;
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -86,6 +87,7 @@ pub struct CoverArtCandidate {
     pub album_id: i64,
     pub mbid: String,
     pub fail_count: i64,
+    pub release_candidates: Vec<String>,
 }
 
 fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
@@ -164,7 +166,7 @@ impl MetadataDb {
             INSERT INTO tracks (
                 path, file_name, title, artist_id, album_id, track_number, disc_number,
                 duration_ms, sample_rate, format, mtime_ms, size_bytes, mb_no_match_key
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             ON CONFLICT(path) DO UPDATE SET
                 file_name = excluded.file_name,
                 title = excluded.title,
@@ -269,6 +271,14 @@ impl MetadataDb {
                     params![year, album_id],
                 )
                 .context("update album year")?;
+            }
+            if !mb.release_candidates.is_empty() {
+                let candidates = serde_json::to_string(&mb.release_candidates)?;
+                tx.execute(
+                    "UPDATE albums SET caa_release_candidates = ?1 WHERE id = ?2",
+                    params![candidates, album_id],
+                )
+                .context("update album release candidates")?;
             }
         }
 
@@ -438,7 +448,7 @@ impl MetadataDb {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT al.id, al.mbid, COALESCE(al.caa_fail_count, 0)
+            SELECT al.id, al.mbid, COALESCE(al.caa_fail_count, 0), al.caa_release_candidates
             FROM albums al
             WHERE al.mbid IS NOT NULL
               AND al.mbid != ''
@@ -449,10 +459,15 @@ impl MetadataDb {
             "#,
         )?;
         let rows = stmt.query_map(params![limit], |row| {
+            let raw_candidates: Option<String> = row.get(3)?;
+            let release_candidates = raw_candidates
+                .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+                .unwrap_or_default();
             Ok(CoverArtCandidate {
                 album_id: row.get(0)?,
                 mbid: row.get(1)?,
                 fail_count: row.get(2)?,
+                release_candidates,
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -475,6 +490,37 @@ impl MetadataDb {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    pub fn advance_cover_candidate(&self, album_id: i64) -> Result<Option<String>> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT caa_release_candidates FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch release candidates")?;
+        let mut candidates: Vec<String> = raw
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+            .unwrap_or_default();
+        let Some(next) = candidates.first().cloned() else {
+            return Ok(None);
+        };
+        candidates.remove(0);
+        let updated_candidates = if candidates.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&candidates)?)
+        };
+        conn.execute(
+            "UPDATE albums SET mbid = ?1, caa_release_candidates = ?2, caa_fail_count = NULL, caa_last_error = NULL WHERE id = ?3",
+            params![next, updated_candidates, album_id],
+        )
+        .context("advance cover candidate")?;
+        Ok(Some(next))
     }
 
     pub fn set_musicbrainz_no_match(&self, path: &str, key: &str) -> Result<()> {
@@ -501,6 +547,17 @@ impl MetadataDb {
         let conn = self.pool.get().context("open metadata db")?;
         conn.execute("UPDATE tracks SET mb_no_match_key = NULL", [])
             .context("clear musicbrainz no match all")?;
+        Ok(())
+    }
+
+    pub fn clear_library(&self) -> Result<()> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata clear")?;
+        tx.execute("DELETE FROM tracks", []).context("clear tracks")?;
+        tx.execute("DELETE FROM albums", []).context("clear albums")?;
+        tx.execute("DELETE FROM artists", []).context("clear artists")?;
+        tx.execute("DELETE FROM sqlite_sequence", []).ok();
+        tx.commit().context("commit metadata clear")?;
         Ok(())
     }
 
@@ -707,6 +764,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
             cover_art_path TEXT,
             caa_fail_count INTEGER,
             caa_last_error TEXT,
+            caa_release_candidates TEXT,
             FOREIGN KEY(artist_id) REFERENCES artists(id) ON DELETE SET NULL
         );
 
@@ -773,6 +831,16 @@ fn init_schema(conn: &Connection) -> Result<()> {
             .context("migrate albums caa_fail_count")?;
         conn.execute("ALTER TABLE albums ADD COLUMN caa_last_error TEXT", [])
             .context("migrate albums caa_last_error")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+        return Ok(());
+    }
+    if version < 4 {
+        conn.execute("ALTER TABLE albums ADD COLUMN caa_release_candidates TEXT", [])
+            .context("migrate albums caa_release_candidates")?;
         conn.execute(
             "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
             params![SCHEMA_VERSION.to_string()],

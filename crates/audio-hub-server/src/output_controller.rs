@@ -184,6 +184,7 @@ impl OutputController {
         let output_id = self
             .resolve_active_output_id(state, requested_output)
             .await?;
+        state.playback_manager.status().set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
 
         Ok(output_id)
@@ -635,6 +636,91 @@ mod tests {
             result,
             Err(OutputControllerError::OutputOffline { .. })
         ));
+    }
+
+    #[test]
+    fn play_request_sets_manual_advance_in_flight() {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-play-request-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let library = crate::library::scan_library(&root).expect("scan library");
+        let metadata_db = crate::metadata_db::MetadataDb::new(&root).unwrap();
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: None,
+            active_output_id: Some("bridge:test:device".to_string()),
+        }));
+        let bridge_state = Arc::new(crate::state::BridgeProviderState::new(
+            cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(crate::state::LocalProviderState {
+            enabled: false,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+        let status = StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(
+            queue,
+            status.clone(),
+            crate::events::EventBus::new(),
+        );
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status,
+            queue_service,
+        );
+        let device_selection = crate::state::DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        let state = AppState::new(
+            library,
+            metadata_db,
+            None,
+            crate::state::MetadataWake::new(),
+            bridge_state,
+            local_state,
+            playback_manager,
+            device_selection,
+            crate::events::EventBus::new(),
+        );
+        let provider = MockProvider {
+            active_output_id: "bridge:test:device".to_string(),
+            should_connect: true,
+        };
+        let controller = OutputController::new(OutputRegistry::new(vec![Box::new(provider)]));
+
+        let path = root.join("track.flac");
+        std::fs::write(&path, b"stub").unwrap();
+
+        let result = actix_web::rt::System::new().block_on(async {
+            controller
+                .play_request(&state, path, QueueMode::Keep, None)
+                .await
+        });
+        assert!(result.is_ok());
+
+        let guard = state.playback_manager.status().inner().lock().unwrap();
+        assert!(guard.manual_advance_in_flight);
     }
 
     #[test]
