@@ -10,6 +10,7 @@ import {
   OutputInfo,
   StatusResponse,
   QueueItem,
+  TrackResolveResponse,
   TrackListResponse,
   TrackSummary
 } from "./types";
@@ -122,6 +123,10 @@ function sortLibraryEntries(entries: LibraryEntry[]): LibraryEntry[] {
 
 function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
   switch (event.kind) {
+    case "library_scan_album_start":
+      return {title: "Scanning album folder", detail: event.path};
+    case "library_scan_album_finish":
+      return {title: "Scanned album folder", detail: `${event.tracks} tracks`};
     case "music_brainz_batch":
       return {title: "MusicBrainz batch", detail: `${event.count} candidates`};
     case "music_brainz_lookup_start":
@@ -159,6 +164,12 @@ function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: 
 
 function metadataDetailLines(event: MetadataEvent): string[] {
   if (event.kind !== "music_brainz_lookup_no_match") {
+    if (event.kind === "library_scan_album_finish") {
+      return [event.path];
+    }
+    if (event.kind === "library_scan_album_start") {
+      return [event.path];
+    }
     if (event.kind === "cover_art_fetch_failure") {
       return [`MBID: ${event.mbid}`];
     }
@@ -212,6 +223,7 @@ export default function App() {
   const [browserView, setBrowserView] = useState<"library" | "albums">("albums");
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
+  const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
@@ -312,18 +324,25 @@ export default function App() {
       () => albums.find((album) => album.id === albumViewId) ?? null,
       [albums, albumViewId]
   );
-  const activeAlbumId = useMemo(() => {
+  const heuristicAlbumId = useMemo(() => {
     const albumKey = normalizeMatch(status?.album);
     if (!albumKey) return null;
     const artistKey = normalizeMatch(status?.artist);
+    const allowArtistMismatch = (albumArtist?: string | null) => {
+      if (!albumArtist) return true;
+      const key = normalizeMatch(albumArtist);
+      return key === "various artists" || key === "various" || key === "va";
+    };
     const match = albums.find((album) => {
       if (normalizeMatch(album.title) !== albumKey) return false;
       if (!artistKey) return true;
       if (!album.artist) return true;
-      return normalizeMatch(album.artist) === artistKey;
+      if (normalizeMatch(album.artist) === artistKey) return true;
+      return allowArtistMismatch(album.artist);
     });
     return match?.id ?? null;
   }, [albums, status?.album, status?.artist]);
+  const activeAlbumId = nowPlayingAlbumId ?? heuristicAlbumId;
 
   const openTrackMatchForLibrary = useCallback(
     (path: string) => {
@@ -572,10 +591,24 @@ export default function App() {
     if (!path) {
       setNowPlayingCover(null);
       setNowPlayingCoverFailed(false);
+      setNowPlayingAlbumId(null);
       return;
     }
     setNowPlayingCover(apiUrl(`/art?path=${encodeURIComponent(path)}`));
     setNowPlayingCoverFailed(false);
+    let active = true;
+    fetchJson<TrackResolveResponse>(`/tracks/resolve?path=${encodeURIComponent(path)}`)
+      .then((response) => {
+        if (!active) return;
+        setNowPlayingAlbumId(response?.album_id ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setNowPlayingAlbumId(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [status?.now_playing]);
 
   useQueueStream({

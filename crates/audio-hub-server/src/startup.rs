@@ -66,10 +66,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             path: path.to_string_lossy().to_string(),
             file_name: file_name.to_string(),
             title: meta.title.clone(),
-            artist: meta
-                .album_artist
-                .clone()
-                .or_else(|| meta.artist.clone()),
+            artist: meta.artist.clone(),
+            album_artist: meta.album_artist.clone(),
             album: meta.album.clone(),
             track_number: meta.track_number,
             disc_number: meta.disc_number,
@@ -91,7 +89,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         if let Err(err) = apply_cover_art(&metadata_db, &media_dir, path, meta, &record) {
             tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
         }
-    })?;
+    }, |_dir, _count| {})?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
         count = bridges.len(),
@@ -245,6 +243,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::artists_list)
             .service(api::albums_list)
             .service(api::tracks_list)
+            .service(api::tracks_resolve)
             .service(api::musicbrainz_match_search)
             .service(api::musicbrainz_match_apply)
             .service(api::art_for_track)

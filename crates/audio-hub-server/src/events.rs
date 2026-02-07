@@ -18,6 +18,8 @@ use tracing_subscriber::Layer;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetadataEvent {
+    LibraryScanAlbumStart { path: String },
+    LibraryScanAlbumFinish { path: String, tracks: usize },
     MusicBrainzBatch { count: usize },
     MusicBrainzLookupStart {
         path: String,

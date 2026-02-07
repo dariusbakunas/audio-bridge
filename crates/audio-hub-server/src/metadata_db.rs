@@ -24,6 +24,7 @@ pub struct TrackRecord {
     pub file_name: String,
     pub title: Option<String>,
     pub artist: Option<String>,
+    pub album_artist: Option<String>,
     pub album: Option<String>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
@@ -79,6 +80,7 @@ pub struct MusicBrainzCandidate {
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
+    pub album_artist: Option<String>,
     pub no_match_key: Option<String>,
 }
 
@@ -163,7 +165,7 @@ impl MetadataDb {
             )
             .optional()
             .context("lookup existing track")?;
-        let (existing_artist_id, existing_album_id, keep_links) = if let Some((
+        let (existing_artist_id, existing_album_id, keep_album_link) = if let Some((
             mtime_ms,
             size_bytes,
             artist_id,
@@ -176,26 +178,32 @@ impl MetadataDb {
             if mtime_ms == record.mtime_ms && size_bytes == record.size_bytes {
                 return tx.commit().context("commit metadata tx");
             }
-            let keep_links = !is_blank(&track_mbid) || !is_blank(&artist_mbid) || !is_blank(&album_mbid);
-            (artist_id, album_id, keep_links)
+            let keep_album_link = !is_blank(&track_mbid) || !is_blank(&album_mbid);
+            (artist_id, album_id, keep_album_link)
         } else {
             (None, None, false)
         };
 
-        let (artist_id, album_id) = if keep_links {
-            (existing_artist_id, existing_album_id)
+        let artist_id = if let Some(name) = record.artist.as_deref() {
+            Some(upsert_artist(&tx, name)?)
         } else {
-            let artist_id = if let Some(name) = record.artist.as_deref() {
-                Some(upsert_artist(&tx, name)?)
-            } else {
-                None
-            };
-            let album_id = if let Some(title) = record.album.as_deref() {
-                Some(upsert_album(&tx, title, artist_id, record.year)?)
-            } else {
-                None
-            };
-            (artist_id, album_id)
+            existing_artist_id
+        };
+        let album_artist_id = if let Some(name) = record
+            .album_artist
+            .as_deref()
+            .or(record.artist.as_deref())
+        {
+            Some(upsert_artist(&tx, name)?)
+        } else {
+            None
+        };
+        let album_id = if keep_album_link {
+            existing_album_id
+        } else if let Some(title) = record.album.as_deref() {
+            Some(upsert_album(&tx, title, album_artist_id, record.year)?)
+        } else {
+            None
         };
 
         tx.execute(
@@ -284,8 +292,17 @@ impl MetadataDb {
         } else {
             None
         };
+        let album_artist_id = if let Some(name) = record
+            .album_artist
+            .as_deref()
+            .or(record.artist.as_deref())
+        {
+            find_artist_id(&tx, name)?
+        } else {
+            None
+        };
         let album_id = if let Some(title) = record.album.as_deref() {
-            find_album_id(&tx, title, artist_id)?
+            find_album_id(&tx, title, album_artist_id)?
         } else {
             None
         };
@@ -446,12 +463,13 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT t.path, t.file_name, t.title, ar.name, al.title,
+                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
                        t.sample_rate, t.format, t.mtime_ms, t.size_bytes
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.path = ?1
                 "#,
                 params![path],
@@ -461,28 +479,41 @@ impl MetadataDb {
                         file_name: row.get(1)?,
                         title: row.get(2)?,
                         artist: row.get(3)?,
-                        album: row.get(4)?,
+                        album_artist: row.get(4)?,
+                        album: row.get(5)?,
                         track_number: row
-                            .get::<_, Option<i64>>(5)?
-                            .map(|v| v as u32),
-                        disc_number: row
                             .get::<_, Option<i64>>(6)?
                             .map(|v| v as u32),
-                        year: row.get(7)?,
+                        disc_number: row
+                            .get::<_, Option<i64>>(7)?
+                            .map(|v| v as u32),
+                        year: row.get(8)?,
                         duration_ms: row
-                            .get::<_, Option<i64>>(8)?
+                            .get::<_, Option<i64>>(9)?
                             .map(|v| v as u64),
                         sample_rate: row
-                            .get::<_, Option<i64>>(9)?
+                            .get::<_, Option<i64>>(10)?
                             .map(|v| v as u32),
-                        format: row.get(10)?,
-                        mtime_ms: row.get(11)?,
-                        size_bytes: row.get(12)?,
+                        format: row.get(11)?,
+                        mtime_ms: row.get(12)?,
+                        size_bytes: row.get(13)?,
                     })
                 },
             )
             .optional()
             .context("fetch track record")
+    }
+
+    pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                "SELECT album_id FROM tracks WHERE path = ?1",
+                params![path],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch album id for track")
     }
 
     pub fn list_musicbrainz_candidates(
@@ -492,10 +523,11 @@ impl MetadataDb {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT t.path, t.title, ar.name, al.title, t.mb_no_match_key
+            SELECT t.path, t.title, ar.name, al.title, aa.name, t.mb_no_match_key
             FROM tracks t
             LEFT JOIN artists ar ON ar.id = t.artist_id
             LEFT JOIN albums al ON al.id = t.album_id
+            LEFT JOIN artists aa ON aa.id = al.artist_id
             WHERE t.title IS NOT NULL
               AND ar.name IS NOT NULL
               AND (
@@ -513,7 +545,8 @@ impl MetadataDb {
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 album: row.get(3)?,
-                no_match_key: row.get(4)?,
+                album_artist: row.get(4)?,
+                no_match_key: row.get(5)?,
             })
         })?;
 

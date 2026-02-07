@@ -80,13 +80,22 @@ impl LibraryIndex {
 
 /// Scan the media root and build a new library index.
 pub fn scan_library(root: &Path) -> Result<LibraryIndex> {
-    scan_library_with_meta(root, |_path, _file_name, _ext, _meta, _fs_meta| {})
+    scan_library_with_meta(
+        root,
+        |_path, _file_name, _ext, _meta, _fs_meta| {},
+        |_dir, _count| {},
+    )
 }
 
 /// Scan the media root and build a new library index, invoking `on_track` per file.
-pub fn scan_library_with_meta<F>(root: &Path, mut on_track: F) -> Result<LibraryIndex>
+pub fn scan_library_with_meta<F, D>(
+    root: &Path,
+    mut on_track: F,
+    mut on_dir: D,
+) -> Result<LibraryIndex>
 where
     F: FnMut(&Path, &str, &str, &TrackMeta, &std::fs::Metadata),
+    D: FnMut(&Path, usize),
 {
     let root = root
         .canonicalize()
@@ -98,23 +107,26 @@ where
     tracing::info!(root = %root.display(), "scanning library");
 
     let mut entries_by_dir = std::collections::HashMap::new();
-    scan_dir(&root, &root, &mut entries_by_dir, &mut on_track)?;
+    scan_dir(&root, &root, &mut entries_by_dir, &mut on_track, &mut on_dir)?;
 
     tracing::info!(root = %root.display(), dirs = entries_by_dir.len(), "library scan complete");
     Ok(LibraryIndex { root, entries_by_dir })
 }
 
-fn scan_dir<F>(
+fn scan_dir<F, D>(
     root: &Path,
     dir: &Path,
     entries_by_dir: &mut std::collections::HashMap<PathBuf, Vec<LibraryEntry>>,
     on_track: &mut F,
+    on_dir: &mut D,
 ) -> Result<()>
 where
     F: FnMut(&Path, &str, &str, &TrackMeta, &std::fs::Metadata),
+    D: FnMut(&Path, usize),
 {
     let mut dirs = Vec::new();
     let mut tracks = Vec::new();
+    let mut has_tracks = false;
 
     for entry in fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
         let entry = entry.context("read_dir entry")?;
@@ -153,6 +165,10 @@ where
             Ok(meta) => meta,
             Err(_) => continue,
         };
+        if !has_tracks {
+            has_tracks = true;
+            on_dir(dir, 0);
+        }
         on_track(&path, &file_name, &ext, &meta, &fs_meta);
         let entry = LibraryEntry::Track {
             path: path.to_string_lossy().to_string(),
@@ -170,11 +186,15 @@ where
     dirs.sort_by(|a, b| a.0.cmp(&b.0));
     tracks.sort_by(|a, b| a.0.cmp(&b.0));
 
+    let track_count = tracks.len();
     let mut entries = Vec::with_capacity(dirs.len() + tracks.len());
     entries.extend(dirs.into_iter().map(|(_, e)| e));
     entries.extend(tracks.into_iter().map(|(_, e)| e));
 
     entries_by_dir.insert(dir.to_path_buf(), entries);
+    if has_tracks {
+        on_dir(dir, track_count);
+    }
 
     for entry in fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
         let entry = entry.context("read_dir entry")?;
@@ -184,7 +204,7 @@ where
                 .canonicalize()
                 .with_context(|| format!("canonicalize {:?}", path))?;
             if canon.starts_with(root) {
-                scan_dir(root, &canon, entries_by_dir, on_track)?;
+                scan_dir(root, &canon, entries_by_dir, on_track, on_dir)?;
             }
         }
     }

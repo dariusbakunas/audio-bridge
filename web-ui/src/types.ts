@@ -117,6 +117,10 @@ export interface TrackListResponse {
   items: TrackSummary[];
 }
 
+export interface TrackResolveResponse {
+  album_id?: number | null;
+}
+
 export type MusicBrainzMatchKind = "track" | "album";
 
 export interface MusicBrainzMatchCandidate {
@@ -135,6 +139,15 @@ export interface MusicBrainzMatchSearchResponse {
 }
 
 export type MetadataEvent =
+  | {
+      kind: "library_scan_album_start";
+      path: string;
+    }
+  | {
+      kind: "library_scan_album_finish";
+      path: string;
+      tracks: number;
+    }
   | {
       kind: "music_brainz_batch";
       count: number;

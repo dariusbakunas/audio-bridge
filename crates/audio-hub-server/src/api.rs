@@ -40,6 +40,7 @@ use crate::models::{
     OutputsResponse,
     OutputSelectRequest,
     ProvidersResponse,
+    TrackResolveResponse,
     TrackListResponse,
 };
 use crate::events::{HubEvent, LogEvent};
@@ -260,10 +261,8 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
             path: path.to_string_lossy().to_string(),
             file_name: file_name.to_string(),
             title: meta.title.clone(),
-            artist: meta
-                .album_artist
-                .clone()
-                .or_else(|| meta.artist.clone()),
+            artist: meta.artist.clone(),
+            album_artist: meta.album_artist.clone(),
             album: meta.album.clone(),
             track_number: meta.track_number,
             disc_number: meta.disc_number,
@@ -284,6 +283,18 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
         }
         if let Err(err) = apply_cover_art(&state.metadata_db, &root, path, meta, &record) {
             tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
+        }
+    }, |dir, count| {
+        let path = dir.to_string_lossy().to_string();
+        if count == 0 {
+            state.events.metadata_event(crate::events::MetadataEvent::LibraryScanAlbumStart {
+                path,
+            });
+        } else {
+            state.events.metadata_event(crate::events::MetadataEvent::LibraryScanAlbumFinish {
+                path,
+                tracks: count,
+            });
         }
     }) {
         Ok(new_index) => {
@@ -346,6 +357,7 @@ pub async fn rescan_track(
             .to_string(),
         title: meta.title.clone(),
         artist: meta.artist.clone(),
+        album_artist: meta.album_artist.clone(),
         album: meta.album.clone(),
         track_number: meta.track_number,
         disc_number: meta.disc_number,
@@ -379,6 +391,35 @@ pub async fn rescan_track(
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct ArtQuery {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct TrackResolveQuery {
+    pub path: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/tracks/resolve",
+    params(TrackResolveQuery),
+    responses(
+        (status = 200, description = "Resolved track metadata", body = TrackResolveResponse),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[get("/tracks/resolve")]
+/// Resolve a track path to album metadata.
+pub async fn tracks_resolve(
+    state: web::Data<AppState>,
+    query: web::Query<TrackResolveQuery>,
+) -> impl Responder {
+    match state.metadata_db.album_id_for_track_path(&query.path) {
+        Ok(Some(album_id)) => HttpResponse::Ok().json(TrackResolveResponse {
+            album_id: Some(album_id),
+        }),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+    }
 }
 
 #[utoipa::path(

@@ -41,7 +41,7 @@ pub fn apply_cover_art(
     let Some(album) = record.album.as_deref() else {
         return Ok(());
     };
-    let artist = record.artist.as_deref();
+    let artist = record.album_artist.as_deref().or(record.artist.as_deref());
     if db.album_cover_path(album, artist)?.is_some() {
         return Ok(());
     }

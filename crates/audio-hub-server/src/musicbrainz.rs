@@ -398,6 +398,7 @@ fn enrich_candidate(
         file_name: String::new(),
         title: Some(candidate.title.clone()),
         artist: Some(candidate.artist.clone()),
+        album_artist: candidate.album_artist.clone(),
         album: candidate.album.clone(),
         track_number: None,
         disc_number: None,

@@ -151,6 +151,12 @@ pub struct MusicBrainzMatchSearchResponse {
     pub items: Vec<MusicBrainzMatchCandidate>,
 }
 
+/// Response for resolving a track path to album metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackResolveResponse {
+    pub album_id: Option<i64>,
+}
+
 /// Payload to apply a MusicBrainz match to a track or album.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
