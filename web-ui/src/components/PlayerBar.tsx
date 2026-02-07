@@ -5,15 +5,18 @@ interface PlayerBarProps {
   status: StatusResponse | null;
   nowPlayingCover: string | null;
   nowPlayingCoverFailed: boolean;
+  placeholderCover: string;
   isPlaying: boolean;
   canTogglePlayback: boolean;
   showPlayIcon: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   activeOutput: OutputInfo | null;
+  activeAlbumId: number | null;
   uiBuildId: string;
   formatMs: (ms?: number | null) => string;
   onCoverError: () => void;
+  onAlbumNavigate: (albumId: number) => void;
   onPrimaryAction: () => void;
   onNext: () => void;
   onSignalOpen: () => void;
@@ -25,15 +28,18 @@ export default function PlayerBar({
   status,
   nowPlayingCover,
   nowPlayingCoverFailed,
+  placeholderCover,
   isPlaying,
   canTogglePlayback,
   showPlayIcon,
   playButtonTitle,
   queueHasItems,
   activeOutput,
+  activeAlbumId,
   uiBuildId,
   formatMs,
   onCoverError,
+  onAlbumNavigate,
   onPrimaryAction,
   onNext,
   onSignalOpen,
@@ -44,6 +50,29 @@ export default function PlayerBar({
     <div className="player-bar">
       <div className="player-left">
         {status?.title || status?.now_playing ? (
+          activeAlbumId ? (
+            <button
+              className="album-art album-art-button"
+              type="button"
+              onClick={() => onAlbumNavigate(activeAlbumId)}
+              aria-label="Go to album"
+            >
+            {nowPlayingCover && !nowPlayingCoverFailed ? (
+              <img
+                className="album-art-image"
+                src={nowPlayingCover}
+                alt={status?.album ?? status?.title ?? "Album art"}
+                onError={onCoverError}
+              />
+            ) : (
+              <img
+                className="album-art-image"
+                src={placeholderCover}
+                alt={status?.album ?? status?.title ?? "Album art"}
+              />
+            )}
+          </button>
+        ) : (
           <div className="album-art">
             {nowPlayingCover && !nowPlayingCoverFailed ? (
               <img
@@ -53,9 +82,14 @@ export default function PlayerBar({
                 onError={onCoverError}
               />
             ) : (
-              <span>Artwork</span>
+              <img
+                className="album-art-image"
+                src={placeholderCover}
+                alt={status?.album ?? status?.title ?? "Album art"}
+              />
             )}
           </div>
+        )
         ) : null}
         <div>
           <div className="track-title">

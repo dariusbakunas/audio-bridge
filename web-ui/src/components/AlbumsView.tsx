@@ -8,6 +8,7 @@ interface AlbumsViewProps {
   canPlay: boolean;
   activeAlbumId: number | null;
   isPlaying: boolean;
+  isPaused: boolean;
   onSelectAlbum: (id: number) => void;
   onPlayAlbum: (id: number) => void;
   onPause: () => void;
@@ -21,6 +22,7 @@ export default function AlbumsView({
   canPlay,
   activeAlbumId,
   isPlaying,
+  isPaused,
   onSelectAlbum,
   onPlayAlbum,
   onPause
@@ -57,28 +59,38 @@ export default function AlbumsView({
                     alt={album.title}
                     loading="lazy"
                   />
-                  <button
-                    className={`album-play${
-                      activeAlbumId === album.id && isPlaying ? " is-active" : ""
-                    }`}
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (activeAlbumId === album.id && isPlaying) {
-                        onPause();
-                        return;
-                      }
-                      onPlayAlbum(album.id);
-                    }}
-                    disabled={!canPlay}
-                    aria-label={
-                      activeAlbumId === album.id && isPlaying ? "Pause playback" : `Play ${album.title}`
+                <button
+                  className={`album-play${
+                    activeAlbumId === album.id && isPlaying ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (activeAlbumId === album.id && (isPlaying || isPaused)) {
+                      onPause();
+                      return;
                     }
-                    title={activeAlbumId === album.id && isPlaying ? "Pause" : "Play album"}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      {activeAlbumId === album.id && isPlaying ? (
-                        <path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" />
+                    onPlayAlbum(album.id);
+                  }}
+                  disabled={!canPlay}
+                  aria-label={
+                    activeAlbumId === album.id && (isPlaying || isPaused)
+                      ? isPaused
+                        ? "Resume playback"
+                        : "Pause playback"
+                      : `Play ${album.title}`
+                  }
+                  title={
+                    activeAlbumId === album.id && (isPlaying || isPaused)
+                      ? isPaused
+                        ? "Resume"
+                        : "Pause"
+                      : "Play album"
+                  }
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    {activeAlbumId === album.id && isPlaying ? (
+                      <path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" />
                       ) : (
                         <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
                       )}

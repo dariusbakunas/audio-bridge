@@ -37,7 +37,7 @@ body {
 
 .side-nav {
   border-right: 1px solid var(--border);
-  padding: 32px 22px;
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -117,7 +117,7 @@ body {
 }
 
 .main {
-  padding: 32px clamp(20px, 5vw, 56px);
+  padding: 96px clamp(20px, 5vw, 56px) 32px;
   overflow: auto;
   height: 100vh;
   margin-left: 240px;
@@ -127,7 +127,7 @@ body {
 .nav-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .nav-label {
@@ -142,11 +142,13 @@ body {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 12px 16px;
+  border-radius: 0;
   border: 1px solid transparent;
   background: transparent;
   font-weight: 500;
+  font-size: 0.95rem;
+  min-height: 44px;
   cursor: pointer;
 }
 
@@ -164,9 +166,7 @@ body {
 }
 
 .nav-button.active {
-  background: var(--bg-accent);
-  border-color: var(--border);
-  color: var(--accent-2);
+  border-radius: 0;
 }
 
 .eyebrow {
@@ -185,12 +185,65 @@ h1 {
 }
 
 .view-header h1 {
-  font-size: clamp(1.9rem, 2.4vw, 2.6rem);
-  margin: 0 0 12px;
+  font-size: clamp(0.95rem, 1.05vw, 1.15rem);
+  font-weight: 500;
+  margin: 0;
 }
 
 .view-header {
-  margin-bottom: 24px;
+  position: fixed;
+  top: 0;
+  z-index: 3;
+  left: 240px;
+  right: 0;
+  padding: 12px clamp(20px, 5vw, 56px);
+  background: rgba(255, 255, 255, 0.86);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.view-header-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.view-header-row h1 {
+  text-align: center;
+}
+
+.view-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.view-nav .icon-btn {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.view-nav .icon-btn:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.view-nav .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.view-nav .icon-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 p {
@@ -359,6 +412,11 @@ p {
   opacity: 1;
 }
 
+.album-cover-frame:hover::after,
+.album-cover-frame:focus-within::after {
+  opacity: 1;
+}
+
 .album-card-link {
   background: transparent;
   padding: 0;
@@ -393,6 +451,17 @@ p {
   filter: drop-shadow(0 2px 6px rgba(255, 255, 255, 0.35));
 }
 
+.album-play.large {
+  width: 60px;
+  height: 60px;
+  border-width: 2.5px;
+}
+
+.album-play.large svg {
+  width: 24px;
+  height: 24px;
+}
+
 .album-play:hover {
   background: #ffffff;
   color: #1a1a1a;
@@ -402,6 +471,12 @@ p {
 
 .album-card:hover .album-play,
 .album-card:focus-within .album-play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.album-cover-frame:hover .album-play,
+.album-cover-frame:focus-within .album-play {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1.04);
 }
@@ -489,7 +564,11 @@ p {
   justify-content: space-between;
   gap: 16px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.album-track-row:hover {
   background: var(--bg-accent);
 }
 
@@ -541,11 +620,15 @@ p {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(18, 18, 18, 0.04);
-  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  border: none;
   cursor: pointer;
   text-align: left;
+}
+
+.library-row:hover {
+  background: rgba(18, 18, 18, 0.04);
 }
 
 .library-row.track {
@@ -756,7 +839,8 @@ p {
 .album-art {
   width: 64px;
   height: 64px;
-  border-radius: 14px;
+  flex: 0 0 64px;
+  border-radius: 0;
   background: linear-gradient(135deg, rgba(255, 107, 53, 0.4), rgba(45, 108, 223, 0.4));
   display: flex;
   align-items: center;
@@ -766,6 +850,16 @@ p {
   letter-spacing: 0.2em;
   color: var(--ink);
   overflow: hidden;
+}
+
+.album-art-button {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.album-art-button:hover {
+  filter: brightness(1.03);
 }
 
 .album-art-image {
@@ -1018,6 +1112,25 @@ p {
 }
 
 @media (max-width: 720px) {
+  .main {
+    margin-left: 0;
+    width: 100%;
+    padding: 96px 20px 24px;
+  }
+
+  .side-nav {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .view-header {
+    left: 0;
+    padding: 18px 20px 14px;
+  }
+
   .controls {
     flex-direction: column;
     align-items: stretch;

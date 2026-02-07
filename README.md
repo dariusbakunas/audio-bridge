@@ -125,6 +125,8 @@ Then point the TUI at the server:
 
 The hub server can serve a lightweight web dashboard if `web-ui/dist` is present next to the repo (or next to the binary).
 
+![web-ui screenshot](docs/screenshots/web-ui.png)
+
 Build the UI:
 
 ```bash

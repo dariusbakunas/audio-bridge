@@ -250,23 +250,43 @@ export default function App() {
       [outputs, activeOutputId]
   );
   const canTogglePlayback = Boolean(
-      activeOutputId && (status?.now_playing || selectedTrackPath)
+    activeOutputId && (status?.now_playing || selectedTrackPath)
   );
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
+  const isPaused = Boolean(status?.now_playing && status?.paused);
   const uiBuildId = useMemo(() => {
     if (__BUILD_MODE__ === "development") {
       return "dev";
     }
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
+  type ViewState = {
+    view: "albums" | "folders" | "album" | "settings";
+    albumId?: number | null;
+    settingsSection?: "metadata" | "logs";
+    browserView?: "library" | "albums";
+  };
+
+  const initialViewState: ViewState = {
+    view: "albums",
+    albumId: null,
+    settingsSection: "metadata",
+    browserView: "albums"
+  };
+  const [navState, setNavState] = useState<{ stack: ViewState[]; index: number }>(() => ({
+    stack: [initialViewState],
+    index: 0
+  }));
+  const applyingHistoryRef = useRef(false);
+
   const viewTitle = settingsOpen
-      ? "Settings"
-      : albumViewId !== null
-          ? "Album"
-          : browserView === "albums"
-              ? "Albums"
-              : "Folders";
+    ? "Settings"
+    : albumViewId !== null
+      ? ""
+      : browserView === "albums"
+        ? "Albums"
+        : "Folders";
   const playButtonTitle = !activeOutputId
       ? "Select an output to control playback."
       : !status?.now_playing && !selectedTrackPath
@@ -288,6 +308,82 @@ export default function App() {
     });
     return match?.id ?? null;
   }, [albums, status?.album, status?.artist]);
+
+  const applyViewState = useCallback((state: ViewState) => {
+    applyingHistoryRef.current = true;
+    if (state.view === "settings") {
+      setSettingsSection(state.settingsSection ?? "metadata");
+      setSettingsOpen(true);
+      if (state.browserView) setBrowserView(state.browserView);
+      setAlbumViewId(null);
+      return;
+    }
+    setSettingsOpen(false);
+    if (state.view === "album") {
+      setAlbumViewId(state.albumId ?? null);
+      if (state.browserView) setBrowserView(state.browserView);
+      return;
+    }
+    if (state.view === "folders") {
+      setBrowserView("library");
+      setAlbumViewId(null);
+      return;
+    }
+    setBrowserView("albums");
+    setAlbumViewId(null);
+  }, []);
+
+  useEffect(() => {
+    if (applyingHistoryRef.current) {
+      applyingHistoryRef.current = false;
+    }
+  });
+
+  const pushViewState = useCallback((next: ViewState) => {
+    setNavState((prev) => {
+      const base = prev.stack.slice(0, prev.index + 1);
+      const last = base[base.length - 1];
+      const isSame =
+        last.view === next.view &&
+        (last.albumId ?? null) === (next.albumId ?? null) &&
+        (last.settingsSection ?? null) === (next.settingsSection ?? null) &&
+        (last.browserView ?? null) === (next.browserView ?? null);
+      if (isSame) return prev;
+      const stack = [...base, next];
+      return { stack, index: stack.length - 1 };
+    });
+  }, []);
+
+  const navigateTo = useCallback(
+    (next: ViewState) => {
+      applyViewState(next);
+      pushViewState(next);
+    },
+    [applyViewState, pushViewState]
+  );
+
+  const canGoBack = navState.index > 0;
+  const canGoForward = navState.index < navState.stack.length - 1;
+
+  const goBack = useCallback(() => {
+    setNavState((prev) => {
+      if (prev.index <= 0) return prev;
+      const index = prev.index - 1;
+      const target = prev.stack[index];
+      applyViewState(target);
+      return { ...prev, index };
+    });
+  }, [applyViewState]);
+
+  const goForward = useCallback(() => {
+    setNavState((prev) => {
+      if (prev.index >= prev.stack.length - 1) return prev;
+      const index = prev.index + 1;
+      const target = prev.stack[index];
+      applyViewState(target);
+      return { ...prev, index };
+    });
+  }, [applyViewState]);
 
   useEffect(() => {
     if (!trackMenuPath) return;
@@ -537,11 +633,12 @@ export default function App() {
             <div className="nav-label">Library</div>
             <button
               className={`nav-button ${browserView === "albums" && !settingsOpen ? "active" : ""}`}
-              onClick={() => {
-                setAlbumViewId(null);
-                setBrowserView("albums");
-                setSettingsOpen(false);
-              }}
+              onClick={() =>
+                navigateTo({
+                  view: "albums",
+                  browserView: "albums"
+                })
+              }
             >
               <span className="nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -555,11 +652,12 @@ export default function App() {
             </button>
             <button
               className={`nav-button ${browserView === "library" && !settingsOpen ? "active" : ""}`}
-              onClick={() => {
-                setAlbumViewId(null);
-                setBrowserView("library");
-                setSettingsOpen(false);
-              }}
+              onClick={() =>
+                navigateTo({
+                  view: "folders",
+                  browserView: "library"
+                })
+              }
             >
               <span className="nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -576,10 +674,13 @@ export default function App() {
             <div className="nav-label">System</div>
             <button
               className={`nav-button ${settingsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsSection("metadata");
-                setSettingsOpen(true);
-              }}
+              onClick={() =>
+                navigateTo({
+                  view: "settings",
+                  settingsSection: "metadata",
+                  browserView
+                })
+              }
             >
               <span className="nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -596,7 +697,42 @@ export default function App() {
 
         <main className="main">
           <header className="view-header">
-            <h1>{viewTitle}</h1>
+            <div className="view-header-row">
+              <div className="view-nav">
+                <button
+                  className="icon-btn"
+                  onClick={goBack}
+                  disabled={!canGoBack}
+                  aria-label="Back"
+                  title="Back"
+                  type="button"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M15.5 5.5 9 12l6.5 6.5-1.5 1.5L6 12l8-8 1.5 1.5Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+                {canGoForward ? (
+                  <button
+                    className="icon-btn"
+                    onClick={goForward}
+                    aria-label="Forward"
+                    title="Forward"
+                    type="button"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="m8.5 5.5 1.5-1.5 8 8-8 8-1.5-1.5L15 12 8.5 5.5Z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+              {viewTitle ? <h1>{viewTitle}</h1> : <span />}
+            </div>
             {error ? <div className="alert">{error}</div> : null}
           </header>
 
@@ -611,7 +747,14 @@ export default function App() {
                   canPlay={Boolean(activeOutputId)}
                   activeAlbumId={activeAlbumId}
                   isPlaying={isPlaying}
-                  onSelectAlbum={setAlbumViewId}
+                  isPaused={isPaused}
+                  onSelectAlbum={(id) =>
+                    navigateTo({
+                      view: "album",
+                      albumId: id,
+                      browserView
+                    })
+                  }
                   onPlayAlbum={handlePlayAlbumById}
                   onPause={handlePause}
                 />
@@ -650,8 +793,11 @@ export default function App() {
               error={albumTracksError}
               placeholder={albumPlaceholder}
               canPlay={Boolean(activeOutputId) && albumTracks.length > 0}
+              activeAlbumId={activeAlbumId}
+              isPlaying={isPlaying}
+              isPaused={isPaused}
+              onPause={handlePause}
               formatMs={formatMs}
-              onBack={() => setAlbumViewId(null)}
               onPlayAlbum={handlePlayAlbum}
               onPlayTrack={handlePlayAlbumTrack}
               onQueueTrack={handleQueueAlbumTrack}
@@ -661,7 +807,13 @@ export default function App() {
           <SettingsView
             active={settingsOpen}
             section={settingsSection}
-            onSectionChange={setSettingsSection}
+            onSectionChange={(section) =>
+              navigateTo({
+                view: "settings",
+                settingsSection: section,
+                browserView
+              })
+            }
             metadataEvents={metadataEvents}
             logEvents={logEvents}
             logsError={logsError}
@@ -686,9 +838,18 @@ export default function App() {
           playButtonTitle={playButtonTitle}
           queueHasItems={queue.length > 0}
           activeOutput={activeOutput}
+          activeAlbumId={activeAlbumId}
           uiBuildId={uiBuildId}
           formatMs={formatMs}
+          placeholderCover={albumPlaceholder(status?.album, status?.artist)}
           onCoverError={() => setNowPlayingCoverFailed(true)}
+          onAlbumNavigate={(albumId) =>
+            navigateTo({
+              view: "album",
+              albumId,
+              browserView
+            })
+          }
           onPrimaryAction={handlePrimaryAction}
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}

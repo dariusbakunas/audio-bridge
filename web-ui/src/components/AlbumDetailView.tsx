@@ -8,7 +8,10 @@ interface AlbumDetailViewProps {
   placeholder: (title?: string | null, artist?: string | null) => string;
   canPlay: boolean;
   formatMs: (ms?: number | null) => string;
-  onBack: () => void;
+  activeAlbumId: number | null;
+  isPlaying: boolean;
+  isPaused: boolean;
+  onPause: () => void;
   onPlayAlbum: () => void;
   onPlayTrack: (track: TrackSummary) => void;
   onQueueTrack: (track: TrackSummary) => void;
@@ -22,26 +25,50 @@ export default function AlbumDetailView({
   placeholder,
   canPlay,
   formatMs,
-  onBack,
+  activeAlbumId,
+  isPlaying,
+  isPaused,
+  onPause,
   onPlayAlbum,
   onPlayTrack,
   onQueueTrack
 }: AlbumDetailViewProps) {
+  const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
+  const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   return (
     <section className="album-view">
-      <div className="album-header">
-        <button className="btn ghost small" onClick={onBack}>
-          Back to albums
-        </button>
-      </div>
       <div className="card album-detail">
         <div className="album-detail-top">
           <div className="album-detail-left">
-            <img
-              className="album-cover large"
-              src={album?.cover_art_url ?? placeholder(album?.title, album?.artist)}
-              alt={album?.title ?? "Album art"}
-            />
+            <div className="album-cover-frame large">
+              <img
+                className="album-cover large"
+                src={album?.cover_art_url ?? placeholder(album?.title, album?.artist)}
+                alt={album?.title ?? "Album art"}
+              />
+              <button
+                className="album-play large"
+                type="button"
+                onClick={() => {
+                  if (isActive) {
+                    onPause();
+                    return;
+                  }
+                  onPlayAlbum();
+                }}
+                disabled={!canPlay}
+                aria-label={isActive ? (isPaused ? "Resume playback" : "Pause playback") : "Play album"}
+                title={isActive ? (isPaused ? "Resume" : "Pause") : "Play album"}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  {isActivePlaying ? (
+                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" />
+                  ) : (
+                    <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
+                  )}
+                </svg>
+              </button>
+            </div>
           </div>
           <div className="album-detail-right">
             <div className="album-meta">
@@ -60,9 +87,6 @@ export default function AlbumDetailView({
                     ? "Cover: not cached"
                     : "Cover: unavailable"}
               </div>
-              <button className="btn ghost small" onClick={onPlayAlbum} disabled={!canPlay}>
-                Play album
-              </button>
             </div>
           </div>
         </div>
