@@ -20,6 +20,7 @@ pub enum Command {
 pub enum Event {
     Status(String),
     RemoteStatus(crate::server_api::RemoteStatus),
+    OutputsUpdate(crate::server_api::RemoteOutputs),
     QueueUpdate {
         items: Vec<crate::server_api::RemoteQueueItem>,
     },

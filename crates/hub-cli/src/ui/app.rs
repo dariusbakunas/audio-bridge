@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -47,6 +48,7 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
     let (evt_tx, evt_rx) = unbounded::<Event>();
     let (scan_tx, scan_rx) = unbounded::<ScanReq>();
     let (scan_done_tx, scan_done_rx) = unbounded::<ScanResp>();
+    let active_output_id = Arc::new(Mutex::new(None));
     let evt_tx_worker = evt_tx.clone();
     std::thread::spawn({
         let server = server.clone();
@@ -56,26 +58,48 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
     std::thread::spawn({
         let server = server.clone();
         let evt_tx = evt_tx.clone();
+        let active_output_id = active_output_id.clone();
+        move || {
+            let mut delay = Duration::from_millis(500);
+            loop {
+                let result = server_api::outputs_stream(&server, |outputs| {
+                    if let Ok(mut guard) = active_output_id.lock() {
+                        *guard = outputs.active_id.clone();
+                    }
+                    let _ = evt_tx.send(Event::OutputsUpdate(outputs));
+                });
+                match result {
+                    Ok(_) => delay = Duration::from_millis(500),
+                    Err(_) => delay = (delay * 2).min(Duration::from_secs(5)),
+                }
+                std::thread::sleep(delay);
+            }
+        }
+    });
+
+    std::thread::spawn({
+        let server = server.clone();
+        let active_output_id = active_output_id.clone();
+        let evt_tx = evt_tx.clone();
         move || {
             let mut delay = Duration::from_millis(250);
-            let mut active_output_id: Option<String> = None;
             loop {
                 std::thread::sleep(delay);
-                if active_output_id.is_none() {
-                    if let Ok(outputs) = server_api::outputs(&server) {
-                        active_output_id = outputs.active_id;
-                    }
-                }
-                let status_result = if let Some(ref id) = active_output_id {
+                let output_id = active_output_id.lock().ok().and_then(|guard| guard.clone());
+                let Some(ref id) = output_id else {
+                    delay = (delay * 2).min(Duration::from_secs(2));
+                    continue;
+                };
+                let status_result = {
                     server_api::status_for_output(&server, id)
-                } else {
-                    server_api::status(&server)
                 };
                 match status_result {
                     Ok(status) => {
                         delay = Duration::from_millis(250);
                         if let Some(id) = status.output_id.clone() {
-                            active_output_id = Some(id);
+                            if let Ok(mut guard) = active_output_id.lock() {
+                                *guard = Some(id);
+                            }
                         }
                         if evt_tx
                             .send(Event::RemoteStatus(status))
@@ -86,7 +110,9 @@ pub(crate) fn run_tui(server: String, dir: PathBuf, log_rx: Receiver<String>) ->
                     }
                     Err(_) => {
                         delay = (delay * 2).min(Duration::from_secs(2));
-                        active_output_id = None;
+                        if let Ok(mut guard) = active_output_id.lock() {
+                            *guard = None;
+                        }
                     }
                 }
             }
@@ -857,6 +883,24 @@ fn ui_loop(
         while let Ok(ev) = evt_rx.try_recv() {
             match ev {
                 Event::Status(s) => app.status = s,
+                Event::OutputsUpdate(outputs) => {
+                    app.outputs = outputs.outputs;
+                    app.outputs_active_id = outputs.active_id;
+                    app.outputs_error = None;
+                    if app.outputs_open {
+                        if let Some(active_id) = app.outputs_active_id.as_ref() {
+                            if let Some(idx) = app.outputs.iter().position(|o| &o.id == active_id) {
+                                app.outputs_state.select(Some(idx));
+                            }
+                        } else if app.outputs.is_empty() {
+                            app.outputs_state.select(None);
+                        } else {
+                            let selected = app.outputs_state.selected().unwrap_or(0);
+                            let next = selected.min(app.outputs.len() - 1);
+                            app.outputs_state.select(Some(next));
+                        }
+                    }
+                }
                 Event::QueueUpdate { items } => {
                     app.queued_next = items.iter().map(|item| item.path.clone()).collect();
                     for item in items {

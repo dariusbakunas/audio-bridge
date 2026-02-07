@@ -1,3 +1,4 @@
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -242,6 +243,61 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
             .context("request /outputs")?,
         "outputs",
     )?;
+    Ok(to_remote_outputs(resp))
+}
+
+pub(crate) fn outputs_stream<F>(server: &str, mut on_event: F) -> Result<()>
+where
+    F: FnMut(RemoteOutputs),
+{
+    let url = format!("{}/outputs/stream", server.trim_end_matches('/'));
+    let resp = ureq::get(&url)
+        .call()
+        .context("request /outputs/stream")?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "outputs stream failed with {}",
+            resp.status()
+        ));
+    }
+    let mut reader = std::io::BufReader::new(resp.into_body().into_reader());
+    let mut line = String::new();
+    let mut event_name = String::new();
+    let mut data = String::new();
+    loop {
+        line.clear();
+        let count = reader.read_line(&mut line)?;
+        if count == 0 {
+            break;
+        }
+        let trimmed = line.trim_end_matches(&['\n', '\r'][..]);
+        if trimmed.is_empty() {
+            if event_name == "outputs" && !data.is_empty() {
+                let parsed: OutputsResponse = serde_json::from_str(&data)?;
+                on_event(to_remote_outputs(parsed));
+            }
+            event_name.clear();
+            data.clear();
+            continue;
+        }
+        if trimmed.starts_with(':') {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("event:") {
+            event_name = rest.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.trim_start());
+        }
+    }
+    Ok(())
+}
+
+fn to_remote_outputs(resp: OutputsResponse) -> RemoteOutputs {
     let outputs = resp
         .outputs
         .into_iter()
@@ -253,10 +309,10 @@ pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
             supported_rates: o.supported_rates.map(|r| (r.min_hz, r.max_hz)),
         })
         .collect();
-    Ok(RemoteOutputs {
+    RemoteOutputs {
         active_id: resp.active_id,
         outputs,
-    })
+    }
 }
 
 pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
