@@ -6,9 +6,8 @@ interface PlayerBarProps {
   nowPlayingCover: string | null;
   nowPlayingCoverFailed: boolean;
   placeholderCover: string;
-  isPlaying: boolean;
+  showSignalPath: boolean;
   canTogglePlayback: boolean;
-  showPlayIcon: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   activeOutput: OutputInfo | null;
@@ -29,9 +28,8 @@ export default function PlayerBar({
   nowPlayingCover,
   nowPlayingCoverFailed,
   placeholderCover,
-  isPlaying,
+  showSignalPath,
   canTogglePlayback,
-  showPlayIcon,
   playButtonTitle,
   queueHasItems,
   activeOutput,
@@ -46,6 +44,7 @@ export default function PlayerBar({
   onQueueOpen,
   onSelectOutput
 }: PlayerBarProps) {
+  const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   return (
     <div className="player-bar">
       <div className="player-left">
@@ -102,9 +101,9 @@ export default function PlayerBar({
       </div>
       <div className="player-middle">
         <PlayerControls
-          isPlaying={isPlaying}
+          showSignalPath={showSignalPath}
           canTogglePlayback={canTogglePlayback}
-          showPlayIcon={showPlayIcon}
+          isPaused={showPlayIcon}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasItems}
           onPrimaryAction={onPrimaryAction}

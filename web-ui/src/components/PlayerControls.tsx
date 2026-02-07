@@ -1,7 +1,7 @@
 interface PlayerControlsProps {
-  isPlaying: boolean;
+  showSignalPath: boolean;
   canTogglePlayback: boolean;
-  showPlayIcon: boolean;
+  isPaused: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   onPrimaryAction: () => void;
@@ -11,9 +11,9 @@ interface PlayerControlsProps {
 }
 
 export default function PlayerControls({
-  isPlaying,
+  showSignalPath,
   canTogglePlayback,
-  showPlayIcon,
+  isPaused,
   playButtonTitle,
   queueHasItems,
   onPrimaryAction,
@@ -24,10 +24,10 @@ export default function PlayerControls({
   return (
     <div className="player-controls">
       <button
-        className={`icon-btn signal-btn${isPlaying ? " active" : ""}`}
+        className={`icon-btn signal-btn${showSignalPath ? " active" : ""}`}
         aria-label="Signal details"
         onClick={onSignalOpen}
-        disabled={!isPlaying}
+        disabled={!showSignalPath}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="10" width="2" height="4" rx="1" />
@@ -51,7 +51,7 @@ export default function PlayerControls({
         disabled={!canTogglePlayback}
         title={playButtonTitle}
       >
-        {showPlayIcon ? (
+        {isPaused ? (
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <polygon points="7,5 19,12 7,19" />
           </svg>
@@ -66,7 +66,7 @@ export default function PlayerControls({
         className="icon-btn"
         onClick={onNext}
         aria-label="Next"
-        disabled={!queueHasItems}
+        disabled={!queueHasItems || !canTogglePlayback}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="19" y="5" width="2" height="14" rx="1" />

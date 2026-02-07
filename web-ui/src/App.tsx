@@ -252,7 +252,6 @@ export default function App() {
   const canTogglePlayback = Boolean(
     activeOutputId && (status?.now_playing || selectedTrackPath)
   );
-  const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const isPaused = Boolean(status?.now_playing && status?.paused);
   const uiBuildId = useMemo(() => {
@@ -430,7 +429,6 @@ export default function App() {
     handlePlay,
     handlePlayAlbumTrack,
     handlePlayAlbumById,
-    handleQueueAlbumTrack,
     handlePlayAlbum,
     handleQueue,
     handlePlayNext
@@ -800,7 +798,13 @@ export default function App() {
               formatMs={formatMs}
               onPlayAlbum={handlePlayAlbum}
               onPlayTrack={handlePlayAlbumTrack}
-              onQueueTrack={handleQueueAlbumTrack}
+              trackMenuPath={trackMenuPath}
+              trackMenuPosition={trackMenuPosition}
+              onToggleMenu={toggleTrackMenu}
+              onMenuPlay={(path) => runTrackMenuAction(handlePlay, path)}
+              onMenuQueue={(path) => runTrackMenuAction(handleQueue, path)}
+              onMenuPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
+              onMenuRescan={(path) => runTrackMenuAction(handleRescanTrack, path)}
             />
           ) : null}
 
@@ -827,33 +831,32 @@ export default function App() {
         </main>
       </div>
 
-      <PlayerBar
-        status={status}
-        nowPlayingCover={nowPlayingCover}
-        nowPlayingCoverFailed={nowPlayingCoverFailed}
-        isPlaying={isPlaying}
-        canTogglePlayback={canTogglePlayback}
-        showPlayIcon={showPlayIcon}
-        playButtonTitle={playButtonTitle}
-        queueHasItems={Boolean(activeOutputId) && queue.length > 0}
-        activeOutput={activeOutput}
-        activeAlbumId={activeAlbumId}
-        uiBuildId={uiBuildId}
-        formatMs={formatMs}
-        placeholderCover={albumPlaceholder(status?.album, status?.artist)}
-        onCoverError={() => setNowPlayingCoverFailed(true)}
-        onAlbumNavigate={(albumId) =>
-          navigateTo({
-            view: "album",
-            albumId,
-            browserView
-          })
-        }
-        onPrimaryAction={handlePrimaryAction}
-        onNext={handleNext}
-        onSignalOpen={() => setSignalOpen(true)}
-        onQueueOpen={() => setQueueOpen(true)}
-        onSelectOutput={() => setOutputsOpen(true)}
+        <PlayerBar
+          status={status}
+          nowPlayingCover={nowPlayingCover}
+          nowPlayingCoverFailed={nowPlayingCoverFailed}
+          showSignalPath={isPlaying}
+          canTogglePlayback={canTogglePlayback}
+          playButtonTitle={playButtonTitle}
+          queueHasItems={Boolean(activeOutputId) && queue.length > 0}
+          activeOutput={activeOutput}
+          activeAlbumId={activeAlbumId}
+          uiBuildId={uiBuildId}
+          formatMs={formatMs}
+          placeholderCover={albumPlaceholder(status?.album, status?.artist)}
+          onCoverError={() => setNowPlayingCoverFailed(true)}
+          onAlbumNavigate={(albumId) =>
+            navigateTo({
+              view: "album",
+              albumId,
+              browserView
+            })
+          }
+          onPrimaryAction={handlePrimaryAction}
+          onNext={handleNext}
+          onSignalOpen={() => setSignalOpen(true)}
+          onQueueOpen={() => setQueueOpen(true)}
+          onSelectOutput={() => setOutputsOpen(true)}
       />
 
       <OutputsModal
@@ -879,6 +882,7 @@ export default function App() {
         items={queue}
         onClose={() => setQueueOpen(false)}
         formatMs={formatMs}
+        placeholder={albumPlaceholder}
       />
 
     </div>

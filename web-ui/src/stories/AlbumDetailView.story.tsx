@@ -86,7 +86,13 @@ export function Default() {
         onPause={action("pause")}
         onPlayAlbum={action("play-album")}
         onPlayTrack={action("play-track")}
-        onQueueTrack={action("queue-track")}
+        trackMenuPath={null}
+        trackMenuPosition={null}
+        onToggleMenu={action("toggle-menu")}
+        onMenuPlay={action("menu-play")}
+        onMenuQueue={action("menu-queue")}
+        onMenuPlayNext={action("menu-play-next")}
+        onMenuRescan={action("menu-rescan")}
       />
     </div>
   );
@@ -109,7 +115,13 @@ export function EmptyTracks() {
         onPause={action("pause")}
         onPlayAlbum={action("play-album")}
         onPlayTrack={action("play-track")}
-        onQueueTrack={action("queue-track")}
+        trackMenuPath={null}
+        trackMenuPosition={null}
+        onToggleMenu={action("toggle-menu")}
+        onMenuPlay={action("menu-play")}
+        onMenuQueue={action("menu-queue")}
+        onMenuPlayNext={action("menu-play-next")}
+        onMenuRescan={action("menu-rescan")}
       />
     </div>
   );

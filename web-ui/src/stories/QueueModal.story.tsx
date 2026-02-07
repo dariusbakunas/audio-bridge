@@ -38,18 +38,45 @@ const formatMs = (ms?: number | null) => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
+const placeholder = (title?: string | null, artist?: string | null) => {
+  const source = title?.trim() || artist?.trim() || "";
+  const initials = source
+    .split(/\s+/)
+    .map((part) => part.replace(/[^A-Za-z0-9]/g, ""))
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const label = initials || "NA";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#50555b"/><stop offset="100%" stop-color="#3f444a"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#ffffff" text-anchor="start">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
 export default {
   title: "Queue/QueueModal"
 };
 
 export function Default() {
   return (
-    <QueueModal open={true} items={items} onClose={action("close")} formatMs={formatMs} />
+    <QueueModal
+      open={true}
+      items={items}
+      onClose={action("close")}
+      formatMs={formatMs}
+      placeholder={placeholder}
+    />
   );
 }
 
 export function Empty() {
   return (
-    <QueueModal open={true} items={[]} onClose={action("close")} formatMs={formatMs} />
+    <QueueModal
+      open={true}
+      items={[]}
+      onClose={action("close")}
+      formatMs={formatMs}
+      placeholder={placeholder}
+    />
   );
 }

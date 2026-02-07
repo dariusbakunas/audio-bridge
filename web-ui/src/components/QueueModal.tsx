@@ -1,5 +1,4 @@
 import { QueueItem } from "../types";
-import Modal from "./Modal";
 import QueueList from "./QueueList";
 
 interface QueueModalProps {
@@ -7,17 +6,36 @@ interface QueueModalProps {
   items: QueueItem[];
   onClose: () => void;
   formatMs: (ms?: number | null) => string;
+  placeholder: (title?: string | null, artist?: string | null) => string;
 }
 
-export default function QueueModal({ open, items, onClose, formatMs }: QueueModalProps) {
+export default function QueueModal({
+  open,
+  items,
+  onClose,
+  formatMs,
+  placeholder
+}: QueueModalProps) {
+  if (!open) return null;
+
   return (
-    <Modal
-      open={open}
-      title="Queue"
-      onClose={onClose}
-      headerRight={<span className="pill">{items.length} items</span>}
-    >
-      <QueueList items={items} formatMs={formatMs} />
-    </Modal>
+    <div className="side-panel-backdrop" onClick={onClose}>
+      <aside
+        className="side-panel"
+        aria-label="Queue"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="card-header">
+          <span>Queue</span>
+          <div className="card-actions">
+            <span className="pill">{items.length} items</span>
+            <button className="btn ghost small" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        <QueueList items={items} formatMs={formatMs} placeholder={placeholder} />
+      </aside>
+    </div>
   );
 }

@@ -36,26 +36,26 @@ export default {
   title: "Player/PlayerBar",
   component: PlayerBar,
   argTypes: {
-    isPlaying: { control: "boolean" },
+    showSignalPath: { control: "boolean" },
     canTogglePlayback: { control: "boolean" },
-    showPlayIcon: { control: "boolean" },
     queueHasItems: { control: "boolean" },
     activeAlbumId: { control: { type: "number", min: 0 } },
     hasOutput: { control: "boolean" },
     hasStatus: { control: "boolean" },
+    paused: { control: "boolean" },
     nowPlayingCoverFailed: { control: "boolean" },
     playButtonTitle: { control: "text" }
   }
 };
 
 type PlayerBarArgs = {
-  isPlaying: boolean;
+  showSignalPath: boolean;
   canTogglePlayback: boolean;
-  showPlayIcon: boolean;
   queueHasItems: boolean;
   activeAlbumId: number;
   hasOutput: boolean;
   hasStatus: boolean;
+  paused: boolean;
   nowPlayingCoverFailed: boolean;
   playButtonTitle: string;
 };
@@ -71,13 +71,12 @@ const formatMs = (ms?: number | null) => {
 const Template = (args: PlayerBarArgs) => (
   <div style={{ paddingBottom: 120 }}>
     <PlayerBar
-      status={args.hasStatus ? status : null}
+      status={args.hasStatus ? { ...status, paused: args.paused } : null}
       nowPlayingCover={null}
       nowPlayingCoverFailed={args.nowPlayingCoverFailed}
       placeholderCover={placeholderCover}
-      isPlaying={args.isPlaying}
+      showSignalPath={args.showSignalPath}
       canTogglePlayback={args.canTogglePlayback}
-      showPlayIcon={args.showPlayIcon}
       playButtonTitle={args.playButtonTitle || undefined}
       queueHasItems={args.queueHasItems}
       activeOutput={args.hasOutput ? activeOutput : null}
@@ -97,65 +96,65 @@ const Template = (args: PlayerBarArgs) => (
 
 export const Playing = Template.bind({});
 Playing.args = {
-  isPlaying: true,
+  showSignalPath: true,
   canTogglePlayback: true,
-  showPlayIcon: false,
   queueHasItems: true,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
+  paused: false,
   nowPlayingCoverFailed: true,
   playButtonTitle: ""
 };
 
 export const Paused = Template.bind({});
 Paused.args = {
-  isPlaying: false,
+  showSignalPath: false,
   canTogglePlayback: true,
-  showPlayIcon: true,
   queueHasItems: true,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
+  paused: true,
   nowPlayingCoverFailed: true,
   playButtonTitle: ""
 };
 
 export const NothingPlaying = Template.bind({});
 NothingPlaying.args = {
-  isPlaying: false,
+  showSignalPath: false,
   canTogglePlayback: false,
-  showPlayIcon: true,
   queueHasItems: false,
   activeAlbumId: 0,
   hasOutput: true,
   hasStatus: false,
+  paused: false,
   nowPlayingCoverFailed: true,
   playButtonTitle: "Select a track to play."
 };
 
 export const NoNextTrack = Template.bind({});
 NoNextTrack.args = {
-  isPlaying: true,
+  showSignalPath: true,
   canTogglePlayback: true,
-  showPlayIcon: false,
   queueHasItems: false,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
+  paused: false,
   nowPlayingCoverFailed: true,
   playButtonTitle: ""
 };
 
 export const NoOutputSelected = Template.bind({});
 NoOutputSelected.args = {
-  isPlaying: true,
+  showSignalPath: true,
   canTogglePlayback: false,
-  showPlayIcon: false,
   queueHasItems: false,
   activeAlbumId: 1,
   hasOutput: false,
   hasStatus: true,
+  paused: false,
   nowPlayingCoverFailed: true,
   playButtonTitle: "Select an output to control playback."
 };

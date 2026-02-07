@@ -571,6 +571,63 @@ p {
   background: var(--bg-accent);
 }
 
+.album-track-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.track-play-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  padding: 0;
+  align-self: center;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.track-play-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.track-index {
+  font-size: 16px;
+  font-weight: 600;
+  transition: opacity 120ms ease;
+  grid-area: 1 / 1;
+}
+
+.track-play-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  grid-area: 1 / 1;
+}
+
+.album-track-row:hover .track-play-icon {
+  opacity: 1;
+}
+
+.album-track-row:hover .track-index {
+  opacity: 0;
+}
+
+.track-play-btn:hover {
+  background: transparent;
+}
+
+.track-play-btn:hover .track-play-icon {
+  color: var(--accent);
+}
+
 .album-track-title {
   font-weight: 600;
 }
@@ -740,10 +797,27 @@ p {
   gap: 12px;
   border-bottom: 1px solid var(--border);
   padding-bottom: 10px;
+  align-items: center;
 }
 
 .queue-row:last-child {
   border-bottom: none;
+}
+
+.queue-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.queue-cover {
+  width: 36px;
+  height: 36px;
+  border-radius: 0;
+  object-fit: cover;
+  background: var(--bg-accent);
+  flex-shrink: 0;
 }
 
 .queue-title {
@@ -1108,6 +1182,37 @@ p {
   padding: 20px 22px;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
+}
+
+.side-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 18, 18, 0.35);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 5;
+}
+
+.side-panel {
+  width: min(420px, 100%);
+  height: 100%;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+  overflow: auto;
+  animation: slide-in 180ms ease;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 @media (max-width: 720px) {
