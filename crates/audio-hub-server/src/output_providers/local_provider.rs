@@ -483,6 +483,7 @@ mod tests {
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
+            Arc::new(crate::events::LogBus::new(64)),
         )
     }
 

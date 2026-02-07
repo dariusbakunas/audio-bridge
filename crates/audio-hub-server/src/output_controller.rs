@@ -496,6 +496,7 @@ mod tests {
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
+            Arc::new(crate::events::LogBus::new(64)),
         )
     }
 
@@ -562,6 +563,7 @@ mod tests {
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
+            Arc::new(crate::events::LogBus::new(64)),
         );
         (state, root)
     }
@@ -702,6 +704,7 @@ mod tests {
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
+            Arc::new(crate::events::LogBus::new(64)),
         );
         let provider = MockProvider {
             active_output_id: "bridge:test:device".to_string(),
