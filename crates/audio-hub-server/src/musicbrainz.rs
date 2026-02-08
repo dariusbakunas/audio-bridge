@@ -94,10 +94,33 @@ impl MusicBrainzClient {
         album: Option<&str>,
     ) -> Result<MusicBrainzLookup> {
         let query = build_query(title, artist, album);
-        let best = self.search_best_recording(&query)?;
+        let mut best = self.search_best_recording(&query)?;
+        let mut query_label = query.clone();
+
+        if best.as_ref().map(|rec| rec.score.unwrap_or(0) < MIN_MATCH_SCORE).unwrap_or(true) {
+            if let Some((fallback_title, fallback_album)) = fallback_parts(title, album) {
+                let fallback_query = build_query(&fallback_title, artist, fallback_album.as_deref());
+                if fallback_query != query {
+                    let fallback_best = self.search_best_recording(&fallback_query)?;
+                    let fallback_score = fallback_best.as_ref().map(|rec| rec.score.unwrap_or(0));
+                    if let Some(score) = fallback_score {
+                        if score >= MIN_MATCH_SCORE {
+                            best = fallback_best;
+                            query_label = fallback_query;
+                        } else {
+                            best = select_best_recording(best, fallback_best);
+                            query_label = format!("{query} | fallback: {fallback_query}");
+                        }
+                    } else if best.is_none() {
+                        query_label = format!("{query} | fallback: {fallback_query}");
+                    }
+                }
+            }
+        }
+
         let Some(best) = best else {
             return Ok(MusicBrainzLookup::NoMatch {
-                query,
+                query: query_label,
                 top_score: None,
                 best_recording_id: None,
                 best_recording_title: None,
@@ -105,7 +128,7 @@ impl MusicBrainzClient {
         };
         if best.score.unwrap_or(0) < MIN_MATCH_SCORE {
             return Ok(MusicBrainzLookup::NoMatch {
-                query,
+                query: query_label,
                 top_score: best.score,
                 best_recording_id: Some(best.id.clone()),
                 best_recording_title: Some(best.title.clone()),
@@ -218,6 +241,20 @@ impl MusicBrainzClient {
             .collect::<Vec<_>>();
 
         results.sort_by(|a, b| b.score.unwrap_or(0).cmp(&a.score.unwrap_or(0)));
+        if results.is_empty() {
+            if let Some((fallback_title, fallback_album)) = fallback_parts(title, album) {
+                let fallback_query =
+                    build_query(&fallback_title, artist, fallback_album.as_deref());
+                if fallback_query != query {
+                    return self.search_recordings(
+                        &fallback_title,
+                        artist,
+                        fallback_album.as_deref(),
+                        limit,
+                    );
+                }
+            }
+        }
         Ok(results)
     }
 
@@ -269,6 +306,14 @@ impl MusicBrainzClient {
             .collect::<Vec<_>>();
 
         results.sort_by(|a, b| b.score.unwrap_or(0).cmp(&a.score.unwrap_or(0)));
+        if results.is_empty() {
+            if let Some(fallback_title) = strip_parenthetical(title) {
+                let fallback_query = build_release_query(&fallback_title, artist);
+                if fallback_query != query {
+                    return self.search_releases(&fallback_title, artist, limit);
+                }
+            }
+        }
         Ok(results)
     }
 
@@ -486,6 +531,91 @@ fn escape_query(raw: &str) -> String {
     raw.replace('"', "\\\"")
 }
 
+fn strip_parenthetical(raw: &str) -> Option<String> {
+    let mut out = String::with_capacity(raw.len());
+    let mut depth = 0usize;
+    let mut prev_space = false;
+    for ch in raw.chars() {
+        match ch {
+            '(' | '[' | '{' => {
+                depth = depth.saturating_add(1);
+            }
+            ')' | ']' | '}' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ => {
+                if depth == 0 {
+                    if ch.is_whitespace() {
+                        if !prev_space {
+                            out.push(' ');
+                            prev_space = true;
+                        }
+                    } else {
+                        out.push(ch);
+                        prev_space = false;
+                    }
+                }
+            }
+        }
+    }
+    let cleaned = out.trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+    let without_suffix = strip_suffix_after_dash(cleaned);
+    if without_suffix.eq_ignore_ascii_case(raw.trim()) {
+        None
+    } else {
+        Some(without_suffix)
+    }
+}
+
+fn strip_suffix_after_dash(value: &str) -> String {
+    if let Some((left, _)) = value.split_once(" - ") {
+        let trimmed = left.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    value.trim().to_string()
+}
+
+fn fallback_parts(title: &str, album: Option<&str>) -> Option<(String, Option<String>)> {
+    let title_fallback = strip_parenthetical(title);
+    let album_fallback = album.and_then(strip_parenthetical);
+    if title_fallback.is_none() && album_fallback.is_none() {
+        return None;
+    }
+    let title = title_fallback.unwrap_or_else(|| title.trim().to_string());
+    let album = album
+        .map(|value| {
+            album_fallback
+                .unwrap_or_else(|| value.trim().to_string())
+        })
+        .filter(|value| !value.is_empty());
+    Some((title, album))
+}
+
+fn select_best_recording(
+    left: Option<RecordingResult>,
+    right: Option<RecordingResult>,
+) -> Option<RecordingResult> {
+    match (left, right) {
+        (Some(a), Some(b)) => {
+            if a.score.unwrap_or(0) >= b.score.unwrap_or(0) {
+                Some(a)
+            } else {
+                Some(b)
+            }
+        }
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 fn parse_year(raw: &str) -> Option<i32> {
     raw.split('-').next()?.trim().parse::<i32>().ok()
 }
@@ -582,5 +712,23 @@ mod tests {
     #[test]
     fn parse_year_handles_full_date() {
         assert_eq!(parse_year("1999-04-01"), Some(1999));
+    }
+
+    #[test]
+    fn strip_parenthetical_removes_suffix() {
+        let stripped = strip_parenthetical("Hunting High and Low (2015 Remaster)");
+        assert_eq!(stripped.as_deref(), Some("Hunting High and Low"));
+    }
+
+    #[test]
+    fn strip_parenthetical_removes_dash_suffix() {
+        let stripped = strip_parenthetical("One Assassination Under God - Chapter 1");
+        assert_eq!(stripped.as_deref(), Some("One Assassination Under God"));
+    }
+
+    #[test]
+    fn strip_parenthetical_removes_brackets() {
+        let stripped = strip_parenthetical("Album Title [Deluxe Edition]");
+        assert_eq!(stripped.as_deref(), Some("Album Title"));
     }
 }

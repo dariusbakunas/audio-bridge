@@ -561,6 +561,16 @@ p {
   gap: 12px;
 }
 
+.album-track-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.album-disc-header {
+  margin: 6px 0 2px;
+}
+
 .album-track-row {
   display: flex;
   align-items: center;

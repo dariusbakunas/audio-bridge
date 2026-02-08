@@ -263,10 +263,7 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
         state.metadata_wake.clone(),
     );
     tracing::info!(root = %root.display(), "rescan requested");
-    if let Err(err) = metadata_service.clear_library() {
-        tracing::warn!(error = %err, "metadata clear failed");
-    }
-    match metadata_service.scan_library(true) {
+    match metadata_service.rescan_library(true) {
         Ok(new_index) => {
             *state.library.write().unwrap() = new_index;
             state.events.library_changed();

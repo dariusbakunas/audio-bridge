@@ -996,6 +996,13 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    pub fn list_all_track_paths(&self) -> Result<Vec<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let mut stmt = conn.prepare("SELECT path FROM tracks")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
     pub fn update_album_metadata(
         &self,
         album_id: i64,

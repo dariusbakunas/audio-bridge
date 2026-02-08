@@ -128,46 +128,56 @@ export default function AlbumDetailView({
           {error ? <p className="muted">{error}</p> : null}
           {!loading && !error ? (
             <div className="album-tracks">
-              {tracks.map((track) => {
+              {tracks.map((track, index) => {
+                const prevDisc = index > 0 ? tracks[index - 1]?.disc_number ?? null : null;
+                const disc = track.disc_number ?? null;
+                const showDiscHeader = disc !== null && disc !== prevDisc;
                 const menuOpen = trackMenuPath === track.path;
                 const menuStyle = menuOpen && trackMenuPosition
                   ? { top: trackMenuPosition.top, right: trackMenuPosition.right }
                   : undefined;
                 return (
-                  <div key={track.id} className="album-track-row">
-                    <div className="album-track-main">
-                      <button
-                        className="track-play-btn"
-                        type="button"
-                        onClick={() => onPlayTrack(track)}
-                        disabled={!canPlay}
-                        aria-label={`Play ${track.title ?? track.file_name}`}
-                        title="Play track"
-                      >
-                        <span className="track-index">{track.track_number ?? ""}</span>
-                        <svg className="track-play-icon" viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
-                        </svg>
-                      </button>
-                      <div>
-                        <div className="album-track-title">{track.title ?? track.file_name}</div>
-                        <div className="muted small">{track.artist ?? "Unknown artist"}</div>
+                  <div key={track.id} className="album-track-block">
+                    {showDiscHeader ? (
+                      <div className="album-disc-header">
+                        <span className="pill small">Disc {disc}</span>
                       </div>
-                    </div>
-                    <div className="album-track-actions">
-                      <span className="muted small">{formatMs(track.duration_ms)}</span>
-                      <TrackMenu
-                        open={menuOpen}
-                        canPlay={canPlay}
-                        menuStyle={menuStyle}
-                        onToggle={(event) => onToggleMenu(track.path, event.currentTarget)}
-                        onPlay={() => onMenuPlay(track.path)}
-                        onQueue={() => onMenuQueue(track.path)}
-                        onPlayNext={() => onMenuPlayNext(track.path)}
-                        onFixMatch={() => onFixTrackMatch(track.path)}
-                        onEditMetadata={() => onEditTrackMetadata(track.path)}
-                        onRescan={() => onMenuRescan(track.path)}
-                      />
+                    ) : null}
+                    <div className="album-track-row">
+                      <div className="album-track-main">
+                        <button
+                          className="track-play-btn"
+                          type="button"
+                          onClick={() => onPlayTrack(track)}
+                          disabled={!canPlay}
+                          aria-label={`Play ${track.title ?? track.file_name}`}
+                          title="Play track"
+                        >
+                          <span className="track-index">{track.track_number ?? ""}</span>
+                          <svg className="track-play-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
+                          </svg>
+                        </button>
+                        <div>
+                          <div className="album-track-title">{track.title ?? track.file_name}</div>
+                          <div className="muted small">{track.artist ?? "Unknown artist"}</div>
+                        </div>
+                      </div>
+                      <div className="album-track-actions">
+                        <span className="muted small">{formatMs(track.duration_ms)}</span>
+                        <TrackMenu
+                          open={menuOpen}
+                          canPlay={canPlay}
+                          menuStyle={menuStyle}
+                          onToggle={(event) => onToggleMenu(track.path, event.currentTarget)}
+                          onPlay={() => onMenuPlay(track.path)}
+                          onQueue={() => onMenuQueue(track.path)}
+                          onPlayNext={() => onMenuPlayNext(track.path)}
+                          onFixMatch={() => onFixTrackMatch(track.path)}
+                          onEditMetadata={() => onEditTrackMetadata(track.path)}
+                          onRescan={() => onMenuRescan(track.path)}
+                        />
+                      </div>
                     </div>
                   </div>
                 );

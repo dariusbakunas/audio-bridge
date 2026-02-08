@@ -86,13 +86,29 @@ impl MetadataService {
         library: &RwLock<LibraryIndex>,
         full_path: &Path,
     ) -> Result<(), HttpResponse> {
-        let meta = match probe_track(full_path) {
-            Ok(meta) => meta,
-            Err(err) => return Err(HttpResponse::BadRequest().body(err.to_string())),
-        };
         let fs_meta = match std::fs::metadata(full_path) {
             Ok(meta) => meta,
             Err(_) => return Err(HttpResponse::NotFound().finish()),
+        };
+        let mtime_ms = fs_meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let size_bytes = fs_meta.len() as i64;
+        if let Ok(Some(existing)) = self.db.track_record_by_path(&full_path.to_string_lossy()) {
+            if existing.mtime_ms == mtime_ms && existing.size_bytes == size_bytes {
+                if let Ok(index) = library.read() {
+                    if index.find_track_by_path(full_path).is_some() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        let meta = match probe_track(full_path) {
+            Ok(meta) => meta,
+            Err(err) => return Err(HttpResponse::BadRequest().body(err.to_string())),
         };
         let file_name = full_path
             .file_name()
@@ -169,6 +185,50 @@ impl MetadataService {
             .map_err(|err| err.to_string())
     }
 
+    pub fn rescan_library(&self, emit_events: bool) -> Result<LibraryIndex> {
+        let (index, seen_paths) = self.scan_library_with_paths(emit_events)?;
+        let existing = self.db.list_all_track_paths()?;
+        for path in existing {
+            if !seen_paths.contains(path.as_str()) {
+                let _ = self.db.delete_track_by_path(&path);
+            }
+        }
+        self.db.prune_orphaned_albums_and_artists()?;
+        Ok(index)
+    }
+
+    fn scan_library_with_paths(
+        &self,
+        emit_events: bool,
+    ) -> Result<(LibraryIndex, std::collections::HashSet<String>)> {
+        let mut seen = std::collections::HashSet::new();
+        let index = scan_library_with_meta(
+            &self.root,
+            |path, file_name, _ext, meta, fs_meta| {
+                seen.insert(path.to_string_lossy().to_string());
+                let record = Self::build_track_record(path, file_name, meta, fs_meta);
+                if let Err(err) = self.upsert_track_record(path, meta, &record) {
+                    tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
+                }
+            },
+            |dir, count| {
+                if !emit_events {
+                    return;
+                }
+                let path = dir.to_string_lossy().to_string();
+                if count == 0 {
+                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumStart { path });
+                } else {
+                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumFinish {
+                        path,
+                        tracks: count,
+                    });
+                }
+            },
+        )?;
+        Ok((index, seen))
+    }
+
     pub fn remove_track_by_path(
         &self,
         library: &RwLock<LibraryIndex>,
@@ -204,29 +264,8 @@ impl MetadataService {
     }
 
     pub fn scan_library(&self, emit_events: bool) -> Result<LibraryIndex> {
-        scan_library_with_meta(
-            &self.root,
-            |path, file_name, _ext, meta, fs_meta| {
-                let record = Self::build_track_record(path, file_name, meta, fs_meta);
-                if let Err(err) = self.upsert_track_record(path, meta, &record) {
-                    tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
-                }
-            },
-            |dir, count| {
-                if !emit_events {
-                    return;
-                }
-                let path = dir.to_string_lossy().to_string();
-                if count == 0 {
-                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumStart { path });
-                } else {
-                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumFinish {
-                        path,
-                        tracks: count,
-                    });
-                }
-            },
-        )
+        let (index, _) = self.scan_library_with_paths(emit_events)?;
+        Ok(index)
     }
 
     pub fn resolve_track_path(root: &Path, raw_path: &str) -> Result<PathBuf, HttpResponse> {
