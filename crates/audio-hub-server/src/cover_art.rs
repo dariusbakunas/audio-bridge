@@ -31,41 +31,57 @@ const CAA_BASE_URL: &str = "https://coverartarchive.org/release";
 const CAA_RATE_LIMIT_MS: u64 = 1000;
 const MAX_COVER_BYTES: usize = 5_000_000;
 
-pub fn apply_cover_art(
-    db: &MetadataDb,
-    root: &Path,
-    track_path: &Path,
-    meta: &TrackMeta,
-    record: &TrackRecord,
-) -> Result<()> {
-    let Some(album) = record.album.as_deref() else {
-        return Ok(());
-    };
-    let artist = record.album_artist.as_deref().or(record.artist.as_deref());
-    if db.album_cover_path(album, artist)?.is_some() {
-        return Ok(());
+#[derive(Clone)]
+pub struct CoverArtResolver {
+    db: MetadataDb,
+    store: CoverArtStore,
+}
+
+impl CoverArtResolver {
+    pub fn new(db: MetadataDb, root: PathBuf) -> Self {
+        Self {
+            db,
+            store: CoverArtStore::new(root),
+        }
     }
 
-    let cover = if let Some(cover) = meta.cover_art.as_ref() {
-        Some(cover.clone())
-    } else {
-        read_folder_cover(track_path.parent())?
-    };
-    let Some(cover) = cover else {
-        return Ok(());
-    };
+    pub fn apply_for_track(
+        &self,
+        track_path: &Path,
+        meta: &TrackMeta,
+        record: &TrackRecord,
+    ) -> Result<()> {
+        let Some(album) = record.album.as_deref() else {
+            return Ok(());
+        };
+        let artist = record.album_artist.as_deref().or(record.artist.as_deref());
+        if self.db.album_cover_path(album, artist)?.is_some() {
+            return Ok(());
+        }
 
-    let hint = match artist {
-        Some(artist) => format!("{}-{}", artist, album),
-        None => album.to_string(),
-    };
-    if let Some(existing) = find_cached_cover(root, &hint) {
-        let _ = db.set_album_cover_if_empty(album, artist, &existing)?;
-        return Ok(());
+        let cover = if let Some(cover) = meta.cover_art.as_ref() {
+            Some(cover.clone())
+        } else {
+            read_folder_cover(track_path.parent())?
+        };
+        let Some(cover) = cover else {
+            return Ok(());
+        };
+
+        let hint = match artist {
+            Some(artist) => format!("{}-{}", artist, album),
+            None => album.to_string(),
+        };
+        if let Some(existing) = self.store.find_cached_cover(&hint) {
+            let _ = self.db.set_album_cover_if_empty(album, artist, &existing)?;
+            return Ok(());
+        }
+        let relative_path = self
+            .store
+            .store_cover_art(&hint, &cover.mime_type, &cover.data)?;
+        let _ = self.db.set_album_cover_if_empty(album, artist, &relative_path)?;
+        Ok(())
     }
-    let relative_path = store_cover_art(root, &hint, &cover.mime_type, &cover.data)?;
-    let _ = db.set_album_cover_if_empty(album, artist, &relative_path)?;
-    Ok(())
 }
 
 fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
@@ -88,41 +104,51 @@ fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
     Ok(None)
 }
 
-fn find_cached_cover(root: &Path, hint: &str) -> Option<String> {
-    let slug = slugify(hint);
-    let art_dir = root.join(COVER_CACHE_DIR);
-    let entries = fs::read_dir(&art_dir).ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with(&format!("{slug}-")) {
-            let relative = PathBuf::from(COVER_CACHE_DIR).join(name);
-            return Some(relative.to_string_lossy().to_string());
-        }
-    }
-    None
+#[derive(Clone)]
+struct CoverArtStore {
+    root: PathBuf,
 }
 
-pub fn store_cover_art(
-    root: &Path,
-    hint: &str,
-    mime_type: &str,
-    data: &[u8],
-) -> Result<String> {
-    let art_dir = root.join(COVER_CACHE_DIR);
-    std::fs::create_dir_all(&art_dir)
-        .with_context(|| format!("create cover cache {:?}", art_dir))?;
-
-    let ext = extension_for_mime(mime_type).unwrap_or("bin");
-    let slug = slugify(hint);
-    let hash = hash_bytes(data);
-    let filename = format!("{}-{:016x}.{}", slug, hash, ext);
-    let relative = PathBuf::from(COVER_CACHE_DIR).join(&filename);
-    let full = root.join(&relative);
-    if !full.exists() {
-        std::fs::write(&full, data)
-            .with_context(|| format!("write cover art {:?}", full))?;
+impl CoverArtStore {
+    fn new(root: PathBuf) -> Self {
+        Self { root }
     }
-    Ok(relative.to_string_lossy().to_string())
+
+    fn cache_dir(&self) -> PathBuf {
+        self.root.join(COVER_CACHE_DIR)
+    }
+
+    fn find_cached_cover(&self, hint: &str) -> Option<String> {
+        let slug = slugify(hint);
+        let art_dir = self.cache_dir();
+        let entries = fs::read_dir(&art_dir).ok()?;
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(&format!("{slug}-")) {
+                let relative = PathBuf::from(COVER_CACHE_DIR).join(name);
+                return Some(relative.to_string_lossy().to_string());
+            }
+        }
+        None
+    }
+
+    fn store_cover_art(&self, hint: &str, mime_type: &str, data: &[u8]) -> Result<String> {
+        let art_dir = self.cache_dir();
+        std::fs::create_dir_all(&art_dir)
+            .with_context(|| format!("create cover cache {:?}", art_dir))?;
+
+        let ext = extension_for_mime(mime_type).unwrap_or("bin");
+        let slug = slugify(hint);
+        let hash = hash_bytes(data);
+        let filename = format!("{}-{:016x}.{}", slug, hash, ext);
+        let relative = PathBuf::from(COVER_CACHE_DIR).join(&filename);
+        let full = self.root.join(&relative);
+        if !full.exists() {
+            std::fs::write(&full, data)
+                .with_context(|| format!("write cover art {:?}", full))?;
+        }
+        Ok(relative.to_string_lossy().to_string())
+    }
 }
 
 fn extension_for_mime(mime: &str) -> Option<&'static str> {
@@ -179,55 +205,75 @@ fn hash_bytes(data: &[u8]) -> u64 {
     hasher.finish()
 }
 
-pub fn spawn_caa_loop(
+pub struct CoverArtFetcher {
     db: MetadataDb,
-    root: PathBuf,
+    store: CoverArtStore,
     user_agent: String,
     events: EventBus,
     wake: MetadataWake,
-) {
-    std::thread::spawn(move || {
-        let client = CoverArtClient::new(&user_agent);
-        let mut wake_seq = 0u64;
-        loop {
-            match db.list_cover_art_candidates(25) {
-                Ok(candidates) => {
-                    if !candidates.is_empty() {
-                        tracing::info!(
-                            count = candidates.len(),
-                            "cover art candidates fetched"
-                        );
-                        events.metadata_event(MetadataEvent::CoverArtBatch {
-                            count: candidates.len(),
-                        });
-                    }
-                    if candidates.is_empty() {
-                        wake.wait(&mut wake_seq);
-                        continue;
-                    }
-                    for candidate in candidates {
-                        if let Err(err) = fetch_and_store_cover(
-                            &db,
-                            &root,
-                            &client,
-                            &events,
-                            &candidate,
-                        ) {
-                            tracing::warn!(
-                                error = %err,
-                                album_id = candidate.album_id,
-                                "cover art fetch failed"
+}
+
+impl CoverArtFetcher {
+    pub fn new(
+        db: MetadataDb,
+        root: PathBuf,
+        user_agent: String,
+        events: EventBus,
+        wake: MetadataWake,
+    ) -> Self {
+        Self {
+            db,
+            store: CoverArtStore::new(root),
+            user_agent,
+            events,
+            wake,
+        }
+    }
+
+    pub fn spawn(self) {
+        std::thread::spawn(move || {
+            let client = CoverArtClient::new(&self.user_agent);
+            let mut wake_seq = 0u64;
+            loop {
+                match self.db.list_cover_art_candidates(25) {
+                    Ok(candidates) => {
+                        if !candidates.is_empty() {
+                            tracing::info!(
+                                count = candidates.len(),
+                                "cover art candidates fetched"
                             );
+                            self.events.metadata_event(MetadataEvent::CoverArtBatch {
+                                count: candidates.len(),
+                            });
+                        }
+                        if candidates.is_empty() {
+                            self.wake.wait(&mut wake_seq);
+                            continue;
+                        }
+                        for candidate in candidates {
+                            if let Err(err) = fetch_and_store_cover(
+                                &self.db,
+                                &self.store,
+                                &client,
+                                &self.events,
+                                &candidate,
+                            ) {
+                                tracing::warn!(
+                                    error = %err,
+                                    album_id = candidate.album_id,
+                                    "cover art fetch failed"
+                                );
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "cover art candidate query failed");
-                    std::thread::sleep(Duration::from_secs(10));
+                    Err(err) => {
+                        tracing::warn!(error = %err, "cover art candidate query failed");
+                        std::thread::sleep(Duration::from_secs(10));
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 struct CoverArtClient {
@@ -285,7 +331,7 @@ impl CoverArtClient {
 
 fn fetch_and_store_cover(
     db: &MetadataDb,
-    root: &Path,
+    store: &CoverArtStore,
     client: &CoverArtClient,
     events: &EventBus,
     candidate: &CoverArtCandidate,
@@ -347,7 +393,7 @@ fn fetch_and_store_cover(
         return Ok(());
     }
     let hint = format!("album-{}", candidate.album_id);
-    let relative_path = store_cover_art(root, &hint, &mime_type, &data)?;
+    let relative_path = store.store_cover_art(&hint, &mime_type, &data)?;
     let updated = db.set_album_cover_by_id_if_empty(candidate.album_id, &relative_path)?;
     if updated {
         tracing::info!(

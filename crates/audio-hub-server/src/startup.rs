@@ -22,7 +22,7 @@ use crate::api;
 use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_manager::parse_output_id;
 use crate::config;
-use crate::cover_art::{apply_cover_art, spawn_caa_loop};
+use crate::cover_art::{CoverArtFetcher, CoverArtResolver};
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
 use crate::library::scan_library_with_meta;
 use crate::metadata_db::MetadataDb;
@@ -61,6 +61,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     } else {
         tracing::info!("musicbrainz enrichment disabled");
     }
+    let cover_art = CoverArtResolver::new(metadata_db.clone(), media_dir.clone());
     let library = scan_library_with_meta(&media_dir, |path, file_name, _ext, meta, fs_meta| {
         let record = crate::metadata_db::TrackRecord {
             path: path.to_string_lossy().to_string(),
@@ -86,7 +87,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         if let Err(err) = metadata_db.upsert_track(&record) {
             tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
         }
-        if let Err(err) = apply_cover_art(&metadata_db, &media_dir, path, meta, &record) {
+        if let Err(err) = cover_art.apply_for_track(path, meta, &record) {
             tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
         }
     }, |_dir, _count| {})?;
@@ -198,13 +199,14 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             state.events.clone(),
             metadata_wake.clone(),
         );
-        spawn_caa_loop(
+        CoverArtFetcher::new(
             state.metadata_db.clone(),
             state.library.read().unwrap().root().to_path_buf(),
             client.user_agent().to_string(),
             state.events.clone(),
             metadata_wake.clone(),
-        );
+        )
+        .spawn();
     }
     setup_shutdown(state.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
@@ -244,6 +246,10 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::albums_list)
             .service(api::tracks_list)
             .service(api::tracks_resolve)
+            .service(api::tracks_metadata)
+            .service(api::tracks_metadata_update)
+            .service(api::albums_metadata)
+            .service(api::albums_metadata_update)
             .service(api::musicbrainz_match_search)
             .service(api::musicbrainz_match_apply)
             .service(api::art_for_track)

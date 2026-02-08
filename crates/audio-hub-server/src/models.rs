@@ -157,6 +157,66 @@ pub struct TrackResolveResponse {
     pub album_id: Option<i64>,
 }
 
+/// Current metadata fields for a track path.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackMetadataResponse {
+    /// Absolute track path.
+    pub path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub year: Option<i32>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+}
+
+/// Update request for writing tag metadata to a track file.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackMetadataUpdateRequest {
+    /// Absolute track path.
+    pub path: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub album_artist: Option<String>,
+    #[serde(default)]
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub track_number: Option<u32>,
+    #[serde(default)]
+    pub disc_number: Option<u32>,
+}
+
+/// Current metadata fields for an album.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumMetadataResponse {
+    /// Album id from the metadata DB.
+    pub album_id: i64,
+    pub title: Option<String>,
+    pub album_artist: Option<String>,
+    pub year: Option<i32>,
+}
+
+/// Update request for writing album metadata to all tracks.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumMetadataUpdateRequest {
+    /// Album id from the metadata DB.
+    pub album_id: i64,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub album_artist: Option<String>,
+    #[serde(default)]
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub track_artist: Option<String>,
+}
+
 /// Payload to apply a MusicBrainz match to a track or album.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]

@@ -121,6 +121,24 @@ export interface TrackResolveResponse {
   album_id?: number | null;
 }
 
+export interface TrackMetadataResponse {
+  path: string;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  album_artist?: string | null;
+  year?: number | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+}
+
+export interface AlbumMetadataResponse {
+  album_id: number;
+  title?: string | null;
+  album_artist?: string | null;
+  year?: number | null;
+}
+
 export type MusicBrainzMatchKind = "track" | "album";
 
 export interface MusicBrainzMatchCandidate {

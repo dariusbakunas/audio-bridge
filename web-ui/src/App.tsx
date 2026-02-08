@@ -15,9 +15,11 @@ import {
   TrackSummary
 } from "./types";
 import AlbumDetailView from "./components/AlbumDetailView";
+import AlbumMetadataModal from "./components/AlbumMetadataModal";
 import AlbumsView from "./components/AlbumsView";
 import FoldersView from "./components/FoldersView";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
+import TrackMetadataModal from "./components/TrackMetadataModal";
 import OutputsModal from "./components/OutputsModal";
 import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
@@ -57,6 +59,30 @@ type MatchTarget =
       title: string;
       artist: string;
     };
+
+type EditTarget = {
+  path: string;
+  label: string;
+  defaults: {
+    title?: string | null;
+    artist?: string | null;
+    album?: string | null;
+    albumArtist?: string | null;
+    year?: number | null;
+    trackNumber?: number | null;
+    discNumber?: number | null;
+  };
+};
+
+type AlbumEditTarget = {
+  albumId: number;
+  label: string;
+  defaults: {
+    title?: string | null;
+    albumArtist?: string | null;
+    year?: number | null;
+  };
+};
 
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
@@ -227,6 +253,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
 
@@ -391,6 +419,67 @@ export default function App() {
     });
   }, [selectedAlbum]);
 
+  const openAlbumEditor = useCallback(() => {
+    if (!selectedAlbum) return;
+    const label = selectedAlbum.artist
+      ? `${selectedAlbum.title} — ${selectedAlbum.artist}`
+      : selectedAlbum.title;
+    setAlbumEditTarget({
+      albumId: selectedAlbum.id,
+      label,
+      defaults: {
+        title: selectedAlbum.title,
+        albumArtist: selectedAlbum.artist ?? null,
+        year: selectedAlbum.year ?? null
+      }
+    });
+  }, [selectedAlbum]);
+
+  const openTrackEditorForLibrary = useCallback(
+    (path: string) => {
+      const entry = libraryEntries.find(
+        (item) => item.kind === "track" && item.path === path
+      );
+      const title = entry && entry.kind === "track" ? entry.file_name : path;
+      const artist = entry && entry.kind === "track" ? entry.artist ?? "" : "";
+      const album = entry && entry.kind === "track" ? entry.album ?? "" : "";
+      const label = artist ? `${title} — ${artist}` : title;
+      setEditTarget({
+        path,
+        label,
+        defaults: {
+          title,
+          artist,
+          album
+        }
+      });
+    },
+    [libraryEntries]
+  );
+
+  const openTrackEditorForAlbum = useCallback(
+    (path: string) => {
+      const track = albumTracks.find((item) => item.path === path);
+      const title = track?.title ?? track?.file_name ?? path;
+      const artist = track?.artist ?? "";
+      const album = track?.album ?? selectedAlbum?.title ?? "";
+      const label = artist ? `${title} — ${artist}` : title;
+      setEditTarget({
+        path,
+        label,
+        defaults: {
+          title,
+          artist,
+          album,
+          albumArtist: selectedAlbum?.artist ?? null,
+          trackNumber: track?.track_number ?? null,
+          discNumber: track?.disc_number ?? null
+        }
+      });
+    },
+    [albumTracks, selectedAlbum]
+  );
+
   const matchLabel = matchTarget
     ? `${matchTarget.title}${matchTarget.artist ? ` — ${matchTarget.artist}` : ""}`
     : "";
@@ -401,6 +490,10 @@ export default function App() {
         album: matchTarget.kind === "track" ? matchTarget.album ?? "" : ""
       }
     : { title: "", artist: "", album: "" };
+  const editLabel = editTarget?.label ?? "";
+  const editDefaults = editTarget?.defaults ?? {};
+  const albumEditLabel = albumEditTarget?.label ?? "";
+  const albumEditDefaults = albumEditTarget?.defaults ?? {};
 
   const applyViewState = useCallback((state: ViewState) => {
     applyingHistoryRef.current = true;
@@ -630,31 +723,31 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [outputsOpen]);
 
-  useEffect(() => {
-    let mounted = true;
-    async function loadLibrary(dir?: string | null) {
+  const loadLibrary = useCallback(
+    async (dir?: string | null, keepSelection = false) => {
       setLibraryLoading(true);
       try {
         const query = dir ? `?dir=${encodeURIComponent(dir)}` : "";
         const response = await fetchJson<LibraryResponse>(`/library${query}`);
-        if (!mounted) return;
         setLibraryDir(response.dir);
         setLibraryEntries(sortLibraryEntries(response.entries));
-        setSelectedTrackPath(null);
-        closeTrackMenu();
+        if (!keepSelection) {
+          setSelectedTrackPath(null);
+          closeTrackMenu();
+        }
         setError(null);
       } catch (err) {
-        if (!mounted) return;
         setError((err as Error).message);
       } finally {
-        if (mounted) setLibraryLoading(false);
+        setLibraryLoading(false);
       }
-    }
+    },
+    [closeTrackMenu]
+  );
+
+  useEffect(() => {
     loadLibrary(libraryDir);
-    return () => {
-      mounted = false;
-    };
-  }, [libraryDir, closeTrackMenu]);
+  }, [libraryDir, loadLibrary]);
 
   const loadAlbums = useCallback(async () => {
     setAlbumsLoading(true);
@@ -690,30 +783,25 @@ export default function App() {
     };
   }, [loadAlbums]);
 
-  useEffect(() => {
-    if (albumViewId === null) return;
-    let mounted = true;
-    async function loadAlbumTracks() {
-      setAlbumTracksLoading(true);
-      try {
-        const response = await fetchJson<TrackListResponse>(
-          `/tracks?album_id=${albumViewId}&limit=500`
-        );
-        if (!mounted) return;
-        setAlbumTracks(response.items ?? []);
-        setAlbumTracksError(null);
-      } catch (err) {
-        if (!mounted) return;
-        setAlbumTracksError((err as Error).message);
-      } finally {
-        if (mounted) setAlbumTracksLoading(false);
-      }
+  const loadAlbumTracks = useCallback(async (albumId: number | null) => {
+    if (albumId === null) return;
+    setAlbumTracksLoading(true);
+    try {
+      const response = await fetchJson<TrackListResponse>(
+        `/tracks?album_id=${albumId}&limit=500`
+      );
+      setAlbumTracks(response.items ?? []);
+      setAlbumTracksError(null);
+    } catch (err) {
+      setAlbumTracksError((err as Error).message);
+    } finally {
+      setAlbumTracksLoading(false);
     }
-    loadAlbumTracks();
-    return () => {
-      mounted = false;
-    };
-  }, [albumViewId]);
+  }, []);
+
+  useEffect(() => {
+    loadAlbumTracks(albumViewId);
+  }, [albumViewId, loadAlbumTracks]);
 
   async function handlePrimaryAction() {
     if (status?.now_playing) {
@@ -887,6 +975,7 @@ export default function App() {
                   onPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
                   onRescanTrack={(path) => runTrackMenuAction(handleRescanTrack, path)}
                   onFixMatch={(path) => runTrackMenuAction(openTrackMatchForLibrary, path)}
+                  onEditMetadata={(path) => runTrackMenuAction(openTrackEditorForLibrary, path)}
                 />
               ) : null}
             </section>
@@ -916,6 +1005,10 @@ export default function App() {
               onMenuRescan={(path) => runTrackMenuAction(handleRescanTrack, path)}
               onFixAlbumMatch={openAlbumMatch}
               onFixTrackMatch={(path) => runTrackMenuAction(openTrackMatchForAlbum, path)}
+              onEditTrackMetadata={(path) =>
+                runTrackMenuAction(openTrackEditorForAlbum, path)
+              }
+              onEditAlbumMetadata={openAlbumEditor}
             />
           ) : null}
 
@@ -996,6 +1089,37 @@ export default function App() {
         trackPath={matchTarget?.kind === "track" ? matchTarget.path : null}
         albumId={matchTarget?.kind === "album" ? matchTarget.albumId : null}
         onClose={() => setMatchTarget(null)}
+      />
+
+      <TrackMetadataModal
+        open={Boolean(editTarget)}
+        trackPath={editTarget?.path ?? null}
+        targetLabel={editLabel}
+        defaults={editDefaults}
+        onClose={() => setEditTarget(null)}
+        onSaved={() => {
+          if (browserView === "library") {
+            loadLibrary(libraryDir, true);
+          }
+          if (albumViewId !== null) {
+            loadAlbumTracks(albumViewId);
+          }
+          loadAlbums();
+        }}
+      />
+
+      <AlbumMetadataModal
+        open={Boolean(albumEditTarget)}
+        albumId={albumEditTarget?.albumId ?? null}
+        targetLabel={albumEditLabel}
+        defaults={albumEditDefaults}
+        onClose={() => setAlbumEditTarget(null)}
+        onSaved={() => {
+          if (albumViewId !== null) {
+            loadAlbumTracks(albumViewId);
+          }
+          loadAlbums();
+        }}
       />
 
       <QueueModal

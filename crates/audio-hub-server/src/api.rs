@@ -3,7 +3,7 @@
 //! Defines the Actix routes for library, playback, queue, and output control.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use actix_files::NamedFile;
@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::time::{Duration, Interval, MissedTickBehavior};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::cover_art::apply_cover_art;
+use crate::cover_art::CoverArtResolver;
 use crate::library::{probe_track, scan_library_with_meta};
 use crate::musicbrainz::MusicBrainzMatch;
 use crate::models::{
@@ -41,10 +41,15 @@ use crate::models::{
     OutputSelectRequest,
     ProvidersResponse,
     TrackResolveResponse,
+    TrackMetadataResponse,
+    TrackMetadataUpdateRequest,
+    AlbumMetadataResponse,
+    AlbumMetadataUpdateRequest,
     TrackListResponse,
 };
 use crate::events::{HubEvent, LogEvent};
 use crate::state::AppState;
+use crate::tag_writer::{write_track_tags, TrackTagUpdate};
 
 /// Query parameters for library listing.
 #[derive(Deserialize, ToSchema)]
@@ -252,6 +257,7 @@ pub async fn stream_track(
 /// Trigger a full library rescan.
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
+    let cover_art = CoverArtResolver::new(state.metadata_db.clone(), root.clone());
     tracing::info!(root = %root.display(), "rescan requested");
     if let Err(err) = state.metadata_db.clear_library() {
         tracing::warn!(error = %err, "metadata clear failed");
@@ -281,7 +287,7 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
         if let Err(err) = state.metadata_db.upsert_track(&record) {
             tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
         }
-        if let Err(err) = apply_cover_art(&state.metadata_db, &root, path, meta, &record) {
+        if let Err(err) = cover_art.apply_for_track(path, meta, &record) {
             tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
         }
     }, |dir, count| {
@@ -312,41 +318,19 @@ pub struct RescanTrackRequest {
     pub path: String,
 }
 
-#[utoipa::path(
-    post,
-    path = "/library/rescan/track",
-    request_body = RescanTrackRequest,
-    responses(
-        (status = 200, description = "Track rescan completed"),
-        (status = 400, description = "Invalid path"),
-        (status = 404, description = "Track not found")
-    )
-)]
-#[post("/library/rescan/track")]
-/// Rescan metadata for a single track.
-pub async fn rescan_track(
-    state: web::Data<AppState>,
-    body: web::Json<RescanTrackRequest>,
-) -> impl Responder {
-    let root = state.library.read().unwrap().root().to_path_buf();
-    let raw_path = PathBuf::from(body.path.as_str());
-    let full_path = match raw_path.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return HttpResponse::NotFound().finish(),
-    };
-    if !full_path.starts_with(&root) {
-        return HttpResponse::BadRequest().body("path outside library root");
-    }
-    if !full_path.is_file() {
-        return HttpResponse::NotFound().finish();
-    }
-    let meta = match probe_track(&full_path) {
+fn rescan_track_inner(
+    state: &AppState,
+    root: &Path,
+    full_path: &Path,
+) -> Result<(), HttpResponse> {
+    let cover_art = CoverArtResolver::new(state.metadata_db.clone(), root.to_path_buf());
+    let meta = match probe_track(full_path) {
         Ok(meta) => meta,
-        Err(err) => return HttpResponse::BadRequest().body(err.to_string()),
+        Err(err) => return Err(HttpResponse::BadRequest().body(err.to_string())),
     };
-    let fs_meta = match std::fs::metadata(&full_path) {
+    let fs_meta = match std::fs::metadata(full_path) {
         Ok(meta) => meta,
-        Err(_) => return HttpResponse::NotFound().finish(),
+        Err(_) => return Err(HttpResponse::NotFound().finish()),
     };
     let record = crate::metadata_db::TrackRecord {
         path: full_path.to_string_lossy().to_string(),
@@ -375,16 +359,50 @@ pub async fn rescan_track(
     };
     let _ = state.metadata_db.clear_musicbrainz_no_match(&record.path);
     if let Err(err) = state.metadata_db.upsert_track(&record) {
-        return HttpResponse::InternalServerError().body(err.to_string());
+        return Err(HttpResponse::InternalServerError().body(err.to_string()));
     }
-    if let Err(err) = apply_cover_art(&state.metadata_db, &root, &full_path, &meta, &record) {
+    if let Err(err) = cover_art.apply_for_track(full_path, &meta, &record) {
         tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
     }
     if let Ok(mut index) = state.library.write() {
-        index.update_track_meta(&full_path, &meta);
+        index.update_track_meta(full_path, &meta);
     }
     state.events.library_changed();
     state.metadata_wake.notify();
+    Ok(())
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/rescan/track",
+    request_body = RescanTrackRequest,
+    responses(
+        (status = 200, description = "Track rescan completed"),
+        (status = 400, description = "Invalid path"),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[post("/library/rescan/track")]
+/// Rescan metadata for a single track.
+pub async fn rescan_track(
+    state: web::Data<AppState>,
+    body: web::Json<RescanTrackRequest>,
+) -> impl Responder {
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let raw_path = PathBuf::from(body.path.as_str());
+    let full_path = match raw_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    if !full_path.starts_with(&root) {
+        return HttpResponse::BadRequest().body("path outside library root");
+    }
+    if !full_path.is_file() {
+        return HttpResponse::NotFound().finish();
+    }
+    if let Err(response) = rescan_track_inner(state.get_ref(), &root, &full_path) {
+        return response;
+    }
     HttpResponse::Ok().finish()
 }
 
@@ -396,6 +414,16 @@ pub struct ArtQuery {
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct TrackResolveQuery {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct TrackMetadataQuery {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct AlbumMetadataQuery {
+    pub album_id: i64,
 }
 
 #[utoipa::path(
@@ -420,6 +448,234 @@ pub async fn tracks_resolve(
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/tracks/metadata",
+    params(TrackMetadataQuery),
+    responses(
+        (status = 200, description = "Track metadata", body = TrackMetadataResponse),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[get("/tracks/metadata")]
+/// Read cached metadata for a track path.
+pub async fn tracks_metadata(
+    state: web::Data<AppState>,
+    query: web::Query<TrackMetadataQuery>,
+) -> impl Responder {
+    match state.metadata_db.track_record_by_path(&query.path) {
+        Ok(Some(record)) => HttpResponse::Ok().json(TrackMetadataResponse {
+            path: record.path,
+            title: record.title,
+            artist: record.artist,
+            album: record.album,
+            album_artist: record.album_artist,
+            year: record.year,
+            track_number: record.track_number,
+            disc_number: record.disc_number,
+        }),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/tracks/metadata/update",
+    request_body = TrackMetadataUpdateRequest,
+    responses(
+        (status = 200, description = "Track metadata updated"),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[post("/tracks/metadata/update")]
+/// Write tag metadata into a track file.
+pub async fn tracks_metadata_update(
+    state: web::Data<AppState>,
+    body: web::Json<TrackMetadataUpdateRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let raw_path = PathBuf::from(request.path.as_str());
+    let full_path = match raw_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    if !full_path.starts_with(&root) {
+        return HttpResponse::BadRequest().body("path outside library root");
+    }
+    if !full_path.is_file() {
+        return HttpResponse::NotFound().finish();
+    }
+
+    let title = request.title.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let artist = request.artist.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let album_artist = request
+        .album_artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let year = request.year.filter(|value| *value > 0);
+    let track_number = request.track_number.filter(|value| *value > 0);
+    let disc_number = request.disc_number.filter(|value| *value > 0);
+
+    if title.is_none()
+        && artist.is_none()
+        && album.is_none()
+        && album_artist.is_none()
+        && year.is_none()
+        && track_number.is_none()
+        && disc_number.is_none()
+    {
+        return HttpResponse::BadRequest().body("no metadata fields provided");
+    }
+
+    if let Err(err) = write_track_tags(
+        &full_path,
+        TrackTagUpdate {
+            title,
+            artist,
+            album,
+            album_artist,
+            year,
+            track_number,
+            disc_number,
+        },
+    ) {
+        tracing::warn!(error = %err, path = %request.path, "track metadata update failed");
+        return HttpResponse::InternalServerError().body(err.to_string());
+    }
+
+    if let Err(response) = rescan_track_inner(state.get_ref(), &root, &full_path) {
+        return response;
+    }
+
+    HttpResponse::Ok().finish()
+}
+
+#[utoipa::path(
+    get,
+    path = "/albums/metadata",
+    params(AlbumMetadataQuery),
+    responses(
+        (status = 200, description = "Album metadata", body = AlbumMetadataResponse),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[get("/albums/metadata")]
+/// Read cached metadata for an album id.
+pub async fn albums_metadata(
+    state: web::Data<AppState>,
+    query: web::Query<AlbumMetadataQuery>,
+) -> impl Responder {
+    match state.metadata_db.album_summary_by_id(query.album_id) {
+        Ok(Some(album)) => HttpResponse::Ok().json(AlbumMetadataResponse {
+            album_id: album.id,
+            title: Some(album.title),
+            album_artist: album.artist,
+            year: album.year,
+        }),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/albums/metadata/update",
+    request_body = AlbumMetadataUpdateRequest,
+    responses(
+        (status = 200, description = "Album metadata updated"),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[post("/albums/metadata/update")]
+/// Write album metadata into all tracks for an album.
+pub async fn albums_metadata_update(
+    state: web::Data<AppState>,
+    body: web::Json<AlbumMetadataUpdateRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let album_artist = request
+        .album_artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let year = request.year.filter(|value| *value > 0);
+    let track_artist = request
+        .track_artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+
+    if album.is_none()
+        && album_artist.is_none()
+        && year.is_none()
+        && track_artist.is_none()
+    {
+        return HttpResponse::BadRequest().body("no metadata fields provided");
+    }
+
+    let paths = match state.metadata_db.list_track_paths_by_album_id(request.album_id) {
+        Ok(paths) => paths,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    if paths.is_empty() {
+        return HttpResponse::NotFound().finish();
+    }
+
+    for path in paths {
+        let full_path = match PathBuf::from(&path).canonicalize() {
+            Ok(path) => path,
+            Err(_) => return HttpResponse::NotFound().finish(),
+        };
+        if !full_path.starts_with(&root) {
+            return HttpResponse::BadRequest().body("path outside library root");
+        }
+        if let Err(err) = write_track_tags(
+            &full_path,
+            TrackTagUpdate {
+                title: None,
+                artist: track_artist,
+                album,
+                album_artist,
+                year,
+                track_number: None,
+                disc_number: None,
+            },
+        ) {
+            tracing::warn!(
+                error = %err,
+                path = %path,
+                album_id = request.album_id,
+                "album metadata update failed"
+            );
+            return HttpResponse::InternalServerError().body(err.to_string());
+        }
+        if let Err(response) = rescan_track_inner(state.get_ref(), &root, &full_path) {
+            return response;
+        }
+    }
+
+    if album.is_some() || album_artist.is_some() || year.is_some() {
+        match state
+            .metadata_db
+            .update_album_metadata(request.album_id, album, album_artist, year)
+        {
+            Ok(true) => {}
+            Ok(false) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    }
+
+    HttpResponse::Ok().finish()
 }
 
 #[utoipa::path(

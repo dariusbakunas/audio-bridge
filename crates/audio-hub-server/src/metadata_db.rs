@@ -896,6 +896,43 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                r#"
+                SELECT al.id, al.title, ar.name, al.year, al.mbid,
+                       COUNT(t.id) AS track_count, al.cover_art_path
+                FROM albums al
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN tracks t ON t.album_id = al.id
+                WHERE al.id = ?1
+                GROUP BY al.id
+                "#,
+                params![album_id],
+                |row| {
+                    let album_id: i64 = row.get(0)?;
+                    let cover_path: Option<String> = row.get(6)?;
+                    let cover_art_url = cover_path
+                        .as_deref()
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|_| format!("/albums/{}/cover", album_id));
+                    Ok(AlbumSummary {
+                        id: album_id,
+                        title: row.get(1)?,
+                        artist: row.get(2)?,
+                        year: row.get(3)?,
+                        mbid: row.get(4)?,
+                        track_count: row.get(5)?,
+                        cover_art_path: cover_path,
+                        cover_art_url,
+                    })
+                },
+            )
+            .optional()
+            .context("select album summary by id")
+    }
+
     pub fn list_tracks(
         &self,
         album_id: Option<i64>,
@@ -948,6 +985,46 @@ impl MetadataDb {
         )?;
 
         Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn list_track_paths_by_album_id(&self, album_id: i64) -> Result<Vec<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let mut stmt = conn.prepare(
+            "SELECT path FROM tracks WHERE album_id = ?1 ORDER BY COALESCE(disc_number, 0), COALESCE(track_number, 0), file_name",
+        )?;
+        let rows = stmt.query_map(params![album_id], |row| row.get(0))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn update_album_metadata(
+        &self,
+        album_id: i64,
+        title: Option<&str>,
+        artist: Option<&str>,
+        year: Option<i32>,
+    ) -> Result<bool> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+        let artist_id = if let Some(name) = artist {
+            Some(upsert_artist(&tx, name)?)
+        } else {
+            None
+        };
+        let updated = tx
+            .execute(
+                r#"
+                UPDATE albums
+                SET title = COALESCE(?1, title),
+                    sort_title = CASE WHEN ?1 IS NULL THEN sort_title ELSE LOWER(?1) END,
+                    artist_id = COALESCE(?2, artist_id),
+                    year = COALESCE(?3, year)
+                WHERE id = ?4
+                "#,
+                params![title, artist_id, year, album_id],
+            )
+            .context("update album metadata")?;
+        tx.commit().context("commit metadata tx")?;
+        Ok(updated > 0)
     }
 }
 

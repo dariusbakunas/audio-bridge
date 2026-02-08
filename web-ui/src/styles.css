@@ -1274,6 +1274,53 @@ p {
   gap: 4px;
 }
 
+.track-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.track-meta-target {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.track-meta-title {
+  font-weight: 600;
+}
+
+.track-meta-note {
+  max-width: 520px;
+}
+
+.track-meta-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.track-meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.track-meta-input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.track-meta-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .side-panel-backdrop {
   position: fixed;
   inset: 0;

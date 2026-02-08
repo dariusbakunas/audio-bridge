@@ -24,6 +24,7 @@ mod local_player;
 mod startup;
 mod status_store;
 mod state;
+mod tag_writer;
 
 use anyhow::Result;
 use clap::Parser;
