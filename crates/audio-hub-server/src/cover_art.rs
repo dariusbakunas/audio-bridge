@@ -35,6 +35,7 @@ const MAX_COVER_BYTES: usize = 5_000_000;
 pub struct CoverArtResolver {
     db: MetadataDb,
     store: CoverArtStore,
+    source: CoverArtSource,
 }
 
 impl CoverArtResolver {
@@ -42,6 +43,7 @@ impl CoverArtResolver {
         Self {
             db,
             store: CoverArtStore::new(root),
+            source: CoverArtSource::default(),
         }
     }
 
@@ -59,11 +61,7 @@ impl CoverArtResolver {
             return Ok(());
         }
 
-        let cover = if let Some(cover) = meta.cover_art.as_ref() {
-            Some(cover.clone())
-        } else {
-            read_folder_cover(track_path.parent())?
-        };
+        let cover = self.source.cover_for_track(track_path, meta)?;
         let Some(cover) = cover else {
             return Ok(());
         };
@@ -102,6 +100,50 @@ fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
         return Ok(Some(CoverArt { mime_type, data }));
     }
     Ok(None)
+}
+
+#[derive(Clone)]
+struct CoverArtSource {
+    strategy: CoverArtStrategy,
+}
+
+impl CoverArtSource {
+    fn new(strategy: CoverArtStrategy) -> Self {
+        Self { strategy }
+    }
+
+    fn cover_for_track(&self, track_path: &Path, meta: &TrackMeta) -> Result<Option<CoverArt>> {
+        match self.strategy {
+            CoverArtStrategy::EmbeddedThenFolder => {
+                if let Some(cover) = meta.cover_art.as_ref() {
+                    return Ok(Some(cover.clone()));
+                }
+                read_folder_cover(track_path.parent())
+            }
+            CoverArtStrategy::FolderThenEmbedded => {
+                if let Some(cover) = read_folder_cover(track_path.parent())? {
+                    return Ok(Some(cover));
+                }
+                Ok(meta.cover_art.clone())
+            }
+            CoverArtStrategy::EmbeddedOnly => Ok(meta.cover_art.clone()),
+            CoverArtStrategy::FolderOnly => read_folder_cover(track_path.parent()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CoverArtStrategy {
+    EmbeddedThenFolder,
+    FolderThenEmbedded,
+    EmbeddedOnly,
+    FolderOnly,
+}
+
+impl Default for CoverArtSource {
+    fn default() -> Self {
+        Self::new(CoverArtStrategy::EmbeddedThenFolder)
+    }
 }
 
 #[derive(Clone)]

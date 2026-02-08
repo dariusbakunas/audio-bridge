@@ -19,6 +19,7 @@ lofty = "0.18.2"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 ctrlc = { workspace = true }
+notify = "6.1.1"
 utoipa = { version = "5.4.0", features = ["actix_extras"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
 toml = "0.9.11+spec-1.1.0"

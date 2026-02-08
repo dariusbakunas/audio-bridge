@@ -13,6 +13,7 @@ mod events;
 mod library;
 mod models;
 mod metadata_db;
+mod metadata_service;
 mod musicbrainz;
 mod openapi;
 mod output_controller;

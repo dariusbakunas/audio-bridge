@@ -15,6 +15,8 @@ use futures_util::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
 use anyhow::Result;
 use crossbeam_channel::unbounded;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::time::Duration;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -22,10 +24,10 @@ use crate::api;
 use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_manager::parse_output_id;
 use crate::config;
-use crate::cover_art::{CoverArtFetcher, CoverArtResolver};
+use crate::cover_art::CoverArtFetcher;
 use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
-use crate::library::scan_library_with_meta;
 use crate::metadata_db::MetadataDb;
+use crate::metadata_service::MetadataService;
 use crate::musicbrainz::{MusicBrainzClient, spawn_enrichment_loop};
 use crate::events::LogBus;
 use crate::state::MetadataWake;
@@ -61,36 +63,15 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     } else {
         tracing::info!("musicbrainz enrichment disabled");
     }
-    let cover_art = CoverArtResolver::new(metadata_db.clone(), media_dir.clone());
-    let library = scan_library_with_meta(&media_dir, |path, file_name, _ext, meta, fs_meta| {
-        let record = crate::metadata_db::TrackRecord {
-            path: path.to_string_lossy().to_string(),
-            file_name: file_name.to_string(),
-            title: meta.title.clone(),
-            artist: meta.artist.clone(),
-            album_artist: meta.album_artist.clone(),
-            album: meta.album.clone(),
-            track_number: meta.track_number,
-            disc_number: meta.disc_number,
-            year: meta.year,
-            duration_ms: meta.duration_ms,
-            sample_rate: meta.sample_rate,
-            format: meta.format.clone(),
-            mtime_ms: fs_meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
-            size_bytes: fs_meta.len() as i64,
-        };
-        if let Err(err) = metadata_db.upsert_track(&record) {
-            tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
-        }
-        if let Err(err) = cover_art.apply_for_track(path, meta, &record) {
-            tracing::warn!(error = %err, path = %record.path, "cover art apply failed");
-        }
-    }, |_dir, _count| {})?;
+    let events = crate::events::EventBus::new();
+    let metadata_wake = MetadataWake::new();
+    let metadata_service = MetadataService::new(
+        metadata_db.clone(),
+        media_dir.clone(),
+        events.clone(),
+        metadata_wake.clone(),
+    );
+    let library = metadata_service.scan_library(false)?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
         count = bridges.len(),
@@ -130,7 +111,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         discovered_bridges.clone(),
         public_base_url,
     ));
-    let events = crate::events::EventBus::new();
     let status_store = crate::status_store::StatusStore::new(status, events.clone());
     let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
     let playback_manager = crate::playback_manager::PlaybackManager::new(
@@ -179,7 +159,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         local: Arc::new(Mutex::new(local_device.clone())),
         bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
-    let metadata_wake = MetadataWake::new();
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -192,6 +171,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         events,
         log_bus,
     ));
+    spawn_library_watcher(state.clone());
     if let Some(client) = state.musicbrainz.as_ref() {
         spawn_enrichment_loop(
             state.metadata_db.clone(),
@@ -296,6 +276,109 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     .await?;
 
     Ok(())
+}
+
+fn spawn_library_watcher(state: web::Data<AppState>) {
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let metadata_service = MetadataService::new(
+        state.metadata_db.clone(),
+        root.clone(),
+        state.events.clone(),
+        state.metadata_wake.clone(),
+    );
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                tracing::warn!(error = %err, "metadata watcher init failed");
+                return;
+            }
+        };
+        if let Err(err) = watcher.watch(&root, RecursiveMode::Recursive) {
+            tracing::warn!(error = %err, "metadata watcher setup failed");
+            return;
+        }
+        loop {
+            let first = match rx.recv() {
+                Ok(event) => event,
+                Err(_) => break,
+            };
+            let mut events = vec![first];
+            while let Ok(event) = rx.recv_timeout(Duration::from_millis(750)) {
+                events.push(event);
+            }
+            for event in events {
+                let event = match event {
+                    Ok(event) => event,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "metadata watcher event error");
+                        continue;
+                    }
+                };
+                match event.kind {
+                    EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
+                        if event.paths.len() >= 2 {
+                            let from = &event.paths[0];
+                            let to = &event.paths[1];
+                            let _ = metadata_service.remove_track_by_path(&state.library, from);
+                            if !to.is_dir() {
+                                let _ = metadata_service.rescan_track(&state.library, to);
+                            }
+                        } else {
+                            for path in event.paths {
+                                if path.is_dir() {
+                                    continue;
+                                }
+                                let _ = metadata_service.rescan_track(&state.library, &path);
+                            }
+                        }
+                    }
+                    EventKind::Create(_)
+                    | EventKind::Modify(_)
+                    | EventKind::Access(_)
+                    | EventKind::Other => {
+                        for path in event.paths {
+                            if path.is_dir() {
+                                continue;
+                            }
+                            if let Err(response) = metadata_service.rescan_track(&state.library, &path) {
+                                let status = response.status();
+                                if status != actix_web::http::StatusCode::NOT_FOUND
+                                    && status != actix_web::http::StatusCode::BAD_REQUEST
+                                {
+                                    tracing::warn!(
+                                        status = %status,
+                                        path = %path.display(),
+                                        "metadata watcher rescan failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    EventKind::Remove(_) => {
+                        for path in event.paths {
+                            if let Err(response) =
+                                metadata_service.remove_track_by_path(&state.library, &path)
+                            {
+                                let status = response.status();
+                                if status != actix_web::http::StatusCode::NOT_FOUND
+                                    && status != actix_web::http::StatusCode::BAD_REQUEST
+                                {
+                                    tracing::warn!(
+                                        status = %status,
+                                        path = %path.display(),
+                                        "metadata watcher remove failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
 }
 
 /// Return true when the request path should be logged.

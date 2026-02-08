@@ -1026,6 +1026,38 @@ impl MetadataDb {
         tx.commit().context("commit metadata tx")?;
         Ok(updated > 0)
     }
+
+    pub fn delete_track_by_path(&self, path: &str) -> Result<bool> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let deleted = conn
+            .execute("DELETE FROM tracks WHERE path = ?1", params![path])
+            .context("delete track by path")?;
+        Ok(deleted > 0)
+    }
+
+    pub fn prune_orphaned_albums_and_artists(&self) -> Result<()> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin metadata tx")?;
+        tx.execute(
+            "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
+            [],
+        )
+        .context("delete orphaned albums")?;
+        tx.execute(
+            r#"
+            DELETE FROM artists
+            WHERE id NOT IN (
+                SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL
+                UNION
+                SELECT DISTINCT artist_id FROM albums WHERE artist_id IS NOT NULL
+            )
+            "#,
+            [],
+        )
+        .context("delete orphaned artists")?;
+        tx.commit().context("commit metadata tx")?;
+        Ok(())
+    }
 }
 
 fn db_path_for(media_root: &Path) -> PathBuf {

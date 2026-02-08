@@ -76,6 +76,26 @@ impl LibraryIndex {
         }
         false
     }
+
+    pub fn remove_track(&mut self, path: &Path) -> bool {
+        let dir = match path.parent() {
+            Some(dir) => dir,
+            None => return false,
+        };
+        let Some(entries) = self.entries_by_dir.get_mut(dir) else {
+            return false;
+        };
+        let path_str = path.to_string_lossy();
+        let before = entries.len();
+        entries.retain(|entry| {
+            if let LibraryEntry::Track { path, .. } = entry {
+                path != path_str.as_ref()
+            } else {
+                true
+            }
+        });
+        before != entries.len()
+    }
 }
 
 /// Scan the media root and build a new library index.
