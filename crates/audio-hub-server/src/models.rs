@@ -285,6 +285,13 @@ pub struct QueueRemoveRequest {
     pub path: String,
 }
 
+/// Payload to play a queued item and drop preceding items.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct QueuePlayFromRequest {
+    /// Path of the queued item to play.
+    pub path: String,
+}
+
 /// Response for listing outputs.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct OutputsResponse {

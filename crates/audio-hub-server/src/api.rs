@@ -34,6 +34,7 @@ use crate::models::{
     QueueMode,
     QueueAddRequest,
     QueueRemoveRequest,
+    QueuePlayFromRequest,
     QueueResponse,
     StatusResponse,
     OutputsResponse,
@@ -865,6 +866,33 @@ pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemov
         .queue_remove_path(&state, &body.path)
     {
         Ok(_) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/queue/play_from",
+    request_body = QueuePlayFromRequest,
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 404, description = "Item not found"),
+        (status = 500, description = "Player offline")
+    )
+)]
+#[post("/queue/play_from")]
+/// Play a queued item and drop items ahead of it.
+pub async fn queue_play_from(
+    state: web::Data<AppState>,
+    body: web::Json<QueuePlayFromRequest>,
+) -> impl Responder {
+    match state
+        .output_controller
+        .queue_play_from(&state, &body.path)
+        .await
+    {
+        Ok(true) => HttpResponse::Ok().finish(),
+        Ok(false) => HttpResponse::NotFound().finish(),
         Err(err) => err.into_response(),
     }
 }

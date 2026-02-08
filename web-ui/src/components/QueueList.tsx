@@ -5,9 +5,17 @@ interface QueueListProps {
   items: QueueItem[];
   formatMs: (ms?: number | null) => string;
   placeholder: (title?: string | null, artist?: string | null) => string;
+  canPlay: boolean;
+  onPlayFrom: (path: string) => void;
 }
 
-export default function QueueList({ items, formatMs, placeholder }: QueueListProps) {
+export default function QueueList({
+  items,
+  formatMs,
+  placeholder,
+  canPlay,
+  onPlayFrom
+}: QueueListProps) {
   return (
     <div className="queue-list">
       {items.map((item, index) => {
@@ -20,19 +28,33 @@ export default function QueueList({ items, formatMs, placeholder }: QueueListPro
             {item.kind === "track" ? (
               <>
                 <div className="queue-main">
-                  <img
-                    className="queue-cover"
-                    src={coverUrl}
-                    alt=""
-                    aria-hidden="true"
-                    onError={(event) => {
-                      const img = event.currentTarget;
-                      if (img.src !== fallback) {
-                        img.onerror = null;
-                        img.src = fallback;
-                      }
-                    }}
-                  />
+                  <div className="queue-cover-frame">
+                    <img
+                      className="queue-cover"
+                      src={coverUrl}
+                      alt=""
+                      aria-hidden="true"
+                      onError={(event) => {
+                        const img = event.currentTarget;
+                        if (img.src !== fallback) {
+                          img.onerror = null;
+                          img.src = fallback;
+                        }
+                      }}
+                    />
+                    <button
+                      className="queue-play"
+                      type="button"
+                      aria-label={`Play ${item.file_name}`}
+                      title="Play from queue"
+                      disabled={!canPlay}
+                      onClick={() => onPlayFrom(item.path)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
+                      </svg>
+                    </button>
+                  </div>
                   <div>
                     <div className="queue-title">{item.file_name}</div>
                     <div className="muted small">

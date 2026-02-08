@@ -803,6 +803,15 @@ export default function App() {
     loadAlbumTracks(albumViewId);
   }, [albumViewId, loadAlbumTracks]);
 
+  const handleQueuePlayFrom = useCallback(async (path: string) => {
+    try {
+      await postJson("/queue/play_from", { path });
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
   async function handlePrimaryAction() {
     if (status?.now_playing) {
       await handlePause();
@@ -1128,6 +1137,8 @@ export default function App() {
         onClose={() => setQueueOpen(false)}
         formatMs={formatMs}
         placeholder={albumPlaceholder}
+        canPlay={Boolean(activeOutputId)}
+        onPlayFrom={handleQueuePlayFrom}
       />
 
     </div>

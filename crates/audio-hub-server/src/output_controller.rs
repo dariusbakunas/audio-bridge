@@ -242,6 +242,32 @@ impl OutputController {
         Ok(state.playback_manager.queue_service().remove_path(&path))
     }
 
+    /// Play a queued item and drop items ahead of it.
+    pub(crate) async fn queue_play_from(
+        &self,
+        state: &AppState,
+        path_str: &str,
+    ) -> Result<bool, OutputControllerError> {
+        let path = std::path::PathBuf::from(path_str);
+        let path = self.canonicalize_under_root(state, &path)?;
+        let mut found = false;
+        {
+            let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
+            if let Some(pos) = queue.items.iter().position(|p| p == &path) {
+                queue.items.drain(0..=pos);
+                found = true;
+                state.events.queue_changed();
+            }
+        }
+        if !found {
+            return Ok(false);
+        }
+        let _ = self.resolve_active_output_id(state, None).await?;
+        state.playback_manager.status().set_manual_advance_in_flight(true);
+        self.dispatch_play(state, path.clone(), None, false)?;
+        Ok(true)
+    }
+
     /// Clear the queue.
     pub(crate) fn queue_clear(&self, state: &AppState) {
         state.playback_manager.queue_service().clear();

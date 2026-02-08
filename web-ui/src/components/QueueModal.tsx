@@ -7,6 +7,8 @@ interface QueueModalProps {
   onClose: () => void;
   formatMs: (ms?: number | null) => string;
   placeholder: (title?: string | null, artist?: string | null) => string;
+  canPlay: boolean;
+  onPlayFrom: (path: string) => void;
 }
 
 export default function QueueModal({
@@ -14,7 +16,9 @@ export default function QueueModal({
   items,
   onClose,
   formatMs,
-  placeholder
+  placeholder,
+  canPlay,
+  onPlayFrom
 }: QueueModalProps) {
   if (!open) return null;
 
@@ -34,7 +38,13 @@ export default function QueueModal({
             </button>
           </div>
         </div>
-        <QueueList items={items} formatMs={formatMs} placeholder={placeholder} />
+        <QueueList
+          items={items}
+          formatMs={formatMs}
+          placeholder={placeholder}
+          canPlay={canPlay}
+          onPlayFrom={onPlayFrom}
+        />
       </aside>
     </div>
   );

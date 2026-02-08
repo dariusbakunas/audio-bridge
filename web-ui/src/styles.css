@@ -825,13 +825,70 @@ p {
   min-width: 0;
 }
 
+.queue-cover-frame {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.queue-cover-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 18, 18, 0.45);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.queue-cover-frame:hover::after,
+.queue-cover-frame:focus-within::after {
+  opacity: 1;
+}
+
 .queue-cover {
+  display: block;
   width: 36px;
   height: 36px;
   border-radius: 0;
   object-fit: cover;
   background: var(--bg-accent);
-  flex-shrink: 0;
+}
+
+.queue-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  background: transparent;
+  color: #ffffff;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.queue-play svg {
+  width: 10px;
+  height: 10px;
+}
+
+.queue-cover-frame:hover .queue-play,
+.queue-cover-frame:focus-within .queue-play {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.queue-play:disabled {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .queue-title {

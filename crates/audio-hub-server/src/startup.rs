@@ -219,6 +219,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::queue_add)
             .service(api::queue_add_next)
             .service(api::queue_remove)
+            .service(api::queue_play_from)
             .service(api::queue_clear)
             .service(api::queue_next)
             .service(api::queue_stream)

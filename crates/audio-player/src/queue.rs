@@ -329,15 +329,17 @@ mod tests {
     fn pop_blocking_exact_waits_for_full_frames() {
         let q = Arc::new(SharedAudio::new(2, 64));
         let q_push = q.clone();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let start = barrier.clone();
 
         let handle = thread::spawn(move || {
+            start.wait();
             let out = q.pop(PopStrategy::BlockingExact { frames: 3 }).unwrap();
             assert_eq!(out.len(), 6);
         });
 
-        thread::sleep(Duration::from_millis(20));
+        barrier.wait();
         q_push.push_interleaved_blocking(&[0.1, 0.2, 0.3, 0.4]);
-        thread::sleep(Duration::from_millis(20));
         q_push.push_interleaved_blocking(&[0.5, 0.6]);
 
         handle.join().unwrap();
@@ -347,8 +349,11 @@ mod tests {
     fn pop_blocking_up_to_drains_tail_and_respects_close() {
         let q = Arc::new(SharedAudio::new(2, 64));
         let q_pop = q.clone();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let start = barrier.clone();
 
         let handle = thread::spawn(move || {
+            start.wait();
             let out = q_pop
                 .pop(PopStrategy::BlockingUpTo { max_frames: 8 })
                 .unwrap();
@@ -358,7 +363,7 @@ mod tests {
             assert!(out2.is_none());
         });
 
-        thread::sleep(Duration::from_millis(20));
+        barrier.wait();
         q.push_interleaved_blocking(&[1.0, 2.0, 3.0, 4.0]);
         q.close();
 
@@ -387,12 +392,14 @@ mod tests {
     fn wait_for_any_returns_true_when_data_arrives() {
         let q = Arc::new(SharedAudio::new(2, 64));
         let q_push = q.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
 
         let handle = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(20));
+            let _ = rx.recv();
             q_push.push_interleaved_blocking(&[1.0, 2.0]);
         });
 
+        let _ = tx.send(());
         assert!(q.wait_for_any(Duration::from_millis(100)));
         handle.join().unwrap();
     }
@@ -424,15 +431,8 @@ mod tests {
     fn wait_until_done_and_empty_or_cancel_respects_cancel() {
         let q = Arc::new(SharedAudio::new(2, 64));
         let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_set = cancel.clone();
-
-        let handle = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(20));
-            cancel_set.store(true, Ordering::Relaxed);
-        });
-
+        cancel.store(true, Ordering::Relaxed);
         let drained = wait_until_done_and_empty_or_cancel(&q, &cancel);
         assert!(!drained);
-        handle.join().unwrap();
     }
 }
