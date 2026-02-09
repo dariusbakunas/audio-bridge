@@ -758,6 +758,19 @@ mod tests {
     }
 
     #[test]
+    fn canonicalize_under_root_rejects_missing_path() {
+        let (state, _root) = make_state_with_root();
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+
+        let result = controller.canonicalize_under_root(
+            &state,
+            std::path::Path::new("missing.flac"),
+        );
+
+        assert!(matches!(result, Err(OutputControllerError::Http(_))));
+    }
+
+    #[test]
     fn canonicalize_under_root_rejects_outside_root() {
         let (state, _root) = make_state_with_root();
         let other_root = std::env::temp_dir().join(format!(
@@ -778,6 +791,22 @@ mod tests {
     }
 
     #[test]
+    fn queue_play_from_returns_false_when_missing() {
+        let (state, root) = make_state_with_root();
+        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
+        let file_path = root.join("track.flac");
+        let _ = std::fs::write(&file_path, b"test");
+
+        let result = actix_web::rt::System::new().block_on(async {
+            controller
+                .queue_play_from(&state, "track.flac")
+                .await
+        });
+
+        assert!(matches!(result, Ok(false)));
+    }
+
+    #[test]
     fn queue_add_paths_skips_missing_files() {
         let (state, root) = make_state_with_root();
         let file_path = root.join("a.flac");
@@ -794,16 +823,6 @@ mod tests {
             state.playback.manager.queue_service().queue().lock().unwrap().items,
             vec![file_path.canonicalize().unwrap()]
         );
-    }
-
-    #[test]
-    fn canonicalize_under_root_rejects_missing_path() {
-        let (state, _root) = make_state_with_root();
-        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-
-        let result = controller.canonicalize_under_root(&state, std::path::Path::new("missing.flac"));
-
-        assert!(matches!(result, Err(OutputControllerError::Http(_))));
     }
 
     #[test]

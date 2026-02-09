@@ -534,4 +534,38 @@ mod tests {
         };
         assert!(!service.maybe_auto_advance(&transport, inputs));
     }
+
+    #[test]
+    fn maybe_auto_advance_respects_user_pause_for_remote_end() {
+        let service = make_service();
+        let transport = TestTransport::new(true);
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+        let inputs = AutoAdvanceInputs {
+            last_duration_ms: Some(1000),
+            remote_duration_ms: None,
+            remote_elapsed_ms: None,
+            user_paused: true,
+            now_playing: true,
+            ..make_inputs()
+        };
+        assert!(!service.maybe_auto_advance(&transport, inputs));
+    }
+
+    #[test]
+    fn has_previous_ignores_current_repeat() {
+        let service = make_service();
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        service.record_played_path(&a);
+        service.record_played_path(&b);
+        service.record_played_path(&b);
+
+        assert!(service.has_previous(Some(&b)));
+        assert!(service.has_previous(Some(&a)));
+
+        let service = make_service();
+        service.record_played_path(&a);
+        service.record_played_path(&a);
+        assert!(!service.has_previous(Some(&a)));
+    }
 }

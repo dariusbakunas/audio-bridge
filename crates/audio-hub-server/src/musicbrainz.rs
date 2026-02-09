@@ -731,4 +731,49 @@ mod tests {
         let stripped = strip_parenthetical("Album Title [Deluxe Edition]");
         assert_eq!(stripped.as_deref(), Some("Album Title"));
     }
+
+    #[test]
+    fn fallback_parts_returns_none_when_no_change() {
+        let fallback = fallback_parts("Album", Some("Album"));
+        assert!(fallback.is_none());
+    }
+
+    #[test]
+    fn fallback_parts_strips_album_only() {
+        let fallback = fallback_parts("Track", Some("Album (Deluxe)"));
+        assert_eq!(fallback, Some(("Track".to_string(), Some("Album".to_string()))));
+    }
+
+    #[test]
+    fn select_best_recording_prefers_higher_score() {
+        let low = RecordingResult {
+            id: "low".to_string(),
+            score: Some(10),
+            title: "Low".to_string(),
+            artist_credit: None,
+            releases: None,
+        };
+        let high = RecordingResult {
+            id: "high".to_string(),
+            score: Some(95),
+            title: "High".to_string(),
+            artist_credit: None,
+            releases: None,
+        };
+        let best = select_best_recording(Some(low), Some(high)).unwrap();
+        assert_eq!(best.id, "high");
+    }
+
+    #[test]
+    fn select_best_recording_handles_none() {
+        let single = RecordingResult {
+            id: "one".to_string(),
+            score: None,
+            title: "Single".to_string(),
+            artist_credit: None,
+            releases: None,
+        };
+        let best = select_best_recording(None, Some(single)).unwrap();
+        assert_eq!(best.id, "one");
+    }
 }

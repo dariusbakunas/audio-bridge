@@ -383,6 +383,14 @@ mod tests {
     }
 
     #[test]
+    fn on_play_sets_has_previous_when_missing() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        let status = store.inner().lock().unwrap();
+        assert_eq!(status.has_previous, Some(false));
+    }
+
+    #[test]
     fn on_stop_clears_playback_fields() {
         let store = make_store();
         store.on_play(PathBuf::from("/music/a.flac"), false);
@@ -392,6 +400,15 @@ mod tests {
         assert!(status.duration_ms.is_none());
         assert!(!status.paused);
         assert!(!status.user_paused);
+    }
+
+    #[test]
+    fn on_stop_clears_manual_advance_flag() {
+        let store = make_store();
+        store.set_manual_advance_in_flight(true);
+        store.on_stop();
+        let status = store.inner().lock().unwrap();
+        assert!(!status.manual_advance_in_flight);
     }
 
     #[test]
@@ -521,6 +538,23 @@ mod tests {
         let store = make_store();
         store.on_play(PathBuf::from("/music/a.flac"), false);
         store.set_manual_advance_in_flight(true);
+        let remote = BridgeStatus {
+            now_playing: None,
+            elapsed_ms: None,
+            duration_ms: None,
+            ..make_bridge_status()
+        };
+
+        store.apply_remote_and_inputs(&remote, None);
+        let status = store.inner().lock().unwrap();
+        assert!(status.now_playing.is_some());
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_keeps_now_playing_during_auto_advance() {
+        let store = make_store();
+        store.on_play(PathBuf::from("/music/a.flac"), false);
+        store.set_auto_advance_in_flight(true);
         let remote = BridgeStatus {
             now_playing: None,
             elapsed_ms: None,

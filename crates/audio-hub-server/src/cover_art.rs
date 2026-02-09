@@ -250,6 +250,8 @@ fn hash_bytes(data: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::TrackMeta;
+    use crate::metadata_service::MetadataService;
 
     fn temp_root() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -293,6 +295,84 @@ mod tests {
 
         let found = store.find_cached_cover(hint).expect("find cached cover");
         assert_eq!(found, relative);
+    }
+
+    #[test]
+    fn resolver_skips_when_cover_already_present() {
+        let root = temp_root();
+        let track_path = root.join("track.flac");
+        std::fs::write(&track_path, b"audio").expect("write file");
+        let db = MetadataDb::new(&root).expect("metadata db");
+        let fs_meta = std::fs::metadata(&track_path).expect("metadata");
+        let meta = TrackMeta {
+            album: Some("Album".to_string()),
+            artist: Some("Artist".to_string()),
+            album_artist: Some("Artist".to_string()),
+            cover_art: Some(CoverArt {
+                mime_type: "image/jpeg".to_string(),
+                data: b"embedded".to_vec(),
+            }),
+            ..TrackMeta::default()
+        };
+        let record = MetadataService::build_track_record(&track_path, "track.flac", &meta, &fs_meta);
+        db.upsert_track(&record).expect("upsert track");
+        db.set_album_cover_if_empty("Album", Some("Artist"), "existing.jpg")
+            .expect("set cover");
+
+        let resolver = CoverArtResolver::new(db, root.clone());
+        resolver
+            .apply_for_track(&track_path, &meta, &record)
+            .expect("apply cover");
+
+        let art_dir = root.join(COVER_CACHE_DIR);
+        assert!(!art_dir.exists());
+        let cover = resolver
+            .db
+            .album_cover_path("Album", Some("Artist"))
+            .expect("cover path");
+        assert_eq!(cover.as_deref(), Some("existing.jpg"));
+    }
+
+    #[test]
+    fn cover_source_prefers_embedded_when_configured() {
+        let root = temp_root();
+        let track_path = root.join("track.flac");
+        std::fs::write(&track_path, b"audio").expect("write file");
+        let folder_cover = track_path.parent().unwrap().join("cover.jpg");
+        std::fs::write(&folder_cover, b"folder").expect("write cover");
+
+        let meta = TrackMeta {
+            cover_art: Some(CoverArt {
+                mime_type: "image/jpeg".to_string(),
+                data: b"embedded".to_vec(),
+            }),
+            ..TrackMeta::default()
+        };
+        let source = CoverArtSource::new(CoverArtStrategy::EmbeddedThenFolder);
+        let cover = source.cover_for_track(&track_path, &meta).expect("cover");
+        assert_eq!(cover.unwrap().data, b"embedded");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cover_source_prefers_folder_when_configured() {
+        let root = temp_root();
+        let track_path = root.join("track.flac");
+        std::fs::write(&track_path, b"audio").expect("write file");
+        let folder_cover = track_path.parent().unwrap().join("cover.jpg");
+        std::fs::write(&folder_cover, b"folder").expect("write cover");
+
+        let meta = TrackMeta {
+            cover_art: Some(CoverArt {
+                mime_type: "image/jpeg".to_string(),
+                data: b"embedded".to_vec(),
+            }),
+            ..TrackMeta::default()
+        };
+        let source = CoverArtSource::new(CoverArtStrategy::FolderThenEmbedded);
+        let cover = source.cover_for_track(&track_path, &meta).expect("cover");
+        assert_eq!(cover.unwrap().data, b"folder");
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 
