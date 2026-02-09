@@ -52,26 +52,11 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     } else {
         tracing::info!("web ui static assets disabled (web-ui/dist not found)");
     }
-    let metadata_db = MetadataDb::new(&media_dir)?;
-    let musicbrainz = match cfg.musicbrainz.as_ref() {
-        Some(cfg) => MusicBrainzClient::new(cfg)?,
-        None => None,
-    }
-    .map(Arc::new);
-    if let Some(client) = musicbrainz.as_ref() {
-        tracing::info!(user_agent = client.user_agent(), "musicbrainz enrichment enabled");
-    } else {
-        tracing::info!("musicbrainz enrichment disabled");
-    }
     let events = crate::events::EventBus::new();
     let metadata_wake = MetadataWake::new();
-    let metadata_service = MetadataService::new(
-        metadata_db.clone(),
-        media_dir.clone(),
-        events.clone(),
-        metadata_wake.clone(),
-    );
-    let library = metadata_service.scan_library(false)?;
+    let (metadata_db, library) =
+        init_metadata_db_and_library(&media_dir, events.clone(), metadata_wake.clone())?;
+    let musicbrainz = init_musicbrainz(&cfg)?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
         count = bridges.len(),
@@ -89,76 +74,10 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .map(|b| b.http_addr)
     });
 
-    let (cmd_tx, _cmd_rx) = unbounded();
-    let status = Arc::new(Mutex::new(PlayerStatus::default()));
-    let queue = Arc::new(Mutex::new(QueueState::default()));
-    let bridge_online = Arc::new(AtomicBool::new(false));
-    let bridges_state = Arc::new(Mutex::new(BridgeState {
-        bridges,
-        active_bridge_id: active_bridge_id.clone(),
-        active_output_id: active_output_id.clone(),
-    }));
-    let discovered_bridges = Arc::new(Mutex::new(std::collections::HashMap::new()));
-    if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = BridgeTransportClient::new(http_addr, public_base_url.clone())
-            .set_device(&device_name);
-    }
-
-    let bridge_state = Arc::new(BridgeProviderState::new(
-        cmd_tx,
-        bridges_state,
-        bridge_online.clone(),
-        discovered_bridges.clone(),
-        public_base_url,
-    ));
-    let status_store = crate::status_store::StatusStore::new(status, events.clone());
-    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
-    let playback_manager = crate::playback_manager::PlaybackManager::new(
-        bridge_state.player.clone(),
-        status_store,
-        queue_service,
-    );
-    let local_enabled = cfg.local_outputs.unwrap_or(false);
-    let local_id = cfg
-        .local_id
-        .clone()
-        .unwrap_or_else(|| "local".to_string());
-    let local_name = cfg
-        .local_name
-        .clone()
-        .unwrap_or_else(|| "Local Host".to_string());
-    let local_device = cfg.local_device.clone().filter(|s| !s.trim().is_empty());
-    if local_enabled {
-        let host = cpal::default_host();
-        match audio_player::device::list_device_infos(&host) {
-            Ok(devices) => {
-                if devices.is_empty() {
-                    tracing::warn!("local outputs enabled but no devices were found");
-                } else {
-                    tracing::info!(
-                        count = devices.len(),
-                        names = ?devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>(),
-                        "local output devices detected"
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "local outputs enabled but device enumeration failed");
-            }
-        }
-    }
-    let (local_cmd_tx, _local_cmd_rx) = unbounded();
-    let local_state = Arc::new(LocalProviderState {
-        enabled: local_enabled,
-        id: local_id,
-        name: local_name,
-        player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
-        running: Arc::new(AtomicBool::new(false)),
-    });
-    let device_selection = crate::state::DeviceSelectionState {
-        local: Arc::new(Mutex::new(local_device.clone())),
-        bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
-    };
+    apply_active_bridge_device(device_to_set, active_http_addr, &public_base_url);
+    let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
+    let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
+    let (local_state, device_selection) = build_local_state(&cfg);
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -282,12 +201,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
 
 fn spawn_library_watcher(state: web::Data<AppState>) {
     let root = state.library.read().unwrap().root().to_path_buf();
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        root.clone(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     std::thread::spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
@@ -533,6 +447,128 @@ async fn serve_index(index_path: PathBuf) -> actix_web::Result<NamedFile> {
     Ok(NamedFile::open(index_path)?)
 }
 
+fn init_musicbrainz(cfg: &config::ServerConfig) -> Result<Option<Arc<MusicBrainzClient>>> {
+    let musicbrainz = match cfg.musicbrainz.as_ref() {
+        Some(cfg) => MusicBrainzClient::new(cfg)?,
+        None => None,
+    }
+    .map(Arc::new);
+    if let Some(client) = musicbrainz.as_ref() {
+        tracing::info!(user_agent = client.user_agent(), "musicbrainz enrichment enabled");
+    } else {
+        tracing::info!("musicbrainz enrichment disabled");
+    }
+    Ok(musicbrainz)
+}
+
+fn init_metadata_db_and_library(
+    media_dir: &PathBuf,
+    events: crate::events::EventBus,
+    metadata_wake: MetadataWake,
+) -> Result<(MetadataDb, crate::library::LibraryIndex)> {
+    let metadata_db = MetadataDb::new(media_dir)?;
+    let metadata_service = MetadataService::new(
+        metadata_db.clone(),
+        media_dir.clone(),
+        events,
+        metadata_wake,
+    );
+    let library = metadata_service.scan_library(false)?;
+    Ok((metadata_db, library))
+}
+
+fn apply_active_bridge_device(
+    device_to_set: Option<String>,
+    active_http_addr: Option<std::net::SocketAddr>,
+    public_base_url: &str,
+) {
+    if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
+        let _ = BridgeTransportClient::new(http_addr, public_base_url.to_string())
+            .set_device(&device_name);
+    }
+}
+
+fn build_bridge_state(
+    bridges: Vec<crate::config::BridgeConfigResolved>,
+    active_bridge_id: Option<String>,
+    active_output_id: Option<String>,
+    public_base_url: String,
+) -> Arc<BridgeProviderState> {
+    let (cmd_tx, _cmd_rx) = unbounded();
+    let bridge_online = Arc::new(AtomicBool::new(false));
+    let bridges_state = Arc::new(Mutex::new(BridgeState {
+        bridges,
+        active_bridge_id,
+        active_output_id,
+    }));
+    let discovered_bridges = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    Arc::new(BridgeProviderState::new(
+        cmd_tx,
+        bridges_state,
+        bridge_online,
+        discovered_bridges,
+        public_base_url,
+    ))
+}
+
+fn build_playback_manager(
+    player: Arc<Mutex<crate::bridge::BridgePlayer>>,
+    events: crate::events::EventBus,
+) -> crate::playback_manager::PlaybackManager {
+    let status = Arc::new(Mutex::new(PlayerStatus::default()));
+    let queue = Arc::new(Mutex::new(QueueState::default()));
+    let status_store = crate::status_store::StatusStore::new(status, events.clone());
+    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events);
+    crate::playback_manager::PlaybackManager::new(player, status_store, queue_service)
+}
+
+fn build_local_state(
+    cfg: &config::ServerConfig,
+) -> (Arc<LocalProviderState>, crate::state::DeviceSelectionState) {
+    let local_enabled = cfg.local_outputs.unwrap_or(false);
+    let local_id = cfg
+        .local_id
+        .clone()
+        .unwrap_or_else(|| "local".to_string());
+    let local_name = cfg
+        .local_name
+        .clone()
+        .unwrap_or_else(|| "Local Host".to_string());
+    let local_device = cfg.local_device.clone().filter(|s| !s.trim().is_empty());
+    if local_enabled {
+        let host = cpal::default_host();
+        match audio_player::device::list_device_infos(&host) {
+            Ok(devices) => {
+                if devices.is_empty() {
+                    tracing::warn!("local outputs enabled but no devices were found");
+                } else {
+                    tracing::info!(
+                        count = devices.len(),
+                        names = ?devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>(),
+                        "local output devices detected"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "local outputs enabled but device enumeration failed");
+            }
+        }
+    }
+    let (local_cmd_tx, _local_cmd_rx) = unbounded();
+    let local_state = Arc::new(LocalProviderState {
+        enabled: local_enabled,
+        id: local_id,
+        name: local_name,
+        player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+        running: Arc::new(AtomicBool::new(false)),
+    });
+    let device_selection = crate::state::DeviceSelectionState {
+        local: Arc::new(Mutex::new(local_device.clone())),
+        bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+    };
+    (local_state, device_selection)
+}
+
 /// Resolve active output id from config and available bridges.
 fn resolve_active_output(
     cfg: &config::ServerConfig,
@@ -643,4 +679,61 @@ fn setup_shutdown(player: std::sync::Arc<std::sync::Mutex<crate::bridge::BridgeP
             std::process::exit(0);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_log_path_filters_noisy_paths() {
+        assert!(!should_log_path("/queue"));
+        assert!(!should_log_path("/queue/stream"));
+        assert!(!should_log_path("/logs/stream"));
+        assert!(!should_log_path("/outputs/bridge:test/status/stream"));
+        assert!(!should_log_path("/outputs/bridge:test"));
+        assert!(should_log_path("/artists"));
+        assert!(should_log_path("/outputs/select"));
+    }
+
+    #[test]
+    fn resolve_active_output_supports_local_override() {
+        let mut device_to_set = None;
+        let cfg = config::ServerConfig {
+            bind: None,
+            media_dir: None,
+            public_base_url: None,
+            bridges: None,
+            active_output: Some("local:default".to_string()),
+            local_outputs: None,
+            local_id: None,
+            local_name: None,
+            local_device: None,
+            musicbrainz: None,
+        };
+        let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
+        assert_eq!(result.0, None);
+        assert_eq!(result.1, Some("local:default".to_string()));
+        assert_eq!(device_to_set, None);
+    }
+
+    #[test]
+    fn resolve_active_output_defaults_to_none_without_bridges() {
+        let mut device_to_set = None;
+        let cfg = config::ServerConfig {
+            bind: None,
+            media_dir: None,
+            public_base_url: None,
+            bridges: None,
+            active_output: None,
+            local_outputs: None,
+            local_id: None,
+            local_name: None,
+            local_device: None,
+            musicbrainz: None,
+        };
+        let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
+        assert_eq!(result, (None, None));
+        assert_eq!(device_to_set, None);
+    }
 }

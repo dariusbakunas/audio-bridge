@@ -283,3 +283,76 @@ impl MetadataService {
         Ok(full_path)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "audio-hub-metadata-service-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn build_track_record_copies_meta_and_fs_fields() {
+        let root = temp_root();
+        let path = root.join("song.flac");
+        std::fs::write(&path, b"audio").expect("write file");
+        let fs_meta = std::fs::metadata(&path).expect("metadata");
+
+        let meta = TrackMeta {
+            title: Some("Title".to_string()),
+            artist: Some("Artist".to_string()),
+            album: Some("Album".to_string()),
+            album_artist: Some("Album Artist".to_string()),
+            track_number: Some(3),
+            disc_number: Some(1),
+            year: Some(1999),
+            duration_ms: Some(1234),
+            sample_rate: Some(44100),
+            format: Some("FLAC".to_string()),
+            ..TrackMeta::default()
+        };
+
+        let record = MetadataService::build_track_record(&path, "song.flac", &meta, &fs_meta);
+        assert_eq!(record.title.as_deref(), Some("Title"));
+        assert_eq!(record.artist.as_deref(), Some("Artist"));
+        assert_eq!(record.album.as_deref(), Some("Album"));
+        assert_eq!(record.album_artist.as_deref(), Some("Album Artist"));
+        assert_eq!(record.track_number, Some(3));
+        assert_eq!(record.disc_number, Some(1));
+        assert_eq!(record.year, Some(1999));
+        assert_eq!(record.duration_ms, Some(1234));
+        assert_eq!(record.sample_rate, Some(44100));
+        assert_eq!(record.format.as_deref(), Some("FLAC"));
+        assert_eq!(record.size_bytes, fs_meta.len() as i64);
+    }
+
+    #[test]
+    fn resolve_track_path_rejects_outside_root() {
+        let root = temp_root().canonicalize().expect("canonicalize root");
+        let other = temp_root().join("outside.flac");
+        std::fs::write(&other, b"audio").expect("write file");
+
+        let result = MetadataService::resolve_track_path(&root, &other.to_string_lossy());
+        assert!(matches!(result, Err(resp) if resp.status() == actix_web::http::StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn resolve_track_path_accepts_file_under_root() {
+        let root = temp_root().canonicalize().expect("canonicalize root");
+        let path = root.join("inside.flac");
+        std::fs::write(&path, b"audio").expect("write file");
+
+        let result = MetadataService::resolve_track_path(&root, &path.to_string_lossy());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), path.canonicalize().unwrap());
+    }
+}

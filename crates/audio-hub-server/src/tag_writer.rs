@@ -76,3 +76,32 @@ fn default_tag_type(path: &Path) -> Option<TagType> {
     };
     Some(tag_type)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_tag_type_maps_known_extensions() {
+        assert_eq!(
+            default_tag_type(Path::new("song.flac")),
+            Some(TagType::VorbisComments)
+        );
+        assert_eq!(
+            default_tag_type(Path::new("song.m4a")),
+            Some(TagType::Mp4Ilst)
+        );
+        assert_eq!(
+            default_tag_type(Path::new("song.mp3")),
+            Some(TagType::Id3v2)
+        );
+    }
+
+    #[test]
+    fn default_tag_type_falls_back_to_id3v2() {
+        assert_eq!(
+            default_tag_type(Path::new("song.unknown")),
+            Some(TagType::Id3v2)
+        );
+    }
+}

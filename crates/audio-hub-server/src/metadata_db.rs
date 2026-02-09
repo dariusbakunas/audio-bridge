@@ -1210,6 +1210,55 @@ fn init_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_path_for_places_db_under_audio_hub_dir() {
+        let root = Path::new("/music/library");
+        let path = db_path_for(root);
+        assert_eq!(path, root.join(".audio-hub").join("metadata.sqlite"));
+    }
+
+    #[test]
+    fn is_blank_handles_empty_and_whitespace() {
+        assert!(is_blank(&None));
+        assert!(is_blank(&Some("".to_string())));
+        assert!(is_blank(&Some("  ".to_string())));
+        assert!(!is_blank(&Some("a".to_string())));
+    }
+
+    #[test]
+    fn find_artist_id_and_album_id_work() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL, artist_id INTEGER);
+            "#,
+        )
+        .expect("create schema");
+        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A-Ha')", [])
+            .expect("insert artist");
+        conn.execute(
+            "INSERT INTO albums (id, title, artist_id) VALUES (10, 'Hunting High and Low', 1)",
+            [],
+        )
+        .expect("insert album");
+
+        let artist_id = find_artist_id(&conn, "A-Ha").expect("find artist");
+        assert_eq!(artist_id, Some(1));
+        let album_id = find_album_id(&conn, "Hunting High and Low", Some(1)).expect("find album");
+        assert_eq!(album_id, Some(10));
+
+        let missing_artist = find_artist_id(&conn, "Missing").expect("find missing artist");
+        assert_eq!(missing_artist, None);
+        let missing_album = find_album_id(&conn, "Missing", Some(1)).expect("find missing album");
+        assert_eq!(missing_album, None);
+    }
+}
+
 fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
     conn.execute(
         "INSERT OR IGNORE INTO artists (name, sort_name) VALUES (?1, ?2)",

@@ -247,6 +247,55 @@ fn hash_bytes(data: &[u8]) -> u64 {
     hasher.finish()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "audio-hub-cover-art-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn slugify_strips_and_collapses() {
+        assert_eq!(slugify("A-Ha: Hunting High & Low"), "a-ha-hunting-high-low");
+        assert_eq!(slugify("   "), "cover");
+        assert_eq!(slugify("--Already--Slug--"), "already-slug");
+    }
+
+    #[test]
+    fn mime_and_extension_round_trip() {
+        assert_eq!(mime_for_extension(Some(std::ffi::OsStr::new("jpg"))), Some("image/jpeg"));
+        assert_eq!(mime_for_extension(Some(std::ffi::OsStr::new("png"))), Some("image/png"));
+        assert_eq!(extension_for_mime("image/jpeg"), Some("jpg"));
+        assert_eq!(extension_for_mime("image/png"), Some("png"));
+        assert_eq!(extension_for_mime("application/octet-stream"), None);
+    }
+
+    #[test]
+    fn cover_store_writes_and_finds_cached_art() {
+        let root = temp_root();
+        let store = CoverArtStore::new(root.clone());
+        let data = b"cover-bytes";
+        let hint = "Test Album";
+        let relative = store
+            .store_cover_art(hint, "image/jpeg", data)
+            .expect("store cover art");
+        let full = root.join(&relative);
+        assert!(full.exists());
+
+        let found = store.find_cached_cover(hint).expect("find cached cover");
+        assert_eq!(found, relative);
+    }
+}
+
 pub struct CoverArtFetcher {
     db: MetadataDb,
     store: CoverArtStore,
