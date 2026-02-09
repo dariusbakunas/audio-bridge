@@ -15,9 +15,6 @@ pub use library::{
     rescan_library,
     rescan_track,
     stream_track,
-    LibraryQuery,
-    RescanTrackRequest,
-    StreamQuery,
 };
 pub use logs::{logs_clear, LogsClearResponse};
 pub use metadata::{
@@ -34,14 +31,6 @@ pub use metadata::{
     tracks_metadata,
     tracks_metadata_update,
     tracks_resolve,
-    AlbumListQuery,
-    AlbumMetadataQuery,
-    ArtQuery,
-    CoverPath,
-    ListQuery,
-    TrackListQuery,
-    TrackMetadataQuery,
-    TrackResolveQuery,
 };
 pub use outputs::{
     outputs_list,
@@ -55,7 +44,6 @@ pub use playback::{
     seek,
     status_for_output,
     stop,
-    SeekBody,
 };
 pub use queue::{
     queue_add,

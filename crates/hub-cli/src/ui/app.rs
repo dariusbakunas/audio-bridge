@@ -588,21 +588,6 @@ impl App {
         self.list_state.select(Some(ni));
     }
 
-    fn select_first(&mut self) {
-        if self.entries.is_empty() {
-            return;
-        }
-        self.list_state.select(Some(0));
-    }
-
-    fn select_last(&mut self) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let last = self.entries.len() - 1;
-        self.list_state.select(Some(last));
-    }
-
     fn page_step(&self) -> usize {
         self.list_view_height.max(1)
     }

@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::Value;
 
 use crate::musicbrainz::MusicBrainzMatch;
 const SCHEMA_VERSION: i32 = 4;
@@ -737,7 +736,7 @@ impl MetadataDb {
     }
 
     pub fn advance_cover_candidate(&self, album_id: i64) -> Result<Option<String>> {
-        let mut conn = self.pool.get().context("open metadata db")?;
+        let conn = self.pool.get().context("open metadata db")?;
         let raw: Option<String> = conn
             .query_row(
                 "SELECT caa_release_candidates FROM albums WHERE id = ?1",

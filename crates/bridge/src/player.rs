@@ -27,11 +27,9 @@ pub(crate) enum PlayerCommand {
         seek_ms: Option<u64>,
     },
     PauseToggle,
-    Pause,
     Resume,
     Stop,
     Seek { ms: u64 },
-    Quit,
 }
 
 /// Handle for sending commands to the playback worker.
@@ -77,10 +75,6 @@ fn player_thread_main(
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
-            PlayerCommand::Quit => {
-                cancel_session(&mut session);
-                break;
-            }
             PlayerCommand::Stop => {
                 cancel_session(&mut session);
                 current = None;
@@ -94,13 +88,6 @@ fn player_thread_main(
                 tracing::info!(paused, "bridge pause toggled");
                 if let Some(sess) = session.as_ref() {
                     sess.paused.store(paused, Ordering::Relaxed);
-                }
-            }
-            PlayerCommand::Pause => {
-                paused = true;
-                tracing::info!(paused, "bridge pause set");
-                if let Some(sess) = session.as_ref() {
-                    sess.paused.store(true, Ordering::Relaxed);
                 }
             }
             PlayerCommand::Resume => {
