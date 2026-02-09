@@ -907,7 +907,10 @@ impl MetadataDb {
             WHERE (?1 IS NULL OR al.artist_id = ?1)
               AND (?2 IS NULL OR LOWER(al.title) LIKE ?2)
             GROUP BY al.id
-            ORDER BY al.title
+            ORDER BY
+                CASE WHEN ar.name IS NULL THEN 1 ELSE 0 END,
+                COALESCE(ar.sort_name, ar.name),
+                COALESCE(al.sort_title, al.title)
             LIMIT ?3 OFFSET ?4
             "#,
         )?;
