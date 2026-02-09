@@ -172,15 +172,15 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         log_bus,
     ));
     spawn_library_watcher(state.clone());
-    if let Some(client) = state.musicbrainz.as_ref() {
+    if let Some(client) = state.metadata.musicbrainz.as_ref() {
         spawn_enrichment_loop(
-            state.metadata_db.clone(),
+            state.metadata.db.clone(),
             client.clone(),
             state.events.clone(),
             metadata_wake.clone(),
         );
         CoverArtFetcher::new(
-            state.metadata_db.clone(),
+            state.metadata.db.clone(),
             state.library.read().unwrap().root().to_path_buf(),
             client.user_agent().to_string(),
             state.events.clone(),
@@ -188,7 +188,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         )
         .spawn();
     }
-    setup_shutdown(state.bridge.player.clone());
+    setup_shutdown(state.providers.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
     HttpServer::new(move || {
@@ -283,10 +283,10 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
 fn spawn_library_watcher(state: web::Data<AppState>) {
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         root.clone(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     std::thread::spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel();

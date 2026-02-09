@@ -15,7 +15,7 @@ use crate::state::AppState;
 #[get("/queue")]
 /// Return the current queue.
 pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(state.output_controller.queue_list(&state))
+    HttpResponse::Ok().json(state.output.controller.queue_list(&state))
 }
 
 #[utoipa::path(
@@ -29,8 +29,7 @@ pub async fn queue_list(state: web::Data<AppState>) -> impl Responder {
 #[post("/queue")]
 /// Add paths to the queue.
 pub async fn queue_add(state: web::Data<AppState>, body: web::Json<QueueAddRequest>) -> impl Responder {
-    let added = state
-        .output_controller
+    let added = state.output.controller
         .queue_add_paths(&state, body.paths.clone());
     HttpResponse::Ok().body(format!("added {added}"))
 }
@@ -49,8 +48,7 @@ pub async fn queue_add_next(
     state: web::Data<AppState>,
     body: web::Json<QueueAddRequest>,
 ) -> impl Responder {
-    let added = state
-        .output_controller
+    let added = state.output.controller
         .queue_add_next_paths(&state, body.paths.clone());
     HttpResponse::Ok().body(format!("added {added}"))
 }
@@ -67,8 +65,7 @@ pub async fn queue_add_next(
 #[post("/queue/remove")]
 /// Remove a path from the queue.
 pub async fn queue_remove(state: web::Data<AppState>, body: web::Json<QueueRemoveRequest>) -> impl Responder {
-    match state
-        .output_controller
+    match state.output.controller
         .queue_remove_path(&state, &body.path)
     {
         Ok(_) => HttpResponse::Ok().finish(),
@@ -92,8 +89,7 @@ pub async fn queue_play_from(
     state: web::Data<AppState>,
     body: web::Json<QueuePlayFromRequest>,
 ) -> impl Responder {
-    match state
-        .output_controller
+    match state.output.controller
         .queue_play_from(&state, &body.path)
         .await
     {
@@ -113,7 +109,7 @@ pub async fn queue_play_from(
 #[post("/queue/clear")]
 /// Clear the queue.
 pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
-    state.output_controller.queue_clear(&state);
+    state.output.controller.queue_clear(&state);
     HttpResponse::Ok().finish()
 }
 
@@ -129,7 +125,7 @@ pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
 /// Skip to the next queued track.
 pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
     tracing::debug!("queue next request");
-    match state.output_controller.queue_next(&state).await {
+    match state.output.controller.queue_next(&state).await {
         Ok(true) => HttpResponse::Ok().finish(),
         Ok(false) => HttpResponse::NoContent().finish(),
         Err(err) => err.into_response(),
@@ -148,7 +144,7 @@ pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
 /// Skip to the previously played track.
 pub async fn queue_previous(state: web::Data<AppState>) -> impl Responder {
     tracing::debug!("queue previous request");
-    match state.output_controller.queue_previous(&state).await {
+    match state.output.controller.queue_previous(&state).await {
         Ok(true) => HttpResponse::Ok().finish(),
         Ok(false) => HttpResponse::NoContent().finish(),
         Err(err) => err.into_response(),

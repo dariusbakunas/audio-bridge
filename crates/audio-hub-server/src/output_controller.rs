@@ -141,7 +141,7 @@ impl OutputController {
         state: &AppState,
         requested: Option<&str>,
     ) -> Result<String, OutputControllerError> {
-        let active_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         let Some(active_id) = active_id else {
             tracing::warn!("request rejected: no active output selected");
             return Err(OutputControllerError::NoActiveOutput);
@@ -175,7 +175,7 @@ impl OutputController {
         requested_output: Option<&str>,
     ) -> Result<String, OutputControllerError> {
         {
-            let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
+            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
             if apply_queue_mode(&mut queue, &path, queue_mode) {
                 state.events.queue_changed();
             }
@@ -184,7 +184,7 @@ impl OutputController {
         let output_id = self
             .resolve_active_output_id(state, requested_output)
             .await?;
-        state.playback_manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.status().set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
 
         Ok(output_id)
@@ -192,7 +192,7 @@ impl OutputController {
 
     /// Return the current queue as API response items.
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        state.playback_manager.queue_service().list(&state.library.read().unwrap())
+        state.playback.manager.queue_service().list(&state.library.read().unwrap())
     }
 
     /// Add paths to the queue and return the number added.
@@ -210,7 +210,7 @@ impl OutputController {
             };
             resolved.push(path);
         }
-        state.playback_manager.queue_service().add_paths(resolved)
+        state.playback.manager.queue_service().add_paths(resolved)
     }
 
     /// Insert paths to the front of the queue and return the number added.
@@ -228,7 +228,7 @@ impl OutputController {
             };
             resolved.push(path);
         }
-        state.playback_manager.queue_service().add_next_paths(resolved)
+        state.playback.manager.queue_service().add_next_paths(resolved)
     }
 
     /// Remove a path from the queue.
@@ -239,7 +239,7 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        Ok(state.playback_manager.queue_service().remove_path(&path))
+        Ok(state.playback.manager.queue_service().remove_path(&path))
     }
 
     /// Play a queued item and drop items ahead of it.
@@ -252,7 +252,7 @@ impl OutputController {
         let path = self.canonicalize_under_root(state, &path)?;
         let mut found = false;
         {
-            let mut queue = state.playback_manager.queue_service().queue().lock().unwrap();
+            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
             if let Some(pos) = queue.items.iter().position(|p| p == &path) {
                 queue.items.drain(0..=pos);
                 found = true;
@@ -263,28 +263,28 @@ impl OutputController {
             return Ok(false);
         }
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback_manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.status().set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
         Ok(true)
     }
 
     /// Clear the queue.
     pub(crate) fn queue_clear(&self, state: &AppState) {
-        state.playback_manager.queue_service().clear();
+        state.playback.manager.queue_service().clear();
     }
 
     /// Dispatch the next queued track if available.
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback_manager.status().set_manual_advance_in_flight(true);
-        match state.playback_manager.queue_next() {
+        state.playback.manager.status().set_manual_advance_in_flight(true);
+        match state.playback.manager.queue_next() {
             NextDispatchResult::Dispatched => Ok(true),
             NextDispatchResult::Empty => {
-                state.playback_manager.status().set_manual_advance_in_flight(false);
+                state.playback.manager.status().set_manual_advance_in_flight(false);
                 Ok(false)
             }
             NextDispatchResult::Failed => {
-                state.playback_manager.status().set_manual_advance_in_flight(false);
+                state.playback.manager.status().set_manual_advance_in_flight(false);
                 Err(OutputControllerError::PlayerOffline)
             }
         }
@@ -293,23 +293,21 @@ impl OutputController {
     /// Play the previous track from history if available.
     pub(crate) async fn queue_previous(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        let current = state
-            .playback_manager
+        let current = state.playback.manager
             .status()
             .inner()
             .lock()
             .ok()
             .and_then(|guard| guard.now_playing.clone());
-        let previous = state
-            .playback_manager
+        let previous = state.playback.manager
             .queue_service()
             .take_previous(current.as_deref());
         let Some(path) = previous else {
             return Ok(false);
         };
-        state.playback_manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.status().set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
-        state.playback_manager.update_has_previous();
+        state.playback.manager.update_has_previous();
         Ok(true)
     }
 
@@ -319,8 +317,7 @@ impl OutputController {
         state: &AppState,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state
-            .playback_manager
+        state.playback.manager
             .pause_toggle()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -333,8 +330,7 @@ impl OutputController {
         ms: u64,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state
-            .playback_manager
+        state.playback.manager
             .seek(ms)
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -343,8 +339,7 @@ impl OutputController {
     /// Stop playback on the active output.
     pub(crate) async fn stop(&self, state: &AppState) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state
-            .playback_manager
+        state.playback.manager
             .stop()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -363,8 +358,7 @@ impl OutputController {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        state
-            .playback_manager
+        state.playback.manager
             .play(path, ext_hint, seek_ms, start_paused)
             .map_err(|_| OutputControllerError::PlayerOffline)
     }
@@ -771,7 +765,7 @@ mod tests {
         });
         assert!(result.is_ok());
 
-        let guard = state.playback_manager.status().inner().lock().unwrap();
+        let guard = state.playback.manager.status().inner().lock().unwrap();
         assert!(guard.manual_advance_in_flight);
     }
 
@@ -823,7 +817,7 @@ mod tests {
 
         assert_eq!(added, 1);
         assert_eq!(
-            state.playback_manager.queue_service().queue().lock().unwrap().items,
+            state.playback.manager.queue_service().queue().lock().unwrap().items,
             vec![file_path.canonicalize().unwrap()]
         );
     }
@@ -866,8 +860,7 @@ mod tests {
             .expect("remove path");
 
         assert!(removed);
-        assert!(state
-            .playback_manager
+        assert!(state.playback.manager
             .queue_service()
             .queue()
             .lock()

@@ -15,7 +15,7 @@ use crate::state::AppState;
 #[get("/providers")]
 /// List all available output providers.
 pub async fn providers_list(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().json(state.output_controller.list_providers(&state))
+    HttpResponse::Ok().json(state.output.controller.list_providers(&state))
 }
 
 #[utoipa::path(
@@ -33,8 +33,7 @@ pub async fn provider_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
 ) -> impl Responder {
-    match state
-        .output_controller
+    match state.output.controller
         .outputs_for_provider(&state, id.as_str())
         .await
     {
@@ -54,7 +53,7 @@ pub async fn provider_outputs_list(
 /// List all outputs across providers.
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(normalize_outputs_response(
-        state.output_controller.list_outputs(&state),
+        state.output.controller.list_outputs(&state),
     ))
 }
 
@@ -73,7 +72,7 @@ pub async fn outputs_select(
     state: web::Data<AppState>,
     body: web::Json<OutputSelectRequest>,
 ) -> impl Responder {
-    match state.output_controller.select_output(&state, &body.id).await {
+    match state.output.controller.select_output(&state, &body.id).await {
         Ok(()) => {
             state.events.outputs_changed();
             HttpResponse::Ok().finish()

@@ -15,17 +15,17 @@ pub(crate) struct LocalProvider;
 impl LocalProvider {
     /// Build the provider id for local outputs.
     fn provider_id(state: &AppState) -> String {
-        format!("local:{}", state.local.id)
+        format!("local:{}", state.providers.local.id)
     }
 
     /// Build an output id for a local device.
     fn output_id(state: &AppState, device_id: &str) -> String {
-        format!("local:{}:{}", state.local.id, device_id)
+        format!("local:{}:{}", state.providers.local.id, device_id)
     }
 
     /// Return true if local outputs are enabled.
     fn is_enabled(state: &AppState) -> bool {
-        state.local.enabled
+        state.providers.local.enabled
     }
 
     fn parse_output_id(output_id: &str) -> Option<String> {
@@ -59,7 +59,7 @@ impl OutputProvider for LocalProvider {
         vec![ProviderInfo {
             id: Self::provider_id(state),
             kind: "local".to_string(),
-            name: state.local.name.clone(),
+            name: state.providers.local.name.clone(),
             state: "available".to_string(),
             capabilities: OutputCapabilities {
                 device_select: true,
@@ -81,13 +81,13 @@ impl OutputProvider for LocalProvider {
             return Err(ProviderError::BadRequest("unknown provider id".to_string()));
         }
         let mut outputs = self.list_outputs(state);
-        if let Some(active_id) = state.bridge.bridges.lock().unwrap().active_output_id.clone() {
+        if let Some(active_id) = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone() {
             if !outputs.iter().any(|o| o.id == active_id) {
                 self.inject_active_output_if_missing(state, &mut outputs, &active_id);
             }
         }
         Ok(OutputsResponse {
-            active_id: state.bridge.bridges.lock().unwrap().active_output_id.clone(),
+            active_id: state.providers.bridge.bridges.lock().unwrap().active_output_id.clone(),
             outputs,
         })
     }
@@ -120,7 +120,7 @@ impl OutputProvider for LocalProvider {
                     name,
                     state: "online".to_string(),
                     provider_id: Some(Self::provider_id(state)),
-                    provider_name: Some(state.local.name.clone()),
+                    provider_name: Some(state.providers.local.name.clone()),
                     supported_rates: Some(supported_rates),
                     capabilities: OutputCapabilities {
                         device_select: true,
@@ -154,7 +154,7 @@ impl OutputProvider for LocalProvider {
         if outputs.iter().any(|o| o.id == active_output_id) {
             return;
         }
-        let status = state.playback_manager.status().inner().lock().ok();
+        let status = state.playback.manager.status().inner().lock().ok();
         let device_name = status
             .as_ref()
             .and_then(|s| s.output_device.clone())
@@ -171,7 +171,7 @@ impl OutputProvider for LocalProvider {
             name,
             state: "active".to_string(),
             provider_id: Some(Self::provider_id(state)),
-            provider_name: Some(state.local.name.clone()),
+            provider_name: Some(state.providers.local.name.clone()),
             supported_rates,
             capabilities: OutputCapabilities {
                 device_select: true,
@@ -198,7 +198,7 @@ impl OutputProvider for LocalProvider {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         };
         {
-            let player = state.bridge.player.lock().unwrap();
+            let player = state.providers.bridge.player.lock().unwrap();
             let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
         }
         let host = cpal::default_host();
@@ -209,11 +209,11 @@ impl OutputProvider for LocalProvider {
             .find(|d| d.id == device_id)
             .map(|d| d.name.clone())
             .ok_or_else(|| ProviderError::BadRequest("unknown device".to_string()))?;
-        if let Ok(mut g) = state.device_selection.local.lock() {
+        if let Ok(mut g) = state.playback.device_selection.local.lock() {
             *g = Some(device_name);
         }
         {
-            let mut bridges = state.bridge.bridges.lock().unwrap();
+            let mut bridges = state.providers.bridge.bridges.lock().unwrap();
             bridges.active_output_id = Some(output_id.to_string());
             bridges.active_bridge_id = None;
         }
@@ -233,13 +233,13 @@ impl OutputProvider for LocalProvider {
         if Self::parse_output_id(output_id).is_none() {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         }
-        let active_output_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_output_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         if active_output_id.as_deref() != Some(output_id) {
             return Err(ProviderError::BadRequest("output is not active".to_string()));
         }
         ensure_local_player(state).await?;
 
-            let status = state.playback_manager.status().inner().lock().unwrap();
+            let status = state.playback.manager.status().inner().lock().unwrap();
             let (title, artist, album, format, sample_rate, bitrate_kbps) =
                 match status.now_playing.as_ref() {
                     Some(path) => {
@@ -308,7 +308,7 @@ impl OutputProvider for LocalProvider {
         if Self::parse_output_id(output_id).is_none() {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         }
-        if let Ok(player) = state.local.player.lock() {
+        if let Ok(player) = state.providers.local.player.lock() {
             let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Stop);
         }
         Ok(())
@@ -344,20 +344,18 @@ async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
     if !LocalProvider::is_enabled(state) {
         return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
     }
-    if !state
-        .local
+    if !state.providers.local
         .running
         .load(std::sync::atomic::Ordering::Relaxed)
     {
             let handle = crate::local_player::spawn_local_player(
-                state.device_selection.local.clone(),
-                state.playback_manager.status().clone(),
+                state.playback.device_selection.local.clone(),
+                state.playback.manager.status().clone(),
                 audio_player::config::PlaybackConfig::default(),
             );
-        state.bridge.player.lock().unwrap().cmd_tx = handle.cmd_tx.clone();
-        state.local.player.lock().unwrap().cmd_tx = handle.cmd_tx;
-        state
-            .local
+        state.providers.bridge.player.lock().unwrap().cmd_tx = handle.cmd_tx.clone();
+        state.providers.local.player.lock().unwrap().cmd_tx = handle.cmd_tx;
+        state.providers.local
             .running
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
@@ -492,7 +490,7 @@ mod tests {
     fn inject_active_output_if_missing_adds_placeholder() {
         let active_id = "local:local:device-1".to_string();
         let state = make_state(Some(active_id.clone()), true);
-        if let Ok(mut status) = state.playback_manager.status().inner().lock() {
+        if let Ok(mut status) = state.playback.manager.status().inner().lock() {
             status.output_device = Some("USB DAC".to_string());
             status.sample_rate = Some(96_000);
         }

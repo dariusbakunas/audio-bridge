@@ -24,14 +24,12 @@ impl BridgeProvider {
     /// Ensure the currently active bridge is reachable before serving requests.
     async fn ensure_active_connected(state: &AppState) -> Result<(), ProviderError> {
         tracing::debug!(
-            bridge_online = state
-                .bridge
+            bridge_online = state.providers.bridge
                 .bridge_online
                 .load(std::sync::atomic::Ordering::Relaxed),
             "ensure_active_connected called"
         );
-        if state
-            .bridge
+        if state.providers.bridge
             .bridge_online
             .load(std::sync::atomic::Ordering::Relaxed)
         {
@@ -39,8 +37,8 @@ impl BridgeProvider {
         }
 
         let (bridge_id, addr) = {
-            let bridges_state = state.bridge.bridges.lock().unwrap();
-            let discovered = state.bridge.discovered_bridges.lock().unwrap();
+            let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
             let Some(active_bridge_id) = bridges_state.active_bridge_id.as_ref() else {
                 return Err(ProviderError::Unavailable("no active output selected".to_string()));
@@ -53,7 +51,7 @@ impl BridgeProvider {
 
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
         {
-            let mut player = state.bridge.player.lock().unwrap();
+            let mut player = state.providers.bridge.player.lock().unwrap();
             let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
             player.cmd_tx = cmd_tx.clone();
         }
@@ -62,26 +60,24 @@ impl BridgeProvider {
             addr,
             cmd_rx,
             cmd_tx,
-            state.playback_manager.status().clone(),
-            state.playback_manager.queue_service().queue().clone(),
-            state.bridge.bridge_online.clone(),
-            state.bridge.bridges.clone(),
-            state.bridge.public_base_url.clone(),
+            state.playback.manager.status().clone(),
+            state.playback.manager.queue_service().queue().clone(),
+            state.providers.bridge.bridge_online.clone(),
+            state.providers.bridge.bridges.clone(),
+            state.providers.bridge.public_base_url.clone(),
             state.events.clone(),
         );
 
         let mut waited = 0u64;
         while waited < 2000
-            && !state
-                .bridge
+            && !state.providers.bridge
                 .bridge_online
                 .load(std::sync::atomic::Ordering::Relaxed)
         {
             actix_web::rt::time::sleep(std::time::Duration::from_millis(100)).await;
             waited += 100;
         }
-        if !state
-            .bridge
+        if !state.providers.bridge
             .bridge_online
             .load(std::sync::atomic::Ordering::Relaxed)
         {
@@ -91,16 +87,15 @@ impl BridgeProvider {
     }
 
     fn list_outputs_internal(state: &AppState) -> Vec<OutputInfo> {
-        let bridges_state = state.bridge.bridges.lock().unwrap();
-        let discovered = state.bridge.discovered_bridges.lock().unwrap();
+        let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+        let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         let (outputs, failed) = build_outputs_from_bridges_with_failures(&merged);
         drop(bridges_state);
         drop(discovered);
         if !failed.is_empty() {
-            if let Ok(mut map) = state.bridge.discovered_bridges.lock() {
-                let configured_ids: std::collections::HashSet<String> = state
-                    .bridge
+            if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
+                let configured_ids: std::collections::HashSet<String> = state.providers.bridge
                     .bridges
                     .lock()
                     .unwrap()
@@ -126,10 +121,9 @@ impl BridgeProvider {
 #[async_trait]
 impl OutputProvider for BridgeProvider {
     fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
-        let bridges_state = state.bridge.bridges.lock().unwrap();
-        let discovered = state.bridge.discovered_bridges.lock().unwrap();
-        let active_online = state
-            .bridge
+        let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+        let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
+        let active_online = state.providers.bridge
             .bridge_online
             .load(std::sync::atomic::Ordering::Relaxed);
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
@@ -167,8 +161,8 @@ impl OutputProvider for BridgeProvider {
         let bridge_id = parse_provider_id(provider_id)
             .map_err(|e| ProviderError::BadRequest(e))?;
         let (bridge, active_output_id) = {
-            let bridges_state = state.bridge.bridges.lock().unwrap();
-            let discovered = state.bridge.discovered_bridges.lock().unwrap();
+            let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
             let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
                 return Err(ProviderError::BadRequest("unknown provider id".to_string()));
@@ -195,8 +189,8 @@ impl OutputProvider for BridgeProvider {
     }
 
     fn can_handle_provider_id(&self, state: &AppState, provider_id: &str) -> bool {
-        let bridges_state = state.bridge.bridges.lock().unwrap();
-        let discovered = state.bridge.discovered_bridges.lock().unwrap();
+        let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+        let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         parse_provider_id(provider_id)
             .ok()
@@ -213,8 +207,8 @@ impl OutputProvider for BridgeProvider {
         let Ok((bridge_id, _)) = parse_output_id(active_output_id) else {
             return;
         };
-        let bridges_state = state.bridge.bridges.lock().unwrap();
-        let discovered = state.bridge.discovered_bridges.lock().unwrap();
+        let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+        let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         if let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) {
             inject_active_output_for_bridge(outputs, Some(active_output_id), bridge);
@@ -235,8 +229,8 @@ impl OutputProvider for BridgeProvider {
         let (bridge_id, device_id) = parse_output_id(output_id)
             .map_err(|e| ProviderError::BadRequest(e))?;
         let http_addr = {
-            let bridges_state = state.bridge.bridges.lock().unwrap();
-            let discovered = state.bridge.discovered_bridges.lock().unwrap();
+            let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
             let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
                 return Err(ProviderError::BadRequest("unknown bridge id".to_string()));
@@ -270,12 +264,12 @@ impl OutputProvider for BridgeProvider {
         };
 
         let resume_info = {
-                let status = state.playback_manager.status().inner().lock().unwrap();
+                let status = state.playback.manager.status().inner().lock().unwrap();
             (status.now_playing.clone(), status.elapsed_ms, status.paused)
         };
 
         {
-            let cmd_tx = state.bridge.player.lock().unwrap().cmd_tx.clone();
+            let cmd_tx = state.providers.bridge.player.lock().unwrap().cmd_tx.clone();
             let _ = cmd_tx.send(crate::bridge::BridgeCommand::Stop);
         }
 
@@ -298,7 +292,7 @@ impl OutputProvider for BridgeProvider {
         }
 
         {
-            let mut bridges = state.bridge.bridges.lock().unwrap();
+            let mut bridges = state.providers.bridge.bridges.lock().unwrap();
             bridges.active_bridge_id = Some(bridge_id.clone());
             bridges.active_output_id = Some(output_id.to_string());
             tracing::info!(
@@ -307,7 +301,7 @@ impl OutputProvider for BridgeProvider {
                 "output selected"
             );
         }
-        if let Ok(mut sel) = state.device_selection.bridge.lock() {
+        if let Ok(mut sel) = state.playback.device_selection.bridge.lock() {
             sel.insert(bridge_id.clone(), device_id.clone());
         }
 
@@ -320,7 +314,7 @@ impl OutputProvider for BridgeProvider {
                 .unwrap_or("")
                 .to_ascii_lowercase();
             let start_paused = resume_info.2;
-            let _ = state.bridge.player.lock().unwrap().cmd_tx.send(
+            let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
                 crate::bridge::BridgeCommand::Play {
                     path,
                     ext_hint,
@@ -342,7 +336,7 @@ impl OutputProvider for BridgeProvider {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         }
         let (active_output_id, http_addr) = {
-            let bridges = state.bridge.bridges.lock().unwrap();
+            let bridges = state.providers.bridge.bridges.lock().unwrap();
             let http_addr = bridges.active_bridge_id.as_ref().and_then(|active_id| {
                 bridges
                     .bridges
@@ -357,7 +351,7 @@ impl OutputProvider for BridgeProvider {
         }
         Self::ensure_active_connected(state).await?;
 
-        let status = state.playback_manager.status().inner().lock().unwrap();
+        let status = state.playback.manager.status().inner().lock().unwrap();
         let (title, artist, album, format, sample_rate, bitrate_kbps) =
             match status.now_playing.as_ref() {
                 Some(path) => {
@@ -379,8 +373,7 @@ impl OutputProvider for BridgeProvider {
                 }
                 None => (None, None, None, None, None, None),
             };
-        let bridge_online = state
-            .bridge
+        let bridge_online = state.providers.bridge
             .bridge_online
             .load(std::sync::atomic::Ordering::Relaxed);
         let mut resp = StatusResponse {
@@ -453,8 +446,8 @@ impl OutputProvider for BridgeProvider {
         let (bridge_id, _device_id) =
             parse_output_id(output_id).map_err(|e| ProviderError::BadRequest(e))?;
         let http_addr = {
-            let bridges_state = state.bridge.bridges.lock().unwrap();
-            let discovered = state.bridge.discovered_bridges.lock().unwrap();
+            let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
             let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
                 return Err(ProviderError::BadRequest("unknown bridge id".to_string()));
@@ -728,7 +721,7 @@ fn switch_active_bridge(
     bridge_id: &str,
     http_addr: std::net::SocketAddr,
 ) -> Result<(), anyhow::Error> {
-    let mut bridges = state.bridge.bridges.lock().unwrap();
+    let mut bridges = state.providers.bridge.bridges.lock().unwrap();
     if bridges.active_bridge_id.as_deref() == Some(bridge_id) {
         return Ok(());
     }
@@ -741,12 +734,11 @@ fn switch_active_bridge(
     bridges.active_bridge_id = Some(bridge_id.to_string());
     drop(bridges);
 
-    state
-        .bridge
+    state.providers.bridge
         .bridge_online
         .store(false, std::sync::atomic::Ordering::Relaxed);
     {
-        let player = state.bridge.player.lock().unwrap();
+        let player = state.providers.bridge.player.lock().unwrap();
         let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
     }
     Ok(())

@@ -30,15 +30,14 @@ pub struct SeekBody {
 /// Start playback for the requested track.
 pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>) -> impl Responder {
     let path = PathBuf::from(&body.path);
-    let path = match state.output_controller.canonicalize_under_root(&state, &path) {
+    let path = match state.output.controller.canonicalize_under_root(&state, &path) {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };
 
     let mode = body.queue_mode.clone().unwrap_or(QueueMode::Keep);
     tracing::info!(path = %path.display(), "play request");
-    let output_id = match state
-        .output_controller
+    let output_id = match state.output.controller
         .play_request(&state, path.clone(), mode, body.output_id.as_deref())
         .await
     {
@@ -61,7 +60,7 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
 /// Toggle pause/resume.
 pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("pause toggle request");
-    match state.output_controller.pause_toggle(&state).await {
+    match state.output.controller.pause_toggle(&state).await {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -79,7 +78,7 @@ pub async fn pause_toggle(state: web::Data<AppState>) -> impl Responder {
 /// Stop playback.
 pub async fn stop(state: web::Data<AppState>) -> impl Responder {
     tracing::info!("stop request");
-    match state.output_controller.stop(&state).await {
+    match state.output.controller.stop(&state).await {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -98,7 +97,7 @@ pub async fn stop(state: web::Data<AppState>) -> impl Responder {
 /// Seek to an absolute position (milliseconds).
 pub async fn seek(state: web::Data<AppState>, body: web::Json<SeekBody>) -> impl Responder {
     let ms = body.ms;
-    match state.output_controller.seek(&state, ms).await {
+    match state.output.controller.seek(&state, ms).await {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -123,7 +122,7 @@ pub async fn status_for_output(
 ) -> impl Responder {
     let output_id = id.into_inner();
     tracing::debug!(output_id = %output_id, "status for output request");
-    match state.output_controller.status_for_output(&state, &output_id).await {
+    match state.output.controller.status_for_output(&state, &output_id).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err(err) => err.into_response(),
     }

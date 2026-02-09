@@ -47,7 +47,7 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
         .map(PathBuf::from)
         .unwrap_or_else(|| state.library.read().unwrap().root().to_path_buf());
 
-    let dir = match state.output_controller.canonicalize_under_root(&state, &dir) {
+    let dir = match state.output.controller.canonicalize_under_root(&state, &dir) {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };
@@ -85,7 +85,7 @@ pub async fn stream_track(
     query: web::Query<StreamQuery>,
 ) -> impl Responder {
     let path = PathBuf::from(&query.path);
-    let path = match state.output_controller.canonicalize_under_root(&state, &path) {
+    let path = match state.output.controller.canonicalize_under_root(&state, &path) {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };
@@ -155,17 +155,17 @@ pub async fn stream_track(
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         root.clone(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     tracing::info!(root = %root.display(), "rescan requested");
     match metadata_service.rescan_library(true) {
         Ok(new_index) => {
             *state.library.write().unwrap() = new_index;
             state.events.library_changed();
-            state.metadata_wake.notify();
+            state.metadata.wake.notify();
             HttpResponse::Ok().finish()
         }
         Err(e) => HttpResponse::InternalServerError().body(format!("scan failed: {e:#}")),
@@ -195,10 +195,10 @@ pub async fn rescan_track(
 ) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         root.clone(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let full_path = match MetadataService::resolve_track_path(&root, &body.path) {
         Ok(path) => path,

@@ -92,7 +92,7 @@ pub async fn status_stream(
     id: web::Path<String>,
 ) -> impl Responder {
     let output_id = id.into_inner();
-    let initial = match state.output_controller.status_for_output(&state, &output_id).await {
+    let initial = match state.output.controller.status_for_output(&state, &output_id).await {
         Ok(resp) => resp,
         Err(err) => return err.into_response(),
     };
@@ -137,8 +137,7 @@ pub async fn status_stream(
 
                 if refresh {
                     if let Ok(status) = ctx
-                        .state
-                        .output_controller
+                        .state.output.controller
                         .status_for_output(&ctx.state, &ctx.output_id)
                         .await
                     {
@@ -176,7 +175,7 @@ pub async fn status_stream(
 #[get("/queue/stream")]
 /// Stream queue updates via server-sent events.
 pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
-    let initial = state.output_controller.queue_list(&state);
+    let initial = state.output.controller.queue_list(&state);
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
     let mut pending = VecDeque::new();
     pending.push_back(sse_event("queue", &initial_json));
@@ -204,7 +203,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                     result = ctx.receiver.recv() => {
                         match result {
                             Ok(HubEvent::QueueChanged) => {
-                                let queue = ctx.state.output_controller.queue_list(&ctx.state);
+                                let queue = ctx.state.output.controller.queue_list(&ctx.state);
                                 let json = serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
                                 if ctx.last_queue.as_deref() != Some(json.as_str()) {
                                     ctx.last_queue = Some(json.clone());
@@ -216,7 +215,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                             Ok(HubEvent::Metadata(_)) => {}
                             Ok(HubEvent::LibraryChanged) => {}
                             Err(RecvError::Lagged(_)) => {
-                                let queue = ctx.state.output_controller.queue_list(&ctx.state);
+                                let queue = ctx.state.output.controller.queue_list(&ctx.state);
                                 let json = serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
                                 ctx.last_queue = Some(json.clone());
                                 ctx.pending.push_back(sse_event("queue", &json));
@@ -251,7 +250,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
 #[get("/outputs/stream")]
 /// Stream output updates via server-sent events.
 pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
-    let initial = normalize_outputs_response(state.output_controller.list_outputs(&state));
+    let initial = normalize_outputs_response(state.output.controller.list_outputs(&state));
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
     let mut pending = VecDeque::new();
     pending.push_back(sse_event("outputs", &initial_json));
@@ -291,7 +290,7 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                 }
 
                 if refresh {
-                    let outputs = normalize_outputs_response(ctx.state.output_controller.list_outputs(&ctx.state));
+                    let outputs = normalize_outputs_response(ctx.state.output.controller.list_outputs(&ctx.state));
                     let json = serde_json::to_string(&outputs).unwrap_or_else(|_| "null".to_string());
                     if ctx.last_outputs.as_deref() != Some(json.as_str()) {
                         ctx.last_outputs = Some(json.clone());

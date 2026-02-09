@@ -121,7 +121,7 @@ impl OutputRegistry {
         for provider in &self.providers {
             outputs.extend(provider.list_outputs(state));
         }
-        let active_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         if let Some(active_id) = active_id.as_deref() {
             if !outputs.iter().any(|o| o.id == active_id) {
                 for provider in &self.providers {
@@ -141,7 +141,7 @@ impl OutputRegistry {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
-        let previous = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let previous = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         if previous.as_deref() != Some(output_id) {
             if let Some(prev_id) = previous.as_deref() {
                 for provider in &self.providers {
@@ -185,7 +185,7 @@ impl OutputRegistry {
         &self,
         state: &AppState,
     ) -> Result<(), ProviderError> {
-        let active_id = state.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         let Some(active_id) = active_id else {
             return Err(ProviderError::Unavailable(
                 "no active output selected".to_string(),

@@ -34,3 +34,5 @@
 - Workspace edition: Rust 2024.
 - Output IDs are namespaced (e.g. `bridge:<bridge_id>:<device_id>`).
 - Config file example: `crates/audio-hub-server/config.example.toml`.
+- API handlers live under `crates/audio-hub-server/src/api/*`; OpenAPI `paths(...)` should use module-qualified handlers (e.g. `api::outputs::outputs_select`).
+- `rg` is not available in this environment; use `grep` for searches.

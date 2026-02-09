@@ -97,10 +97,10 @@ pub async fn tracks_resolve(
     query: web::Query<TrackResolveQuery>,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     match metadata_service.album_id_for_track_path(&query.path) {
         Ok(Some(album_id)) => HttpResponse::Ok().json(TrackResolveResponse {
@@ -127,10 +127,10 @@ pub async fn tracks_metadata(
     query: web::Query<TrackMetadataQuery>,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     match metadata_service.track_record_by_path(&query.path) {
         Ok(Some(record)) => HttpResponse::Ok().json(TrackMetadataResponse {
@@ -167,10 +167,10 @@ pub async fn tracks_metadata_update(
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         root.clone(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let full_path = match MetadataService::resolve_track_path(&root, &request.path) {
         Ok(path) => path,
@@ -239,10 +239,10 @@ pub async fn albums_metadata(
     query: web::Query<AlbumMetadataQuery>,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     match metadata_service.album_summary_by_id(query.album_id) {
         Ok(Some(album)) => HttpResponse::Ok().json(AlbumMetadataResponse {
@@ -275,10 +275,10 @@ pub async fn albums_metadata_update(
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         root.clone(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let album_artist = request
@@ -366,10 +366,10 @@ pub async fn art_for_track(
     req: HttpRequest,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let cover_rel = match metadata_service.cover_path_for_track(&query.path) {
         Ok(Some(path)) => path,
@@ -400,10 +400,10 @@ pub async fn track_cover(
     req: HttpRequest,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let cover_rel = match metadata_service.cover_path_for_track_id(path.id) {
         Ok(Some(path)) => path,
@@ -429,10 +429,10 @@ pub async fn album_cover(
     req: HttpRequest,
 ) -> impl Responder {
     let metadata_service = MetadataService::new(
-        state.metadata_db.clone(),
+        state.metadata.db.clone(),
         state.library.read().unwrap().root().to_path_buf(),
         state.events.clone(),
-        state.metadata_wake.clone(),
+        state.metadata.wake.clone(),
     );
     let cover_rel = match metadata_service.cover_path_for_album_id(path.id) {
         Ok(Some(path)) => path,
@@ -476,8 +476,7 @@ fn serve_cover_art(state: &AppState, cover_rel: &str, req: &HttpRequest) -> Http
 pub async fn artists_list(state: web::Data<AppState>, query: web::Query<ListQuery>) -> impl Responder {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
-    match state
-        .metadata_db
+    match state.metadata.db
         .list_artists(query.search.as_deref(), limit, offset)
     {
         Ok(items) => HttpResponse::Ok().json(ArtistListResponse { items }),
@@ -509,7 +508,7 @@ pub async fn albums_list(
 ) -> impl Responder {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
-    match state.metadata_db.list_albums(
+    match state.metadata.db.list_albums(
         query.artist_id,
         query.search.as_deref(),
         limit,
@@ -545,7 +544,7 @@ pub async fn tracks_list(
 ) -> impl Responder {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
-    match state.metadata_db.list_tracks(
+    match state.metadata.db.list_tracks(
         query.album_id,
         query.artist_id,
         query.search.as_deref(),
@@ -575,7 +574,7 @@ pub async fn musicbrainz_match_search(
     state: web::Data<AppState>,
     body: web::Json<MusicBrainzMatchSearchRequest>,
 ) -> impl Responder {
-    let Some(client) = state.musicbrainz.as_ref() else {
+    let Some(client) = state.metadata.musicbrainz.as_ref() else {
         return HttpResponse::BadRequest().body("musicbrainz is disabled");
     };
     let title = body.title.trim();
@@ -641,7 +640,7 @@ pub async fn musicbrainz_match_apply(
     state: web::Data<AppState>,
     body: web::Json<MusicBrainzMatchApplyRequest>,
 ) -> impl Responder {
-    let Some(_) = state.musicbrainz.as_ref() else {
+    let Some(_) = state.metadata.musicbrainz.as_ref() else {
         return HttpResponse::BadRequest().body("musicbrainz is disabled");
     };
     match body.into_inner() {
@@ -662,7 +661,7 @@ pub async fn musicbrainz_match_apply(
                 override_existing = ?override_existing,
                 "manual musicbrainz match apply (track)"
             );
-            let record = match state.metadata_db.track_record_by_path(&path) {
+            let record = match state.metadata.db.track_record_by_path(&path) {
                 Ok(Some(record)) => record,
                 Ok(None) => return HttpResponse::NotFound().finish(),
                 Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
@@ -678,8 +677,7 @@ pub async fn musicbrainz_match_apply(
                 release_candidates: Vec::new(),
             };
             let override_existing = override_existing.unwrap_or(true);
-            if let Err(err) = state
-                .metadata_db
+            if let Err(err) = state.metadata.db
                 .apply_musicbrainz_with_override(&record, &mb, override_existing)
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
@@ -695,7 +693,7 @@ pub async fn musicbrainz_match_apply(
                 artist_mbid: mb.artist_mbid.clone(),
                 album_mbid: mb.album_mbid.clone(),
             });
-            state.metadata_wake.notify();
+            state.metadata.wake.notify();
         }
         MusicBrainzMatchApplyRequest::Album {
             album_id,
@@ -723,14 +721,13 @@ pub async fn musicbrainz_match_apply(
                 release_candidates: Vec::new(),
             };
             let override_existing = override_existing.unwrap_or(true);
-            if let Err(err) = state
-                .metadata_db
+            if let Err(err) = state.metadata.db
                 .apply_album_musicbrainz(album_id, &mb, override_existing)
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
             }
             tracing::info!(album_id, "manual musicbrainz match applied (album)");
-            state.metadata_wake.notify();
+            state.metadata.wake.notify();
         }
     }
     HttpResponse::Ok().finish()

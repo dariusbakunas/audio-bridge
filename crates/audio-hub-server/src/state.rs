@@ -96,26 +96,50 @@ pub struct PlayerStatus {
     pub manual_advance_in_flight: bool,
 }
 
-/// Shared application state for Actix handlers and background workers.
-pub struct AppState {
-    /// Library index and root.
-    pub library: RwLock<LibraryIndex>,
+/// Grouped metadata dependencies for handlers/services.
+pub struct MetadataState {
     /// Metadata database.
-    pub metadata_db: MetadataDb,
+    pub db: MetadataDb,
     /// Optional MusicBrainz client for enrichment.
     pub musicbrainz: Option<Arc<MusicBrainzClient>>,
     /// Wake signal for metadata background jobs.
-    pub metadata_wake: MetadataWake,
+    pub wake: MetadataWake,
+}
+
+/// Grouped playback dependencies.
+pub struct PlaybackState {
+    /// Playback manager (queue + transport).
+    pub manager: PlaybackManager,
+    /// Device selections (local + per-bridge).
+    pub device_selection: DeviceSelectionState,
+}
+
+/// Grouped provider state.
+pub struct ProviderState {
     /// Bridge provider state (active bridge, discovery, transport).
     pub bridge: Arc<BridgeProviderState>,
     /// Local provider state (optional local playback).
     pub local: Arc<LocalProviderState>,
-    /// Playback manager (queue + transport).
-    pub playback_manager: PlaybackManager,
-    /// Device selections (local + per-bridge).
-    pub device_selection: DeviceSelectionState,
+}
+
+/// Grouped output dependencies.
+pub struct OutputState {
     /// Output controller facade.
-    pub output_controller: OutputController,
+    pub controller: OutputController,
+}
+
+/// Shared application state for Actix handlers and background workers.
+pub struct AppState {
+    /// Library index and root.
+    pub library: RwLock<LibraryIndex>,
+    /// Grouped metadata dependencies.
+    pub metadata: MetadataState,
+    /// Grouped provider state.
+    pub providers: ProviderState,
+    /// Grouped playback state.
+    pub playback: PlaybackState,
+    /// Grouped output dependencies.
+    pub output: OutputState,
     /// Event bus for UI subscriptions.
     pub events: EventBus,
     /// Log stream for UI subscriptions.
@@ -137,14 +161,19 @@ impl AppState {
     ) -> Self {
         Self {
             library: RwLock::new(library),
-            metadata_db,
-            musicbrainz,
-            metadata_wake,
-            bridge,
-            local,
-            playback_manager,
-            device_selection,
-            output_controller: OutputController::default(),
+            metadata: MetadataState {
+                db: metadata_db,
+                musicbrainz,
+                wake: metadata_wake,
+            },
+            providers: ProviderState { bridge, local },
+            playback: PlaybackState {
+                manager: playback_manager,
+                device_selection,
+            },
+            output: OutputState {
+                controller: OutputController::default(),
+            },
             events,
             log_bus,
         }
