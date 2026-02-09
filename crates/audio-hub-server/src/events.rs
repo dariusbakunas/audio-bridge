@@ -53,6 +53,13 @@ pub enum MetadataEvent {
         error: String,
         attempts: i64,
     },
+    AlbumNormalization {
+        path: String,
+        original_album: String,
+        normalized_album: String,
+        disc_number: Option<u32>,
+        source: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

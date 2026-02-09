@@ -217,6 +217,13 @@ pub struct AlbumMetadataUpdateRequest {
     pub track_artist: Option<String>,
 }
 
+/// Response for album metadata updates.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumMetadataUpdateResponse {
+    /// Album id after update (may differ if merged).
+    pub album_id: i64,
+}
+
 /// Payload to apply a MusicBrainz match to a track or album.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]

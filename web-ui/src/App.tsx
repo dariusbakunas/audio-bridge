@@ -1225,9 +1225,10 @@ export default function App() {
         targetLabel={albumEditLabel}
         defaults={albumEditDefaults}
         onClose={() => setAlbumEditTarget(null)}
-        onSaved={() => {
+        onSaved={(updatedAlbumId) => {
           if (albumViewId !== null) {
-            loadAlbumTracks(albumViewId);
+            setAlbumViewId(updatedAlbumId);
+            loadAlbumTracks(updatedAlbumId);
           }
           loadAlbums();
         }}

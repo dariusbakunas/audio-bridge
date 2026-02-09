@@ -79,6 +79,7 @@ use crate::models;
             models::TrackMetadataUpdateRequest,
             models::AlbumMetadataResponse,
             models::AlbumMetadataUpdateRequest,
+            models::AlbumMetadataUpdateResponse,
             models::MusicBrainzMatchSearchRequest,
             models::MusicBrainzMatchSearchResponse,
             models::MusicBrainzMatchCandidate,

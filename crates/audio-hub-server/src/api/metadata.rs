@@ -10,6 +10,7 @@ use crate::models::{
     AlbumListResponse,
     AlbumMetadataResponse,
     AlbumMetadataUpdateRequest,
+    AlbumMetadataUpdateResponse,
     ArtistListResponse,
     MusicBrainzMatchApplyRequest,
     MusicBrainzMatchCandidate,
@@ -240,7 +241,7 @@ pub async fn albums_metadata(
     path = "/albums/metadata/update",
     request_body = AlbumMetadataUpdateRequest,
     responses(
-        (status = 200, description = "Album metadata updated"),
+        (status = 200, description = "Album metadata updated", body = AlbumMetadataUpdateResponse),
         (status = 400, description = "Bad request"),
         (status = 404, description = "Album not found")
     )
@@ -300,28 +301,47 @@ pub async fn albums_metadata_update(
                 disc_number: None,
             },
         ) {
+            let message = format!("album metadata update failed for {path}: {err}");
             tracing::warn!(
                 error = %err,
                 path = %path,
                 album_id = request.album_id,
                 "album metadata update failed"
             );
-            return HttpResponse::InternalServerError().body(err.to_string());
+            return HttpResponse::InternalServerError().body(message);
         }
         if let Err(response) = metadata_service.rescan_track(&state.library, &full_path) {
+            tracing::warn!(
+                path = %path,
+                album_id = request.album_id,
+                status = %response.status(),
+                "album metadata rescan failed"
+            );
             return response;
         }
     }
 
+    let mut updated_album_id = request.album_id;
     if album.is_some() || album_artist.is_some() || year.is_some() {
         match metadata_service.update_album_metadata(request.album_id, album, album_artist, year) {
-            Ok(true) => {}
-            Ok(false) => return HttpResponse::NotFound().finish(),
-            Err(err) => return HttpResponse::InternalServerError().body(err),
+            Ok(Some(new_id)) => {
+                updated_album_id = new_id;
+            }
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    album_id = request.album_id,
+                    "album metadata db update failed"
+                );
+                return HttpResponse::InternalServerError().body(err);
+            }
         }
     }
 
-    HttpResponse::Ok().finish()
+    HttpResponse::Ok().json(AlbumMetadataUpdateResponse {
+        album_id: updated_album_id,
+    })
 }
 
 #[utoipa::path(

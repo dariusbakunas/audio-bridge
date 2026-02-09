@@ -43,15 +43,16 @@ impl MetadataService {
         meta: &TrackMeta,
         fs_meta: &std::fs::Metadata,
     ) -> TrackRecord {
+        let (album, disc_number, _source) = normalize_album_and_disc(path, meta);
         TrackRecord {
             path: path.to_string_lossy().to_string(),
             file_name: file_name.to_string(),
             title: meta.title.clone(),
             artist: meta.artist.clone(),
             album_artist: meta.album_artist.clone(),
-            album: meta.album.clone(),
+            album,
             track_number: meta.track_number,
-            disc_number: meta.disc_number,
+            disc_number,
             year: meta.year,
             duration_ms: meta.duration_ms,
             sample_rate: meta.sample_rate,
@@ -110,17 +111,36 @@ impl MetadataService {
             Ok(meta) => meta,
             Err(err) => return Err(HttpResponse::BadRequest().body(err.to_string())),
         };
+        let mut normalized_meta = meta.clone();
+        let original_album = normalized_meta.album.clone();
+        let (album, disc_number, source) =
+            normalize_album_and_disc(full_path, &normalized_meta);
+        if let (Some(original), Some(normalized), Some(source)) =
+            (original_album, album.clone(), source)
+        {
+            if original != normalized {
+                self.events.metadata_event(MetadataEvent::AlbumNormalization {
+                    path: full_path.to_string_lossy().to_string(),
+                    original_album: original,
+                    normalized_album: normalized.clone(),
+                    disc_number,
+                    source: source.to_string(),
+                });
+            }
+        }
+        normalized_meta.album = album;
+        normalized_meta.disc_number = disc_number;
         let file_name = full_path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("<unknown>");
-        let record = Self::build_track_record(full_path, file_name, &meta, &fs_meta);
+        let record = Self::build_track_record(full_path, file_name, &normalized_meta, &fs_meta);
         let _ = self.db.clear_musicbrainz_no_match(&record.path);
-        if let Err(err) = self.upsert_track_record(full_path, &meta, &record) {
+        if let Err(err) = self.upsert_track_record(full_path, &normalized_meta, &record) {
             return Err(HttpResponse::InternalServerError().body(err));
         }
         if let Ok(mut index) = library.write() {
-            index.update_track_meta(full_path, &meta);
+            index.update_track_meta(full_path, &normalized_meta);
         }
         self.events.library_changed();
         self.metadata_wake.notify();
@@ -155,10 +175,10 @@ impl MetadataService {
         title: Option<&str>,
         artist: Option<&str>,
         year: Option<i32>,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<i64>, String> {
         self.db
             .update_album_metadata(album_id, title, artist, year)
-            .map_err(|err| err.to_string())
+            .map_err(|err| format!("{err:#}"))
     }
 
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>, String> {
@@ -197,7 +217,7 @@ impl MetadataService {
         Ok(index)
     }
 
-    fn scan_library_with_paths(
+fn scan_library_with_paths(
         &self,
         emit_events: bool,
     ) -> Result<(LibraryIndex, std::collections::HashSet<String>)> {
@@ -206,8 +226,26 @@ impl MetadataService {
             &self.root,
             |path, file_name, _ext, meta, fs_meta| {
                 seen.insert(path.to_string_lossy().to_string());
-                let record = Self::build_track_record(path, file_name, meta, fs_meta);
-                if let Err(err) = self.upsert_track_record(path, meta, &record) {
+                let mut normalized_meta = meta.clone();
+                let original_album = normalized_meta.album.clone();
+                let (album, disc_number, source) = normalize_album_and_disc(path, &normalized_meta);
+                if let (Some(original), Some(normalized), Some(source)) =
+                    (original_album, album.clone(), source)
+                {
+                    if original != normalized {
+                        self.events.metadata_event(MetadataEvent::AlbumNormalization {
+                            path: path.to_string_lossy().to_string(),
+                            original_album: original,
+                            normalized_album: normalized.clone(),
+                            disc_number,
+                            source: source.to_string(),
+                        });
+                    }
+                }
+                normalized_meta.album = album;
+                normalized_meta.disc_number = disc_number;
+                let record = Self::build_track_record(path, file_name, &normalized_meta, fs_meta);
+                if let Err(err) = self.upsert_track_record(path, &normalized_meta, &record) {
                     tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
                 }
             },
@@ -284,6 +322,148 @@ impl MetadataService {
     }
 }
 
+fn normalize_album_and_disc(
+    path: &Path,
+    meta: &TrackMeta,
+) -> (Option<String>, Option<u32>, Option<&'static str>) {
+    let mut album = meta.album.clone();
+    let mut disc_number = meta.disc_number;
+    let Some(raw_album) = meta.album.as_deref() else {
+        return (album, disc_number, None);
+    };
+    let Some((normalized, disc_from_suffix)) = extract_disc_suffix(raw_album) else {
+        return (album, disc_number, None);
+    };
+
+    let path_hint = disc_hint_from_path(path);
+    if disc_number.is_none() {
+        if path_hint != Some(disc_from_suffix) {
+            return (album, disc_number, None);
+        }
+        disc_number = Some(disc_from_suffix);
+    }
+
+    if disc_number == Some(disc_from_suffix) {
+        album = Some(normalized);
+    }
+
+    let source = if meta.disc_number.is_some() {
+        Some("tag")
+    } else if path_hint.is_some() {
+        Some("folder")
+    } else {
+        None
+    };
+
+    (album, disc_number, source)
+}
+
+fn extract_disc_suffix(raw: &str) -> Option<(String, u32)> {
+    let trimmed = raw.trim();
+    if let Some((left, right)) = split_suffix_with_delim(trimmed, " - ") {
+        if let Some(disc) = parse_disc_number(right) {
+            return Some((left.to_string(), disc));
+        }
+    }
+
+    if let Some((left, suffix)) = split_wrapped_suffix(trimmed) {
+        if let Some(disc) = parse_disc_number(suffix) {
+            return Some((left.to_string(), disc));
+        }
+    }
+
+    if let Some((left, suffix)) = split_suffix_with_space(trimmed) {
+        if let Some(disc) = parse_disc_number(suffix) {
+            return Some((left.to_string(), disc));
+        }
+    }
+
+    None
+}
+
+fn split_wrapped_suffix(raw: &str) -> Option<(&str, &str)> {
+    let bytes = raw.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let (open, close) = match bytes[bytes.len() - 1] {
+        b')' => (b'(', b')'),
+        b']' => (b'[', b']'),
+        b'}' => (b'{', b'}'),
+        _ => return None,
+    };
+    let mut idx = None;
+    for (i, ch) in bytes.iter().enumerate() {
+        if *ch == open {
+            idx = Some(i);
+        }
+    }
+    let start = idx?;
+    let left = raw[..start].trim_end();
+    let suffix = raw[start + 1..raw.len() - 1].trim();
+    if left.is_empty() || suffix.is_empty() {
+        None
+    } else {
+        Some((left, suffix))
+    }
+}
+
+fn split_suffix_with_delim<'a>(raw: &'a str, delim: &'a str) -> Option<(&'a str, &'a str)> {
+    let (left, right) = raw.rsplit_once(delim)?;
+    let left = left.trim_end();
+    let right = right.trim_start();
+    if left.is_empty() || right.is_empty() {
+        None
+    } else {
+        Some((left, right))
+    }
+}
+
+fn split_suffix_with_space(raw: &str) -> Option<(&str, &str)> {
+    let (left, right) = raw.rsplit_once(' ')?;
+    let left = left.trim_end();
+    let right = right.trim_start();
+    if left.is_empty() || right.is_empty() {
+        None
+    } else {
+        Some((left, right))
+    }
+}
+
+fn parse_disc_number(raw: &str) -> Option<u32> {
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    if let Ok(value) = lower.parse::<u32>() {
+        return Some(value);
+    }
+    for key in ["disc", "disk", "cd"] {
+        if let Some(rest) = lower.strip_prefix(key) {
+            let rest = rest.trim_start_matches(|c: char| !c.is_ascii_digit());
+            if let Some(value) = rest.split_whitespace().next() {
+                if let Ok(num) = value.parse::<u32>() {
+                    return Some(num);
+                }
+            }
+        }
+    }
+    let tokens: Vec<&str> = lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|s| !s.is_empty()).collect();
+    for window in tokens.windows(2) {
+        if ["disc", "disk", "cd"].contains(&window[0]) {
+            if let Ok(num) = window[1].parse::<u32>() {
+                return Some(num);
+            }
+        }
+    }
+    None
+}
+
+fn disc_hint_from_path(path: &Path) -> Option<u32> {
+    let name = path.parent()?.file_name()?.to_string_lossy().to_string();
+    parse_disc_number(&name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +534,51 @@ mod tests {
         let result = MetadataService::resolve_track_path(&root, &path.to_string_lossy());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), path.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn normalize_album_disc_suffix_sets_disc_from_folder_hint() {
+        let root = temp_root();
+        let cd_dir = root.join("CD1");
+        std::fs::create_dir_all(&cd_dir).expect("create cd dir");
+        let path = cd_dir.join("track.flac");
+
+        let meta = TrackMeta {
+            album: Some("Random Access Memories (1)".to_string()),
+            ..TrackMeta::default()
+        };
+
+        let (album, disc, _source) = normalize_album_and_disc(&path, &meta);
+        assert_eq!(album.as_deref(), Some("Random Access Memories"));
+        assert_eq!(disc, Some(1));
+    }
+
+    #[test]
+    fn normalize_album_disc_suffix_skips_when_no_hint_and_no_disc() {
+        let root = temp_root();
+        let path = root.join("track.flac");
+        let meta = TrackMeta {
+            album: Some("Random Access Memories (1)".to_string()),
+            ..TrackMeta::default()
+        };
+
+        let (album, disc, _source) = normalize_album_and_disc(&path, &meta);
+        assert_eq!(album.as_deref(), Some("Random Access Memories (1)"));
+        assert_eq!(disc, None);
+    }
+
+    #[test]
+    fn normalize_album_disc_suffix_respects_existing_disc_number() {
+        let root = temp_root();
+        let path = root.join("track.flac");
+        let meta = TrackMeta {
+            album: Some("Random Access Memories (2)".to_string()),
+            disc_number: Some(2),
+            ..TrackMeta::default()
+        };
+
+        let (album, disc, _source) = normalize_album_and_disc(&path, &meta);
+        assert_eq!(album.as_deref(), Some("Random Access Memories"));
+        assert_eq!(disc, Some(2));
     }
 }

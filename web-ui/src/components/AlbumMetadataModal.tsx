@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchJson, postJson } from "../api";
-import { AlbumMetadataResponse } from "../types";
+import { AlbumMetadataResponse, AlbumMetadataUpdateResponse } from "../types";
 import Modal from "./Modal";
 
 interface AlbumMetadataModalProps {
@@ -13,7 +13,7 @@ interface AlbumMetadataModalProps {
     year?: number | null;
   };
   onClose: () => void;
-  onSaved?: () => void;
+  onSaved?: (albumId: number) => void;
 }
 
 function parseOptionalInt(value: string): number | undefined {
@@ -105,8 +105,12 @@ export default function AlbumMetadataModal({
     setSaving(true);
     setError(null);
     try {
-      await postJson("/albums/metadata/update", payload);
-      onSaved?.();
+      const response = await postJson<AlbumMetadataUpdateResponse>(
+        "/albums/metadata/update",
+        payload
+      );
+      const updatedAlbumId = response?.album_id ?? albumId;
+      onSaved?.(updatedAlbumId);
       onClose();
     } catch (err) {
       setError((err as Error).message);

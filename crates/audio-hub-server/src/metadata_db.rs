@@ -136,7 +136,18 @@ impl MetadataDb {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
 
-        let existing: Option<(i64, i64, Option<i64>, Option<i64>, Option<String>, Option<String>, Option<String>)> = tx
+        let existing: Option<(
+            i64,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<u32>,
+        )> = tx
             .query_row(
                 r#"
                 SELECT t.mtime_ms,
@@ -145,10 +156,14 @@ impl MetadataDb {
                        t.album_id,
                        t.mbid,
                        ar.mbid,
-                       al.mbid
+                       al.mbid,
+                       al.title,
+                       aa.name,
+                       t.disc_number
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.path = ?1
                 "#,
                 params![record.path],
@@ -160,6 +175,9 @@ impl MetadataDb {
                     row.get(4)?,
                     row.get(5)?,
                     row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
                 )),
             )
             .optional()
@@ -172,9 +190,32 @@ impl MetadataDb {
             track_mbid,
             artist_mbid,
             album_mbid,
+            album_title,
+            album_artist,
+            disc_number,
         )) = existing
         {
-            if mtime_ms == record.mtime_ms && size_bytes == record.size_bytes {
+            let album_title_same = match (record.album.as_deref(), album_title.as_deref()) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => true,
+                _ => false,
+            };
+            let desired_album_artist = record
+                .album_artist
+                .as_deref()
+                .or(record.artist.as_deref());
+            let album_artist_same = match (desired_album_artist, album_artist.as_deref()) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => true,
+                _ => false,
+            };
+            let disc_same = record.disc_number == disc_number;
+            if mtime_ms == record.mtime_ms
+                && size_bytes == record.size_bytes
+                && album_title_same
+                && album_artist_same
+                && disc_same
+            {
                 return tx.commit().context("commit metadata tx");
             }
             let keep_album_link = !is_blank(&track_mbid) || !is_blank(&album_mbid);
@@ -1008,14 +1049,52 @@ impl MetadataDb {
         title: Option<&str>,
         artist: Option<&str>,
         year: Option<i32>,
-    ) -> Result<bool> {
+    ) -> Result<Option<i64>> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
+        let current: Option<(String, Option<i64>)> = tx
+            .query_row(
+                "SELECT title, artist_id FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .context("lookup current album")?;
+        let Some((current_title, current_artist_id)) = current else {
+            return Ok(None);
+        };
         let artist_id = if let Some(name) = artist {
             Some(upsert_artist(&tx, name)?)
         } else {
             None
         };
+        let desired_title = title.unwrap_or(current_title.as_str());
+        let desired_artist_id = artist_id.or(current_artist_id);
+        if let Some(existing_id) = find_album_id(&tx, desired_title, desired_artist_id)? {
+            if existing_id != album_id {
+                tx.execute(
+                    r#"
+                    UPDATE albums
+                    SET title = ?1,
+                        sort_title = LOWER(?1),
+                        artist_id = ?2,
+                        year = COALESCE(?3, year)
+                    WHERE id = ?4
+                    "#,
+                    params![desired_title, desired_artist_id, year, existing_id],
+                )
+                .context("merge album metadata")?;
+                tx.execute(
+                    "UPDATE tracks SET album_id = ?1 WHERE album_id = ?2",
+                    params![existing_id, album_id],
+                )
+                .context("reassign tracks to merged album")?;
+                tx.execute("DELETE FROM albums WHERE id = ?1", params![album_id])
+                    .context("delete merged album")?;
+                tx.commit().context("commit metadata tx")?;
+                return Ok(Some(existing_id));
+            }
+        }
         let updated = tx
             .execute(
                 r#"
@@ -1030,7 +1109,11 @@ impl MetadataDb {
             )
             .context("update album metadata")?;
         tx.commit().context("commit metadata tx")?;
-        Ok(updated > 0)
+        if updated > 0 {
+            Ok(Some(album_id))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn delete_track_by_path(&self, path: &str) -> Result<bool> {

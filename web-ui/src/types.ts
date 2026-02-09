@@ -139,6 +139,10 @@ export interface AlbumMetadataResponse {
   year?: number | null;
 }
 
+export interface AlbumMetadataUpdateResponse {
+  album_id: number;
+}
+
 export type MusicBrainzMatchKind = "track" | "album";
 
 export interface MusicBrainzMatchCandidate {
