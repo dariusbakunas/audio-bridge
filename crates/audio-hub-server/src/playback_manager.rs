@@ -176,6 +176,17 @@ mod tests {
     use crate::bridge::BridgeCommand;
     use crate::state::PlayerStatus;
 
+    fn make_manager() -> PlaybackManager {
+        let (cmd_tx, _cmd_rx) = unbounded();
+        let player = Arc::new(Mutex::new(BridgePlayer { cmd_tx }));
+        let status = Arc::new(Mutex::new(PlayerStatus::default()));
+        let events = crate::events::EventBus::new();
+        let status_store = StatusStore::new(status, events.clone());
+        let queue = Arc::new(Mutex::new(crate::state::QueueState::default()));
+        let queue_service = QueueService::new(queue, status_store.clone(), events);
+        PlaybackManager::new(player, status_store, queue_service)
+    }
+
     #[test]
     fn pause_toggle_does_not_mutate_status_optimistically() {
         let (cmd_tx, cmd_rx) = unbounded();
@@ -198,5 +209,70 @@ mod tests {
         assert!(matches!(cmd_rx.try_recv(), Ok(BridgeCommand::PauseToggle)));
         assert!(status.lock().unwrap().paused);
         assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn apply_queue_mode_replace_clears_queue() {
+        let manager = make_manager();
+        manager.queue_add_paths(vec![std::path::PathBuf::from("/music/a.flac")]);
+
+        manager.apply_queue_mode(std::path::Path::new("/music/b.flac"), QueueMode::Replace);
+
+        let queue = manager.queue_service().queue().lock().unwrap();
+        assert!(queue.items.is_empty());
+    }
+
+    #[test]
+    fn apply_queue_mode_append_adds_once() {
+        let manager = make_manager();
+        let path = std::path::Path::new("/music/a.flac");
+
+        manager.apply_queue_mode(path, QueueMode::Append);
+        manager.apply_queue_mode(path, QueueMode::Append);
+
+        let queue = manager.queue_service().queue().lock().unwrap();
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
+    }
+
+    #[test]
+    fn current_path_reflects_status_now_playing() {
+        let manager = make_manager();
+        let path = std::path::PathBuf::from("/music/a.flac");
+
+        {
+            let mut guard = manager.status().inner().lock().unwrap();
+            guard.now_playing = Some(path.clone());
+        }
+
+        assert_eq!(manager.current_path(), Some(path));
+    }
+
+    #[test]
+    fn take_previous_skips_current_path() {
+        let manager = make_manager();
+        let a = std::path::PathBuf::from("/music/a.flac");
+        let b = std::path::PathBuf::from("/music/b.flac");
+        let c = std::path::PathBuf::from("/music/c.flac");
+        manager.queue_service().record_played_path(&a);
+        manager.queue_service().record_played_path(&b);
+        manager.queue_service().record_played_path(&c);
+
+        let previous = manager.take_previous(Some(&c));
+
+        assert_eq!(previous, Some(b));
+    }
+
+    #[test]
+    fn queue_play_from_drops_items_before_match() {
+        let manager = make_manager();
+        let a = std::path::PathBuf::from("/music/a.flac");
+        let b = std::path::PathBuf::from("/music/b.flac");
+        let c = std::path::PathBuf::from("/music/c.flac");
+        manager.queue_add_paths(vec![a, b.clone(), c.clone()]);
+
+        assert!(manager.queue_play_from(&b));
+        let queue = manager.queue_service().queue().lock().unwrap();
+        assert_eq!(queue.items, vec![c]);
     }
 }

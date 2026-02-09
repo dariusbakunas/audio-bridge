@@ -431,6 +431,39 @@ mod tests {
     }
 
     #[test]
+    fn drain_through_path_removes_up_to_match() {
+        let service = make_service();
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        let c = PathBuf::from("/music/c.flac");
+        service.add_paths(vec![a.clone(), b.clone(), c.clone()]);
+
+        assert!(service.drain_through_path(&b));
+        let queue = service.queue.lock().unwrap();
+        assert_eq!(queue.items, vec![c]);
+    }
+
+    #[test]
+    fn drain_through_path_returns_false_when_missing() {
+        let service = make_service();
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+
+        assert!(!service.drain_through_path(Path::new("/music/missing.flac")));
+        let queue = service.queue.lock().unwrap();
+        assert_eq!(queue.items.len(), 1);
+    }
+
+    #[test]
+    fn clear_returns_true_only_when_items_exist() {
+        let service = make_service();
+        assert!(!service.clear());
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+        assert!(service.clear());
+        let queue = service.queue.lock().unwrap();
+        assert!(queue.items.is_empty());
+    }
+
+    #[test]
     fn maybe_auto_advance_dispatches_on_remote_end() {
         let service = make_service();
         let transport = TestTransport::new(true);
