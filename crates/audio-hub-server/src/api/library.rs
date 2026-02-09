@@ -10,7 +10,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
 
-use crate::metadata_service::MetadataService;
 use crate::models::LibraryResponse;
 use crate::state::AppState;
 
@@ -154,12 +153,7 @@ pub async fn stream_track(
 /// Trigger a full library rescan.
 pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        root.clone(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     tracing::info!(root = %root.display(), "rescan requested");
     match metadata_service.rescan_library(true) {
         Ok(new_index) => {
@@ -194,13 +188,8 @@ pub async fn rescan_track(
     body: web::Json<RescanTrackRequest>,
 ) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        root.clone(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
-    let full_path = match MetadataService::resolve_track_path(&root, &body.path) {
+    let metadata_service = state.metadata_service();
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &body.path) {
         Ok(path) => path,
         Err(response) => return response,
     };

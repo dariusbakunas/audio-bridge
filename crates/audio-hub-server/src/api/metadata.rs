@@ -5,7 +5,6 @@ use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::metadata_service::MetadataService;
 use crate::musicbrainz::MusicBrainzMatch;
 use crate::models::{
     AlbumListResponse,
@@ -96,12 +95,7 @@ pub async fn tracks_resolve(
     state: web::Data<AppState>,
     query: web::Query<TrackResolveQuery>,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     match metadata_service.album_id_for_track_path(&query.path) {
         Ok(Some(album_id)) => HttpResponse::Ok().json(TrackResolveResponse {
             album_id: Some(album_id),
@@ -126,12 +120,7 @@ pub async fn tracks_metadata(
     state: web::Data<AppState>,
     query: web::Query<TrackMetadataQuery>,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     match metadata_service.track_record_by_path(&query.path) {
         Ok(Some(record)) => HttpResponse::Ok().json(TrackMetadataResponse {
             path: record.path,
@@ -166,13 +155,8 @@ pub async fn tracks_metadata_update(
 ) -> impl Responder {
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        root.clone(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
-    let full_path = match MetadataService::resolve_track_path(&root, &request.path) {
+    let metadata_service = state.metadata_service();
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &request.path) {
         Ok(path) => path,
         Err(response) => return response,
     };
@@ -238,12 +222,7 @@ pub async fn albums_metadata(
     state: web::Data<AppState>,
     query: web::Query<AlbumMetadataQuery>,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     match metadata_service.album_summary_by_id(query.album_id) {
         Ok(Some(album)) => HttpResponse::Ok().json(AlbumMetadataResponse {
             album_id: album.id,
@@ -274,12 +253,7 @@ pub async fn albums_metadata_update(
 ) -> impl Responder {
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        root.clone(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let album_artist = request
         .album_artist
@@ -310,7 +284,7 @@ pub async fn albums_metadata_update(
     }
 
     for path in paths {
-        let full_path = match MetadataService::resolve_track_path(&root, &path) {
+        let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
             Ok(path) => path,
             Err(response) => return response,
         };
@@ -365,12 +339,7 @@ pub async fn art_for_track(
     query: web::Query<ArtQuery>,
     req: HttpRequest,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     let cover_rel = match metadata_service.cover_path_for_track(&query.path) {
         Ok(Some(path)) => path,
         Ok(None) => return HttpResponse::NotFound().finish(),
@@ -399,12 +368,7 @@ pub async fn track_cover(
     path: web::Path<CoverPath>,
     req: HttpRequest,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     let cover_rel = match metadata_service.cover_path_for_track_id(path.id) {
         Ok(Some(path)) => path,
         Ok(None) => return HttpResponse::NotFound().finish(),
@@ -428,12 +392,7 @@ pub async fn album_cover(
     path: web::Path<CoverPath>,
     req: HttpRequest,
 ) -> impl Responder {
-    let metadata_service = MetadataService::new(
-        state.metadata.db.clone(),
-        state.library.read().unwrap().root().to_path_buf(),
-        state.events.clone(),
-        state.metadata.wake.clone(),
-    );
+    let metadata_service = state.metadata_service();
     let cover_rel = match metadata_service.cover_path_for_album_id(path.id) {
         Ok(Some(path)) => path,
         Ok(None) => return HttpResponse::NotFound().finish(),

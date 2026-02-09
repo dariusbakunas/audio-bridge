@@ -13,6 +13,7 @@ use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::events::{EventBus, LogBus};
 use crate::library::LibraryIndex;
+use crate::metadata_service::MetadataService;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
 use crate::metadata_db::MetadataDb;
@@ -177,6 +178,16 @@ impl AppState {
             events,
             log_bus,
         }
+    }
+
+    pub fn metadata_service(&self) -> MetadataService {
+        let root = self.library.read().unwrap().root().to_path_buf();
+        MetadataService::new(
+            self.metadata.db.clone(),
+            root,
+            self.events.clone(),
+            self.metadata.wake.clone(),
+        )
     }
 }
 
