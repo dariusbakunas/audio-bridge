@@ -1,0 +1,54 @@
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.signal-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.signal-value {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.pill {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  color: var(--muted);
+}
+
+.chip {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(18, 18, 18, 0.08);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+}
+
+.muted.small {
+  font-size: 0.8rem;
+}
+
+.updated {
+  margin-top: 12px;
+  text-align: right;
+}
+

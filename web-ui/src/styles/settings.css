@@ -1,0 +1,141 @@
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  width: fit-content;
+}
+
+.settings-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.settings-tab.active {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title {
+  font-weight: 600;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 80px 60px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.log-level {
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.log-level.log-info {
+  color: var(--accent-2);
+}
+
+.log-level.log-warn,
+.log-level.log-warning {
+  color: #d97706;
+}
+
+.log-level.log-error {
+  color: #d64545;
+}
+
+.log-level.log-debug {
+  color: #6b7280;
+}
+
+.log-level.log-trace {
+  color: #9ca3af;
+}
+
+.log-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-target {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-title {
+  font-weight: 600;
+}
+

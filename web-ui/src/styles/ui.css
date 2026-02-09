@@ -1,0 +1,117 @@
+.btn {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.btn.secondary {
+  background: var(--ink);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.btn.small {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.alert {
+  margin-top: 8px;
+  background: rgba(255, 107, 53, 0.15);
+  border: 1px solid rgba(255, 107, 53, 0.35);
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+
+.card {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+  position: relative;
+  z-index: 1;
+}
+
+.now-playing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.card-header.actions-only {
+  justify-content: flex-end;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 6px rgba(45, 108, 223, 0.15);
+}
+
+.status-dot.paused {
+  background: #f1b24a;
+  box-shadow: 0 0 0 6px rgba(241, 178, 74, 0.2);
+}
+
+.progress {
+  position: relative;
+  height: 8px;
+  background: rgba(18, 18, 18, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  width: 0%;
+  border-radius: 999px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.grid {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+}
+

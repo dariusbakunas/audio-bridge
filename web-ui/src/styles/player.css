@@ -1,0 +1,134 @@
+.player-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 2fr) minmax(220px, 1fr);
+  gap: 24px;
+  padding: 16px clamp(20px, 5vw, 72px);
+  align-items: center;
+  z-index: 4;
+}
+
+.player-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.album-art {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  border-radius: 0;
+  background: linear-gradient(135deg, rgba(255, 107, 53, 0.4), rgba(45, 108, 223, 0.4));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  overflow: hidden;
+}
+
+.album-art-button {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.album-art-button:hover {
+  filter: brightness(1.03);
+}
+
+.album-art-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.track-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.player-middle .controls {
+  margin-bottom: 10px;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.icon-btn.primary {
+  width: 52px;
+  height: 52px;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+}
+
+.icon-btn.signal-btn {
+  color: var(--muted);
+  border: none;
+}
+
+.icon-btn.signal-btn.active {
+  color: var(--accent-2);
+}
+
+.icon-btn.queue-btn {
+  color: var(--muted);
+  border: none;
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.player-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.output-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+
+.build-footer {
+  font-family: "IBM Plex Mono", monospace;
+}
+
