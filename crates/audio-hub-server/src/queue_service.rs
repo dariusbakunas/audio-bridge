@@ -191,13 +191,26 @@ impl QueueService {
     }
 
     /// Clear the queue.
-    pub(crate) fn clear(&self) {
+    pub(crate) fn clear(&self) -> bool {
         let mut queue = self.queue.lock().unwrap();
         if !queue.items.is_empty() {
             tracing::debug!(count = queue.items.len(), "queue cleared");
             queue.items.clear();
             self.events.queue_changed();
+            return true;
         }
+        false
+    }
+
+    /// Drop all items up to and including the matching path.
+    pub(crate) fn drain_through_path(&self, path: &Path) -> bool {
+        let mut queue = self.queue.lock().unwrap();
+        if let Some(pos) = queue.items.iter().position(|p| p == path) {
+            queue.items.drain(0..=pos);
+            self.events.queue_changed();
+            return true;
+        }
+        false
     }
 
     /// Dispatch the next track (if any) via the provided transport.

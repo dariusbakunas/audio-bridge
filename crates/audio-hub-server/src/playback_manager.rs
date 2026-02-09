@@ -2,12 +2,15 @@
 //!
 //! Wraps the active player handle, status store, and queue service for dispatch.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::playback_transport::{ChannelTransport, PlaybackTransport};
 use crate::queue_service::{NextDispatchResult, QueueService};
 use crate::bridge::BridgePlayer;
 use crate::status_store::StatusStore;
+use crate::library::LibraryIndex;
+use crate::models::{QueueMode, QueueResponse};
 
 /// Coordinates playback commands and status updates for the active output.
 #[derive(Clone)]
@@ -39,6 +42,64 @@ impl PlaybackManager {
     /// Access the queue service.
     pub fn queue_service(&self) -> &QueueService {
         &self.queue_service
+    }
+
+    /// Return the currently playing path, if any.
+    pub fn current_path(&self) -> Option<std::path::PathBuf> {
+        self.status
+            .inner()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.now_playing.clone())
+    }
+
+    /// Set the manual-advance in-flight flag.
+    pub fn set_manual_advance_in_flight(&self, value: bool) {
+        self.status.set_manual_advance_in_flight(value);
+    }
+
+    /// Apply a queue mode update for the supplied path.
+    pub fn apply_queue_mode(&self, path: &Path, mode: QueueMode) -> bool {
+        match mode {
+            QueueMode::Keep => false,
+            QueueMode::Replace => self.queue_service.clear(),
+            QueueMode::Append => self.queue_service.add_paths(vec![path.to_path_buf()]) > 0,
+        }
+    }
+
+    /// Build an API response for the current queue.
+    pub fn queue_list(&self, library: &LibraryIndex) -> QueueResponse {
+        self.queue_service.list(library)
+    }
+
+    /// Add paths to the queue and return how many were inserted.
+    pub fn queue_add_paths(&self, paths: Vec<std::path::PathBuf>) -> usize {
+        self.queue_service.add_paths(paths)
+    }
+
+    /// Insert paths at the front of the queue.
+    pub fn queue_add_next_paths(&self, paths: Vec<std::path::PathBuf>) -> usize {
+        self.queue_service.add_next_paths(paths)
+    }
+
+    /// Remove a specific path from the queue.
+    pub fn queue_remove_path(&self, path: &std::path::PathBuf) -> bool {
+        self.queue_service.remove_path(path)
+    }
+
+    /// Clear the queue.
+    pub fn queue_clear(&self) {
+        let _ = self.queue_service.clear();
+    }
+
+    /// Drop queued items up to and including the given path.
+    pub fn queue_play_from(&self, path: &Path) -> bool {
+        self.queue_service.drain_through_path(path)
+    }
+
+    /// Pop the previous history item, skipping the current path.
+    pub fn take_previous(&self, current: Option<&Path>) -> Option<std::path::PathBuf> {
+        self.queue_service.take_previous(current)
     }
 
     /// Start playback for a media path.

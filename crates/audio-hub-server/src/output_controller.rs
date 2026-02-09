@@ -48,25 +48,6 @@ pub(crate) struct OutputController {
     registry: OutputRegistry,
 }
 
-fn apply_queue_mode(queue: &mut QueueState, path: &std::path::Path, mode: QueueMode) -> bool {
-    match mode {
-        QueueMode::Keep => false,
-        QueueMode::Replace => {
-            let changed = !queue.items.is_empty();
-            queue.items.clear();
-            changed
-        }
-        QueueMode::Append => {
-            if queue.items.iter().any(|p| p == path) {
-                false
-            } else {
-                queue.items.push(path.to_path_buf());
-                true
-            }
-        }
-    }
-}
-
 impl OutputController {
     /// Build a controller around the provided registry.
     pub(crate) fn new(registry: OutputRegistry) -> Self {
@@ -174,17 +155,12 @@ impl OutputController {
         queue_mode: QueueMode,
         requested_output: Option<&str>,
     ) -> Result<String, OutputControllerError> {
-        {
-            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
-            if apply_queue_mode(&mut queue, &path, queue_mode) {
-                state.events.queue_changed();
-            }
-        }
+        let _ = state.playback.manager.apply_queue_mode(&path, queue_mode);
 
         let output_id = self
             .resolve_active_output_id(state, requested_output)
             .await?;
-        state.playback.manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
 
         Ok(output_id)
@@ -192,7 +168,7 @@ impl OutputController {
 
     /// Return the current queue as API response items.
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        state.playback.manager.queue_service().list(&state.library.read().unwrap())
+        state.playback.manager.queue_list(&state.library.read().unwrap())
     }
 
     /// Add paths to the queue and return the number added.
@@ -210,7 +186,7 @@ impl OutputController {
             };
             resolved.push(path);
         }
-        state.playback.manager.queue_service().add_paths(resolved)
+        state.playback.manager.queue_add_paths(resolved)
     }
 
     /// Insert paths to the front of the queue and return the number added.
@@ -228,7 +204,7 @@ impl OutputController {
             };
             resolved.push(path);
         }
-        state.playback.manager.queue_service().add_next_paths(resolved)
+        state.playback.manager.queue_add_next_paths(resolved)
     }
 
     /// Remove a path from the queue.
@@ -239,7 +215,7 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        Ok(state.playback.manager.queue_service().remove_path(&path))
+        Ok(state.playback.manager.queue_remove_path(&path))
     }
 
     /// Play a queued item and drop items ahead of it.
@@ -250,41 +226,33 @@ impl OutputController {
     ) -> Result<bool, OutputControllerError> {
         let path = std::path::PathBuf::from(path_str);
         let path = self.canonicalize_under_root(state, &path)?;
-        let mut found = false;
-        {
-            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
-            if let Some(pos) = queue.items.iter().position(|p| p == &path) {
-                queue.items.drain(0..=pos);
-                found = true;
-                state.events.queue_changed();
-            }
-        }
+        let found = state.playback.manager.queue_play_from(&path);
         if !found {
             return Ok(false);
         }
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
         Ok(true)
     }
 
     /// Clear the queue.
     pub(crate) fn queue_clear(&self, state: &AppState) {
-        state.playback.manager.queue_service().clear();
+        state.playback.manager.queue_clear();
     }
 
     /// Dispatch the next queued track if available.
     pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.set_manual_advance_in_flight(true);
         match state.playback.manager.queue_next() {
             NextDispatchResult::Dispatched => Ok(true),
             NextDispatchResult::Empty => {
-                state.playback.manager.status().set_manual_advance_in_flight(false);
+                state.playback.manager.set_manual_advance_in_flight(false);
                 Ok(false)
             }
             NextDispatchResult::Failed => {
-                state.playback.manager.status().set_manual_advance_in_flight(false);
+                state.playback.manager.set_manual_advance_in_flight(false);
                 Err(OutputControllerError::PlayerOffline)
             }
         }
@@ -293,19 +261,12 @@ impl OutputController {
     /// Play the previous track from history if available.
     pub(crate) async fn queue_previous(&self, state: &AppState) -> Result<bool, OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        let current = state.playback.manager
-            .status()
-            .inner()
-            .lock()
-            .ok()
-            .and_then(|guard| guard.now_playing.clone());
-        let previous = state.playback.manager
-            .queue_service()
-            .take_previous(current.as_deref());
+        let current = state.playback.manager.current_path();
+        let previous = state.playback.manager.take_previous(current.as_deref());
         let Some(path) = previous else {
             return Ok(false);
         };
-        state.playback.manager.status().set_manual_advance_in_flight(true);
+        state.playback.manager.set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
         state.playback.manager.update_has_previous();
         Ok(true)
@@ -613,29 +574,42 @@ mod tests {
 
     #[test]
     fn apply_queue_mode_keep_preserves_items() {
-        let mut queue = QueueState {
-            items: vec![std::path::PathBuf::from("/music/a.flac")],
-        };
-        apply_queue_mode(&mut queue, std::path::Path::new("/music/b.flac"), QueueMode::Keep);
+        let (state, _root) = make_state_with_root();
+        {
+            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
+            queue.items.push(std::path::PathBuf::from("/music/a.flac"));
+        }
+        state
+            .playback
+            .manager
+            .apply_queue_mode(std::path::Path::new("/music/b.flac"), QueueMode::Keep);
+        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
     }
 
     #[test]
     fn apply_queue_mode_replace_clears_queue() {
-        let mut queue = QueueState {
-            items: vec![std::path::PathBuf::from("/music/a.flac")],
-        };
-        apply_queue_mode(&mut queue, std::path::Path::new("/music/b.flac"), QueueMode::Replace);
+        let (state, _root) = make_state_with_root();
+        {
+            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
+            queue.items.push(std::path::PathBuf::from("/music/a.flac"));
+        }
+        state
+            .playback
+            .manager
+            .apply_queue_mode(std::path::Path::new("/music/b.flac"), QueueMode::Replace);
+        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
         assert!(queue.items.is_empty());
     }
 
     #[test]
     fn apply_queue_mode_append_adds_once() {
-        let mut queue = QueueState { items: Vec::new() };
         let path = std::path::Path::new("/music/a.flac");
-        apply_queue_mode(&mut queue, path, QueueMode::Append);
-        apply_queue_mode(&mut queue, path, QueueMode::Append);
+        let (state, _root) = make_state_with_root();
+        state.playback.manager.apply_queue_mode(path, QueueMode::Append);
+        state.playback.manager.apply_queue_mode(path, QueueMode::Append);
+        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
     }
