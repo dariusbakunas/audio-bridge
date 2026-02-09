@@ -29,10 +29,18 @@ impl StatusStore {
         &self.inner
     }
 
+    pub fn set_has_previous(&self, value: bool) {
+        if let Ok(mut s) = self.inner.lock() {
+            s.has_previous = Some(value);
+        }
+        self.events.status_changed();
+    }
+
     /// Record a play request for the given media path.
     pub fn on_play(&self, path: PathBuf, start_paused: bool) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = Some(path);
+            s.has_previous = s.has_previous.or(Some(false));
             s.elapsed_ms = Some(0);
             s.user_paused = start_paused;
             apply_playback_fields(
@@ -74,6 +82,7 @@ impl StatusStore {
     pub fn on_stop(&self) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = None;
+            s.has_previous = Some(false);
             s.paused = false;
             s.user_paused = false;
             s.elapsed_ms = None;
@@ -124,6 +133,7 @@ impl StatusStore {
     ) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = Some(path);
+            s.has_previous = s.has_previous.or(Some(false));
             s.manual_advance_in_flight = false;
             apply_playback_fields(
                 &mut s,
@@ -153,6 +163,7 @@ impl StatusStore {
     pub fn on_local_playback_end(&self) {
         if let Ok(mut s) = self.inner.lock() {
             s.now_playing = None;
+            s.has_previous = Some(false);
             s.elapsed_ms = None;
             s.duration_ms = None;
             s.manual_advance_in_flight = false;
@@ -194,6 +205,7 @@ impl StatusStore {
             let should_clear = should_clear_now_playing(&s, remote);
             if should_clear {
                 s.now_playing = None;
+                s.has_previous = Some(false);
                 s.paused = false;
                 s.user_paused = false;
                 s.auto_advance_in_flight = false;

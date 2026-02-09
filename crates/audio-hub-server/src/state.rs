@@ -86,6 +86,8 @@ pub struct PlayerStatus {
     pub buffered_frames: Option<u64>,
     /// Queue capacity in frames (best-effort).
     pub buffer_capacity_frames: Option<u64>,
+    /// True when history has a previous track available.
+    pub has_previous: Option<bool>,
     /// Auto-advance is in flight (prevents double-advance).
     pub auto_advance_in_flight: bool,
     /// Seek is in flight (prevents false end-of-track).

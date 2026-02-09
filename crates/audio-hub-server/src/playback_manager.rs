@@ -53,7 +53,9 @@ impl PlaybackManager {
         transport
             .play(path.clone(), ext_hint, seek_ms, start_paused)
             .map_err(|_| ())?;
-        self.status.on_play(path, start_paused);
+        self.status.on_play(path.clone(), start_paused);
+        self.queue_service.record_played_path(&path);
+        self.update_has_previous();
         Ok(())
     }
 
@@ -82,7 +84,22 @@ impl PlaybackManager {
     /// Dispatch the next queue entry to the active transport.
     pub fn queue_next(&self) -> NextDispatchResult {
         let transport = self.transport();
-        self.queue_service.dispatch_next(&transport, false)
+        let result = self.queue_service.dispatch_next(&transport, false);
+        self.update_has_previous();
+        result
+    }
+
+    pub fn update_has_previous(&self) {
+        let current = self
+            .status
+            .inner()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.now_playing.clone());
+        let has_previous = self
+            .queue_service
+            .has_previous(current.as_deref());
+        self.status.set_has_previous(has_previous);
     }
 
     fn transport(&self) -> ChannelTransport {

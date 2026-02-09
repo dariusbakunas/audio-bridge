@@ -216,6 +216,13 @@ function metadataDetailLines(event: MetadataEvent): string[] {
   return lines;
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
+}
+
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
@@ -803,6 +810,99 @@ export default function App() {
     loadAlbumTracks(albumViewId);
   }, [albumViewId, loadAlbumTracks]);
 
+  const handlePlayMedia = useCallback(async () => {
+    if (status?.now_playing) {
+      if (status.paused) {
+        await handlePause();
+      }
+      return;
+    }
+    if (selectedTrackPath) {
+      await handlePlay(selectedTrackPath);
+    }
+  }, [handlePause, handlePlay, selectedTrackPath, status?.now_playing, status?.paused]);
+
+  const handlePauseMedia = useCallback(async () => {
+    if (status?.now_playing && !status?.paused) {
+      await handlePause();
+    }
+  }, [handlePause, status?.now_playing, status?.paused]);
+
+  const handlePreviousMedia = useCallback(async () => {
+    try {
+      await postJson("/queue/previous");
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [setError]);
+
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if (event.code !== "Space") return;
+      if (event.repeat) return;
+      if (isEditableTarget(event.target)) return;
+      event.preventDefault();
+      handlePrimaryAction();
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [handlePrimaryAction]);
+
+  useEffect(() => {
+    const session = navigator.mediaSession;
+    if (!session) return;
+
+    if (status?.title || status?.artist || status?.album) {
+      const artwork = nowPlayingCover ? [{ src: nowPlayingCover, sizes: "512x512" }] : [];
+      session.metadata = new MediaMetadata({
+        title: status?.title ?? "",
+        artist: status?.artist ?? "",
+        album: status?.album ?? "",
+        artwork
+      });
+    } else {
+      session.metadata = null;
+    }
+
+    try {
+      session.setActionHandler("play", () => {
+        handlePlayMedia();
+      });
+      session.setActionHandler("pause", () => {
+        handlePauseMedia();
+      });
+      session.setActionHandler("previoustrack", () => {
+        handlePreviousMedia();
+      });
+      session.setActionHandler("nexttrack", () => {
+        handleNext();
+      });
+    } catch {
+      // MediaSession action handlers are best-effort.
+    }
+
+    return () => {
+      try {
+        session.setActionHandler("play", null);
+        session.setActionHandler("pause", null);
+        session.setActionHandler("previoustrack", null);
+        session.setActionHandler("nexttrack", null);
+      } catch {
+        // Best-effort cleanup.
+      }
+    };
+  }, [
+    handleNext,
+    handlePauseMedia,
+    handlePlayMedia,
+    handlePreviousMedia,
+    nowPlayingCover,
+    status?.album,
+    status?.artist,
+    status?.title
+  ]);
+
   const handleQueuePlayFrom = useCallback(async (path: string) => {
     try {
       await postJson("/queue/play_from", { path });
@@ -1050,6 +1150,7 @@ export default function App() {
           nowPlayingCoverFailed={nowPlayingCoverFailed}
           showSignalPath={isPlaying}
           canTogglePlayback={canTogglePlayback}
+          canGoPrevious={Boolean(status?.has_previous)}
           playButtonTitle={playButtonTitle}
           queueHasItems={Boolean(activeOutputId) && queue.length > 0}
           activeOutput={activeOutput}
@@ -1066,6 +1167,7 @@ export default function App() {
             })
           }
           onPrimaryAction={handlePrimaryAction}
+          onPrevious={handlePreviousMedia}
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}
           onQueueOpen={() => setQueueOpen(true)}

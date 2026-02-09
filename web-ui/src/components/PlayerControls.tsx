@@ -1,10 +1,12 @@
 interface PlayerControlsProps {
   showSignalPath: boolean;
   canTogglePlayback: boolean;
+  canGoPrevious: boolean;
   isPaused: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   onPrimaryAction: () => void;
+  onPrevious: () => void;
   onNext: () => void;
   onSignalOpen: () => void;
   onQueueOpen: () => void;
@@ -13,10 +15,12 @@ interface PlayerControlsProps {
 export default function PlayerControls({
   showSignalPath,
   canTogglePlayback,
+  canGoPrevious,
   isPaused,
   playButtonTitle,
   queueHasItems,
   onPrimaryAction,
+  onPrevious,
   onNext,
   onSignalOpen,
   onQueueOpen
@@ -37,7 +41,12 @@ export default function PlayerControls({
           <rect x="19" y="10" width="2" height="4" rx="1" />
         </svg>
       </button>
-      <button className="icon-btn" aria-label="Previous" disabled>
+      <button
+        className="icon-btn"
+        aria-label="Previous"
+        onClick={onPrevious}
+        disabled={!canGoPrevious}
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="5" width="2" height="14" rx="1" />
           <polygon points="21,5 13,12 21,19" />

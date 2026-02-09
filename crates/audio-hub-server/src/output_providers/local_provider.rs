@@ -290,6 +290,7 @@ impl OutputProvider for LocalProvider {
                 buffer_size_frames: status.buffer_size_frames,
                 buffered_frames: status.buffered_frames,
                 buffer_capacity_frames: status.buffer_capacity_frames,
+                has_previous: status.has_previous,
             };
             drop(status);
         Ok(resp)

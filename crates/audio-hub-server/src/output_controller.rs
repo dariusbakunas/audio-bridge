@@ -290,6 +290,29 @@ impl OutputController {
         }
     }
 
+    /// Play the previous track from history if available.
+    pub(crate) async fn queue_previous(&self, state: &AppState) -> Result<bool, OutputControllerError> {
+        let _ = self.resolve_active_output_id(state, None).await?;
+        let current = state
+            .playback_manager
+            .status()
+            .inner()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.now_playing.clone());
+        let previous = state
+            .playback_manager
+            .queue_service()
+            .take_previous(current.as_deref());
+        let Some(path) = previous else {
+            return Ok(false);
+        };
+        state.playback_manager.status().set_manual_advance_in_flight(true);
+        self.dispatch_play(state, path.clone(), None, false)?;
+        state.playback_manager.update_has_previous();
+        Ok(true)
+    }
+
     /// Toggle pause/resume on the active output.
     pub(crate) async fn pause_toggle(
         &self,

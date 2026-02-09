@@ -54,4 +54,5 @@ pub struct PlaybackStatus {
     pub buffer_size_frames: Option<u32>,
     pub buffered_frames: Option<u64>,
     pub buffer_capacity_frames: Option<u64>,
+    pub has_previous: Option<bool>,
 }

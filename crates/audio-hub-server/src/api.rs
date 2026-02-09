@@ -1208,6 +1208,25 @@ pub async fn queue_next(state: web::Data<AppState>) -> impl Responder {
 }
 
 #[utoipa::path(
+    post,
+    path = "/queue/previous",
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 204, description = "No previous track")
+    )
+)]
+#[post("/queue/previous")]
+/// Skip to the previously played track.
+pub async fn queue_previous(state: web::Data<AppState>) -> impl Responder {
+    tracing::debug!("queue previous request");
+    match state.output_controller.queue_previous(&state).await {
+        Ok(true) => HttpResponse::Ok().finish(),
+        Ok(false) => HttpResponse::NoContent().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
     get,
     path = "/outputs/{id}/status",
     params(

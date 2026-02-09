@@ -25,6 +25,7 @@ use crate::models;
         api::queue_clear,
         api::queue_play_from,
         api::queue_next,
+        api::queue_previous,
         api::queue_stream,
         api::artists_list,
         api::albums_list,

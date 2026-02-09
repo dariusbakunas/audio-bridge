@@ -411,6 +411,7 @@ impl OutputProvider for BridgeProvider {
             buffer_size_frames: status.buffer_size_frames,
             buffered_frames: status.buffered_frames,
             buffer_capacity_frames: status.buffer_capacity_frames,
+            has_previous: status.has_previous,
         };
         drop(status);
         if let Some(http_addr) = http_addr {

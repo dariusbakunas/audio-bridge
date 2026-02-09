@@ -2,7 +2,8 @@
 //!
 //! Owns queue mutations and decides when to dispatch the next track.
 
-use std::path::PathBuf;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::models::{QueueItem, QueueResponse};
@@ -54,6 +55,7 @@ fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
 #[derive(Clone)]
 pub(crate) struct QueueService {
     queue: Arc<Mutex<QueueState>>,
+    history: Arc<Mutex<VecDeque<PathBuf>>>,
     status: StatusStore,
     events: EventBus,
 }
@@ -61,12 +63,51 @@ pub(crate) struct QueueService {
 impl QueueService {
     /// Create a queue service backed by the shared queue + status store.
     pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore, events: EventBus) -> Self {
-        Self { queue, status, events }
+        Self {
+            queue,
+            history: Arc::new(Mutex::new(VecDeque::new())),
+            status,
+            events,
+        }
     }
 
     /// Return the shared queue state (for inspection/testing).
     pub(crate) fn queue(&self) -> &Arc<Mutex<QueueState>> {
         &self.queue
+    }
+
+    pub(crate) fn record_played_path(&self, path: &Path) {
+        const MAX_HISTORY: usize = 100;
+        let mut history = self.history.lock().unwrap();
+        if history.back().map(|last| last == path).unwrap_or(false) {
+            return;
+        }
+        history.push_back(path.to_path_buf());
+        if history.len() > MAX_HISTORY {
+            history.pop_front();
+        }
+    }
+
+    pub(crate) fn take_previous(&self, current: Option<&Path>) -> Option<PathBuf> {
+        let mut history = self.history.lock().unwrap();
+        while let Some(last) = history.pop_back() {
+            if current.map(|c| c == last).unwrap_or(false) {
+                continue;
+            }
+            return Some(last);
+        }
+        None
+    }
+
+    pub(crate) fn has_previous(&self, current: Option<&Path>) -> bool {
+        let history = self.history.lock().unwrap();
+        for path in history.iter().rev() {
+            if current.map(|c| c == path).unwrap_or(false) {
+                continue;
+            }
+            return true;
+        }
+        false
     }
 
     /// Build an API response for the current queue.
@@ -196,10 +237,11 @@ impl QueueService {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        if transport.play(path, ext_hint, None, false).is_ok() {
+        if transport.play(path.clone(), ext_hint, None, false).is_ok() {
             if mark_auto_advance {
                 self.status.set_auto_advance_in_flight(true);
             }
+            self.record_played_path(&path);
             NextDispatchResult::Dispatched
         } else {
             NextDispatchResult::Failed

@@ -8,6 +8,7 @@ interface PlayerBarProps {
   placeholderCover: string;
   showSignalPath: boolean;
   canTogglePlayback: boolean;
+  canGoPrevious: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   activeOutput: OutputInfo | null;
@@ -17,6 +18,7 @@ interface PlayerBarProps {
   onCoverError: () => void;
   onAlbumNavigate: (albumId: number) => void;
   onPrimaryAction: () => void;
+  onPrevious: () => void;
   onNext: () => void;
   onSignalOpen: () => void;
   onQueueOpen: () => void;
@@ -30,6 +32,7 @@ export default function PlayerBar({
   placeholderCover,
   showSignalPath,
   canTogglePlayback,
+  canGoPrevious,
   playButtonTitle,
   queueHasItems,
   activeOutput,
@@ -39,6 +42,7 @@ export default function PlayerBar({
   onCoverError,
   onAlbumNavigate,
   onPrimaryAction,
+  onPrevious,
   onNext,
   onSignalOpen,
   onQueueOpen,
@@ -103,10 +107,12 @@ export default function PlayerBar({
         <PlayerControls
           showSignalPath={showSignalPath}
           canTogglePlayback={canTogglePlayback}
+          canGoPrevious={canGoPrevious}
           isPaused={showPlayIcon}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasItems}
           onPrimaryAction={onPrimaryAction}
+          onPrevious={onPrevious}
           onNext={onNext}
           onSignalOpen={onSignalOpen}
           onQueueOpen={onQueueOpen}
