@@ -22,6 +22,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
+  overflow-y: scroll;
 }
 
 .app {
@@ -117,8 +118,6 @@ body {
 
 .main {
   padding: 96px clamp(20px, 5vw, 56px) 32px;
-  overflow: auto;
-  height: 100vh;
   margin-left: 240px;
   width: calc(100% - 240px);
 }
