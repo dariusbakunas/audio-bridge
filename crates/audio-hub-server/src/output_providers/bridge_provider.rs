@@ -3,9 +3,10 @@
 //! Maps output provider operations to bridge discovery + HTTP transport calls.
 
 use std::path::PathBuf;
+use std::time::Duration;
 use async_trait::async_trait;
 
-use crate::bridge_transport::BridgeTransportClient;
+use crate::bridge_transport::{BridgeTransportClient, HttpDeviceInfo};
 use crate::bridge_manager::{merge_bridges, parse_output_id, parse_provider_id};
 use crate::models::{
     OutputCapabilities,
@@ -91,28 +92,16 @@ impl BridgeProvider {
         let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         let (outputs, failed) = build_outputs_from_bridges_with_failures(&merged);
+        let active_bridge_id = bridges_state.active_bridge_id.clone();
         drop(bridges_state);
         drop(discovered);
-        if !failed.is_empty() {
-            if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
-                let configured_ids: std::collections::HashSet<String> = state.providers.bridge
-                    .bridges
-                    .lock()
-                    .unwrap()
-                    .bridges
-                    .iter()
-                    .map(|b| b.id.clone())
-                    .collect();
-                for id in failed {
-                    if !configured_ids.contains(&id) {
-                        map.remove(&id);
-                        tracing::info!(
-                            bridge_id = %id,
-                            "outputs: removed discovered bridge after device list failure"
-                        );
-                    }
-                }
-            }
+        for id in failed {
+            let is_active = active_bridge_id.as_deref() == Some(id.as_str());
+            tracing::warn!(
+                bridge_id = %id,
+                active = is_active,
+                "outputs: device list failed; keeping discovered bridge for retry"
+            );
         }
         outputs
     }
@@ -470,7 +459,7 @@ fn build_outputs_from_bridges_with_failures(
     let mut failed = Vec::new();
 
     for bridge in bridges {
-        let devices = match BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices() {
+        let devices = match list_devices_with_retry(bridge, 3) {
             Ok(list) => {
                 tracing::info!(
                     bridge_id = %bridge.id,
@@ -485,7 +474,7 @@ fn build_outputs_from_bridges_with_failures(
                     bridge_id = %bridge.id,
                     bridge_name = %bridge.name,
                     error = %e,
-                    "outputs: device list failed"
+                    "outputs: device list failed after retries"
                 );
                 failed.push(bridge.id.clone());
                 Vec::new()
@@ -529,7 +518,7 @@ fn build_outputs_from_bridges_with_failures(
 fn build_outputs_for_bridge(
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>, anyhow::Error> {
-    let devices = BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices()?;
+    let devices = list_devices_with_retry(bridge, 3)?;
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
     for device in &devices {
@@ -560,6 +549,105 @@ fn build_outputs_for_bridge(
         });
     }
     Ok(outputs)
+}
+
+fn list_devices_with_retry(
+    bridge: &crate::config::BridgeConfigResolved,
+    attempts: usize,
+) -> Result<Vec<HttpDeviceInfo>, anyhow::Error> {
+    list_devices_with_retry_fn(bridge, attempts, || {
+        BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices()
+    })
+}
+
+fn list_devices_with_retry_fn<F>(
+    bridge: &crate::config::BridgeConfigResolved,
+    attempts: usize,
+    mut list_fn: F,
+) -> Result<Vec<HttpDeviceInfo>, anyhow::Error>
+where
+    F: FnMut() -> Result<Vec<HttpDeviceInfo>, anyhow::Error>,
+{
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 1..=attempts {
+        match list_fn() {
+            Ok(list) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        bridge_id = %bridge.id,
+                        bridge_name = %bridge.name,
+                        attempt,
+                        "outputs: device list recovered"
+                    );
+                }
+                return Ok(list);
+            }
+            Err(err) => {
+                last_err = Some(err);
+                if attempt < attempts {
+                    let backoff = Duration::from_millis(200 * attempt as u64);
+                    tracing::warn!(
+                        bridge_id = %bridge.id,
+                        bridge_name = %bridge.name,
+                        attempt,
+                        "outputs: device list failed; retrying"
+                    );
+                    std::thread::sleep(backoff);
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("device list failed")))
+}
+
+#[cfg(test)]
+mod tests_retry {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn make_bridge() -> crate::config::BridgeConfigResolved {
+        crate::config::BridgeConfigResolved {
+            id: "bridge-1".to_string(),
+            name: "Bridge 1".to_string(),
+            http_addr: "127.0.0.1:1".parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn list_devices_with_retry_fn_succeeds_after_retry() {
+        let bridge = make_bridge();
+        let calls = AtomicUsize::new(0);
+        let devices = list_devices_with_retry_fn(&bridge, 3, || {
+            let attempt = calls.fetch_add(1, Ordering::SeqCst);
+            if attempt < 2 {
+                Err(anyhow::anyhow!("timeout"))
+            } else {
+                Ok(vec![HttpDeviceInfo {
+                    id: "dev1".to_string(),
+                    name: "Device 1".to_string(),
+                    min_rate: 0,
+                    max_rate: 0,
+                }])
+            }
+        })
+        .expect("retry should succeed");
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn list_devices_with_retry_fn_returns_last_error() {
+        let bridge = make_bridge();
+        let calls = AtomicUsize::new(0);
+        let result = list_devices_with_retry_fn(&bridge, 2, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("timeout"))
+        });
+
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
 }
 
 /// Normalize a reported min/max rate into a valid range.
