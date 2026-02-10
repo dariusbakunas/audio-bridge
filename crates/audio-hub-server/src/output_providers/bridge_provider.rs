@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn start_paused_for_resume_respects_user_pause_on_browser_switch() {
         assert!(start_paused_for_resume(Some("browser:abc"), true, true));
-        assert!(start_paused_for_resume(Some("browser:abc"), false, true));
+        assert!(!start_paused_for_resume(Some("browser:abc"), false, true));
     }
 
     #[test]
