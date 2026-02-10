@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use tiny_http::{Header, Method, Response, Server, StatusCode};
+use actix_web::{http::StatusCode, middleware::Logger, web, App, HttpResponse, HttpServer};
 use crossbeam_channel::Sender;
 
 use audio_player::device;
@@ -63,6 +63,13 @@ struct SeekRequest {
     ms: u64,
 }
 
+#[derive(Clone)]
+struct AppState {
+    status: Arc<Mutex<BridgeStatusState>>,
+    device_selected: Arc<Mutex<Option<String>>>,
+    player_tx: Sender<PlayerCommand>,
+}
+
 /// Spawn the HTTP API server on the given bind address.
 pub(crate) fn spawn_http_server(
     bind: SocketAddr,
@@ -71,218 +78,226 @@ pub(crate) fn spawn_http_server(
     player_tx: Sender<PlayerCommand>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let server = match Server::http(bind) {
-            Ok(server) => server,
+        let state = AppState {
+            status,
+            device_selected,
+            player_tx,
+        };
+        let runner = match HttpServer::new(move || {
+            App::new()
+                .app_data(web::Data::new(state.clone()))
+                .wrap(Logger::new("http request method=%m path=%U status=%s").exclude("/status").exclude("/health"))
+                .route("/health", web::get().to(health))
+                .route("/devices", web::get().to(list_devices))
+                .route("/devices/select", web::post().to(select_device))
+                .route("/status", web::get().to(status_snapshot))
+                .route("/play", web::post().to(play))
+                .route("/pause", web::post().to(pause))
+                .route("/resume", web::post().to(resume))
+                .route("/stop", web::post().to(stop))
+                .route("/seek", web::post().to(seek))
+        })
+        .bind(bind)
+        {
+            Ok(server) => server.run(),
             Err(e) => {
                 tracing::error!(error = %e, "http server bind failed");
                 return;
             }
         };
+
         tracing::info!(bind = %bind, "http api listening");
-
-        for mut request in server.incoming_requests() {
-            let method = request.method().clone();
-            let url = request.url().split('?').next().unwrap_or("").to_string();
-            let (status, response) = match (method, url.as_str()) {
-                (Method::Get, "/health") => {
-                    let body = HealthResponse {
-                        status: "ok",
-                        version: env!("CARGO_PKG_VERSION"),
-                    };
-                    json_response(200, &body)
-                }
-                (Method::Get, "/devices") => {
-                    let host = cpal::default_host();
-                    match device::list_device_infos(&host) {
-                        Ok(devices) => {
-                            let mut seen = std::collections::HashSet::new();
-                            let mut deduped = Vec::new();
-                            for dev in devices {
-                                if seen.insert(dev.id.clone()) {
-                                    deduped.push(DeviceInfo {
-                                        id: dev.id,
-                                        name: dev.name,
-                                        min_rate: dev.min_rate,
-                                        max_rate: dev.max_rate,
-                                    });
-                                }
-                            }
-                            deduped.sort_by(|a, b| a.name.cmp(&b.name));
-                            let selected = device_selected.lock().ok().and_then(|g| g.clone());
-                            let selected_id = selected.as_ref().and_then(|name| {
-                                deduped
-                                    .iter()
-                                    .find(|dev| dev.name == *name)
-                                    .map(|dev| dev.id.clone())
-                            });
-                            let body = DevicesResponse {
-                                devices: deduped,
-                                selected,
-                                selected_id,
-                            };
-                            json_response(200, &body)
-                        }
-                        Err(e) => error_response(500, &format!("{e:#}")),
-                    }
-                }
-                (Method::Post, "/devices/select") => {
-                    let mut body = String::new();
-                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        error_response(400, &format!("read body failed: {e}"))
-                    } else {
-                        match serde_json::from_str::<DeviceSelectRequest>(&body) {
-                            Ok(req) => {
-                                let mut error: Option<(u16, Response<std::io::Cursor<Vec<u8>>>)> = None;
-                                let selected_name = if let Some(id) = req.id {
-                                    let host = cpal::default_host();
-                                    match device::list_device_infos(&host) {
-                                        Ok(devices) => devices
-                                            .into_iter()
-                                            .find(|dev| dev.id == id)
-                                            .map(|dev| dev.name),
-                                        Err(e) => {
-                                            error = Some(error_response(500, &format!("{e:#}")));
-                                            None
-                                        }
-                                    }
-                                } else {
-                                    req.name
-                                };
-                                if let Some(resp) = error {
-                                    resp
-                                } else if let Some(selected_name) = selected_name {
-                                    if let Ok(mut g) = device_selected.lock() {
-                                        if selected_name.trim().is_empty() {
-                                            *g = None;
-                                        } else {
-                                            *g = Some(selected_name);
-                                        }
-                                    }
-                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                                } else {
-                                    error_response(400, "unknown device")
-                                }
-                            }
-                            Err(e) => error_response(400, &format!("invalid json: {e}")),
-                        }
-                    }
-                }
-                (Method::Get, "/status") => {
-                    let snapshot = status
-                        .lock()
-                        .map(|s| s.snapshot())
-                        .unwrap_or_else(|_| StatusSnapshot {
-                            now_playing: None,
-                            paused: false,
-                            elapsed_ms: None,
-                            duration_ms: None,
-                            source_codec: None,
-                            source_bit_depth: None,
-                            container: None,
-                            output_sample_format: None,
-                            resampling: None,
-                            resample_from_hz: None,
-                            resample_to_hz: None,
-                            sample_rate: None,
-                            channels: None,
-                            device: None,
-                            underrun_frames: None,
-                            underrun_events: None,
-                            buffer_size_frames: None,
-                            buffered_frames: None,
-                            buffer_capacity_frames: None,
-                        });
-                    json_response(200, &snapshot)
-                }
-                (Method::Post, "/play") => {
-                    let mut body = String::new();
-                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        error_response(400, &format!("read body failed: {e}"))
-                    } else {
-                        match serde_json::from_str::<PlayRequest>(&body) {
-                            Ok(req) => {
-                                if req.url.trim().is_empty() {
-                                    error_response(400, "url is required")
-                                } else if player_tx
-                                    .send(PlayerCommand::Play {
-                                        url: req.url,
-                                        ext_hint: req.ext_hint,
-                                        title: req.title,
-                                        seek_ms: req.seek_ms,
-                                    })
-                                    .is_err()
-                                {
-                                    error_response(500, "player offline")
-                                } else {
-                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                                }
-                            }
-                            Err(e) => error_response(400, &format!("invalid json: {e}")),
-                        }
-                    }
-                }
-                (Method::Post, "/pause") => {
-                    if player_tx.send(PlayerCommand::PauseToggle).is_err() {
-                        error_response(500, "player offline")
-                    } else {
-                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                    }
-                }
-                (Method::Post, "/resume") => {
-                    if player_tx.send(PlayerCommand::Resume).is_err() {
-                        error_response(500, "player offline")
-                    } else {
-                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                    }
-                }
-                (Method::Post, "/stop") => {
-                    if player_tx.send(PlayerCommand::Stop).is_err() {
-                        error_response(500, "player offline")
-                    } else {
-                        (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                    }
-                }
-                (Method::Post, "/seek") => {
-                    let mut body = String::new();
-                    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        error_response(400, &format!("read body failed: {e}"))
-                    } else {
-                        match serde_json::from_str::<SeekRequest>(&body) {
-                            Ok(req) => {
-                                if player_tx.send(PlayerCommand::Seek { ms: req.ms }).is_err() {
-                                    error_response(500, "player offline")
-                                } else {
-                                    (204, Response::from_data(Vec::new()).with_status_code(StatusCode(204)))
-                                }
-                            }
-                            Err(e) => error_response(400, &format!("invalid json: {e}")),
-                        }
-                    }
-                }
-                _ => error_response(404, "not found"),
-            };
-
-            let response = response.with_header(Header::from_bytes("Content-Type", "application/json").unwrap());
-            if should_log_path(&url) {
-                tracing::info!(method = %request.method(), path = %url, status = status, "http request");
-            }
-            let _ = request.respond(response);
-        }
+        let _ = actix_web::rt::System::new().block_on(runner);
     })
 }
 
-/// Encode a JSON response with a specific status code.
-fn json_response<T: serde::Serialize>(status: u16, body: &T) -> (u16, Response<std::io::Cursor<Vec<u8>>>) {
-    match serde_json::to_vec(body) {
-        Ok(json) => (status, Response::from_data(json).with_status_code(StatusCode(status))),
-        Err(e) => (500, Response::from_string(format!("json encode error: {e}")).with_status_code(StatusCode(500))),
+async fn health() -> HttpResponse {
+    HttpResponse::Ok().json(HealthResponse {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+async fn list_devices(state: web::Data<AppState>) -> HttpResponse {
+    let host = cpal::default_host();
+    match device::list_device_infos(&host) {
+        Ok(devices) => {
+            let mut seen = std::collections::HashSet::new();
+            let mut deduped = Vec::new();
+            for dev in devices {
+                if seen.insert(dev.id.clone()) {
+                    deduped.push(DeviceInfo {
+                        id: dev.id,
+                        name: dev.name,
+                        min_rate: dev.min_rate,
+                        max_rate: dev.max_rate,
+                    });
+                }
+            }
+            deduped.sort_by(|a, b| a.name.cmp(&b.name));
+            let selected = state.device_selected.lock().ok().and_then(|g| g.clone());
+            let selected_id = selected.as_ref().and_then(|name| {
+                deduped
+                    .iter()
+                    .find(|dev| dev.name == *name)
+                    .map(|dev| dev.id.clone())
+            });
+            HttpResponse::Ok().json(DevicesResponse {
+                devices: deduped,
+                selected,
+                selected_id,
+            })
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("{e:#}")),
     }
 }
 
+async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
+    let req: DeviceSelectRequest = match parse_json(&body) {
+        Ok(req) => req,
+        Err(resp) => return resp,
+    };
+
+    let mut error: Option<HttpResponse> = None;
+    let selected_name = if let Some(id) = req.id {
+        let host = cpal::default_host();
+        match device::list_device_infos(&host) {
+            Ok(devices) => devices
+                .into_iter()
+                .find(|dev| dev.id == id)
+                .map(|dev| dev.name),
+            Err(e) => {
+                error = Some(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("{e:#}"),
+                ));
+                None
+            }
+        }
+    } else {
+        req.name
+    };
+
+    if let Some(resp) = error {
+        resp
+    } else if let Some(selected_name) = selected_name {
+        if let Ok(mut g) = state.device_selected.lock() {
+            if selected_name.trim().is_empty() {
+                *g = None;
+            } else {
+                *g = Some(selected_name);
+            }
+        }
+        HttpResponse::NoContent().finish()
+    } else {
+        error_response(StatusCode::BAD_REQUEST, "unknown device")
+    }
+}
+
+async fn status_snapshot(state: web::Data<AppState>) -> HttpResponse {
+    let snapshot = state
+        .status
+        .lock()
+        .map(|s| s.snapshot())
+        .unwrap_or_else(|_| StatusSnapshot {
+            now_playing: None,
+            paused: false,
+            elapsed_ms: None,
+            duration_ms: None,
+            source_codec: None,
+            source_bit_depth: None,
+            container: None,
+            output_sample_format: None,
+            resampling: None,
+            resample_from_hz: None,
+            resample_to_hz: None,
+            sample_rate: None,
+            channels: None,
+            device: None,
+            underrun_frames: None,
+            underrun_events: None,
+            buffer_size_frames: None,
+            buffered_frames: None,
+            buffer_capacity_frames: None,
+        });
+    HttpResponse::Ok().json(snapshot)
+}
+
+async fn play(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
+    let req: PlayRequest = match parse_json(&body) {
+        Ok(req) => req,
+        Err(resp) => return resp,
+    };
+
+    if req.url.trim().is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "url is required");
+    }
+
+    if state
+        .player_tx
+        .send(PlayerCommand::Play {
+            url: req.url,
+            ext_hint: req.ext_hint,
+            title: req.title,
+            seek_ms: req.seek_ms,
+        })
+        .is_err()
+    {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
+    } else {
+        HttpResponse::NoContent().finish()
+    }
+}
+
+async fn pause(state: web::Data<AppState>) -> HttpResponse {
+    if state.player_tx.send(PlayerCommand::PauseToggle).is_err() {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
+    } else {
+        HttpResponse::NoContent().finish()
+    }
+}
+
+async fn resume(state: web::Data<AppState>) -> HttpResponse {
+    if state.player_tx.send(PlayerCommand::Resume).is_err() {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
+    } else {
+        HttpResponse::NoContent().finish()
+    }
+}
+
+async fn stop(state: web::Data<AppState>) -> HttpResponse {
+    if state.player_tx.send(PlayerCommand::Stop).is_err() {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
+    } else {
+        HttpResponse::NoContent().finish()
+    }
+}
+
+async fn seek(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
+    let req: SeekRequest = match parse_json(&body) {
+        Ok(req) => req,
+        Err(resp) => return resp,
+    };
+
+    if state
+        .player_tx
+        .send(PlayerCommand::Seek { ms: req.ms })
+        .is_err()
+    {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
+    } else {
+        HttpResponse::NoContent().finish()
+    }
+}
+
+fn parse_json<T: serde::de::DeserializeOwned>(body: &web::Bytes) -> Result<T, HttpResponse> {
+    serde_json::from_slice(body)
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid json: {e}")))
+}
+
 /// Emit a JSON error response.
-fn error_response(status: u16, message: &str) -> (u16, Response<std::io::Cursor<Vec<u8>>>) {
-    let body = serde_json::json!({ "error": message });
-    (status, Response::from_data(body.to_string()).with_status_code(StatusCode(status)))
+fn error_response(status: StatusCode, message: &str) -> HttpResponse {
+    HttpResponse::build(status).json(serde_json::json!({ "error": message }))
 }
 
 /// Filter noisy paths from logging output.
@@ -293,7 +308,7 @@ fn should_log_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use actix_web::body;
 
     #[test]
     fn should_log_path_filters_health_and_status() {
@@ -302,31 +317,12 @@ mod tests {
         assert!(should_log_path("/devices"));
     }
 
-    #[test]
-    fn json_response_encodes_body() {
-        #[derive(serde::Serialize)]
-        struct Payload {
-            name: &'static str,
-        }
-        let (status, resp) = json_response(200, &Payload { name: "bridge" });
-        let mut buf = String::new();
-        let mut reader = resp.into_reader();
-        reader.read_to_string(&mut buf).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&buf).unwrap();
+    #[actix_web::test]
+    async fn error_response_encodes_message() {
+        let resp = error_response(StatusCode::NOT_FOUND, "missing");
+        let body = body::to_bytes(resp.into_body()).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(status, 200);
-        assert_eq!(value["name"], "bridge");
-    }
-
-    #[test]
-    fn error_response_encodes_message() {
-        let (status, resp) = error_response(404, "missing");
-        let mut buf = String::new();
-        let mut reader = resp.into_reader();
-        reader.read_to_string(&mut buf).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&buf).unwrap();
-
-        assert_eq!(status, 404);
         assert_eq!(value["error"], "missing");
     }
 
