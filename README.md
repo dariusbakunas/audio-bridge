@@ -71,6 +71,7 @@ Notes:
 - Providers expose outputs (devices). The hub keeps one active output at a time.
 - `bridge` outputs are discovered via mDNS and polled over HTTP.
 - Local outputs (optional) reuse the same control path as bridge outputs.
+- Browser outputs are registered by the web UI and controlled via WebSocket (`/browser/ws`).
 
 ### Status + UI
 
@@ -136,6 +137,8 @@ npm run build
 ```
 
 Then start `audio-hub-server` as usual and open `http://<SERVER_IP>:8080/`.
+
+The browser UI registers itself as a playback output; select the `browser:<id>` output to play directly in that browser.
 
 For local development:
 

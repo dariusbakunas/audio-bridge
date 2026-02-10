@@ -4,6 +4,7 @@
 - Rust workspace for a networked audio hub + receiver.
 - Main binaries: `bridge` (receiver), `audio-hub-server` (server), `hub-cli` (TUI client).
 - Experimental web UI in `web-ui` (Vite + React).
+- Browser playback is supported via a browser output provider + WebSocket receiver (`/browser/ws`).
 
 ## Repo layout
 - `crates/audio-hub-server`: HTTP API, library scan, output management, stream source.
