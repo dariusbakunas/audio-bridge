@@ -9,12 +9,14 @@ pub mod outputs;
 pub mod playback;
 pub mod queue;
 pub mod streams;
+pub mod browser;
 
 pub use library::{
     list_library,
     rescan_library,
     rescan_track,
     stream_track,
+    transcode_track,
 };
 pub use logs::{logs_clear, LogsClearResponse};
 pub use metadata::{
@@ -63,6 +65,7 @@ pub use streams::{
     queue_stream,
     status_stream,
 };
+pub use browser::browser_ws;
 
 #[cfg(test)]
 mod tests {
@@ -129,6 +132,7 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
+        let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
         let state = AppState::new(
             library,
             metadata_db,
@@ -136,6 +140,7 @@ mod tests {
             MetadataWake::new(),
             bridge_state,
             local_state,
+            browser_state,
             playback_manager,
             device_selection,
             events,

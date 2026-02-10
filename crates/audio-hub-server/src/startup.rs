@@ -78,6 +78,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
+    let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -85,6 +86,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         metadata_wake.clone(),
         bridge_state,
         local_state,
+        browser_state,
         playback_manager,
         device_selection,
         events,
@@ -134,6 +136,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::stop)
             .service(api::seek)
             .service(api::stream_track)
+            .service(api::transcode_track)
             .service(api::queue_list)
             .service(api::queue_add)
             .service(api::queue_add_next)
@@ -157,6 +160,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::track_cover)
             .service(api::album_cover)
             .service(api::logs_clear)
+            .service(api::browser_ws)
             .service(api::status_for_output)
             .service(api::status_stream)
             .service(api::providers_list)

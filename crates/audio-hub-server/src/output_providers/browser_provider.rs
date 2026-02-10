@@ -1,0 +1,326 @@
+//! Browser output provider implementation.
+//!
+//! Exposes connected browser receivers as selectable outputs.
+
+use async_trait::async_trait;
+
+use crate::browser::spawn_browser_worker;
+use crate::models::{OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse};
+use crate::output_providers::registry::{OutputProvider, ProviderError};
+use crate::state::AppState;
+
+pub(crate) struct BrowserProvider;
+
+impl BrowserProvider {
+    fn provider_id() -> &'static str {
+        "browser"
+    }
+
+    fn output_id(session_id: &str) -> String {
+        format!("browser:{session_id}")
+    }
+
+    fn parse_output_id(output_id: &str) -> Option<String> {
+        let mut parts = output_id.splitn(2, ':');
+        let kind = parts.next().unwrap_or("");
+        let session_id = parts.next().unwrap_or("");
+        if kind != "browser" || session_id.is_empty() {
+            return None;
+        }
+        Some(session_id.to_string())
+    }
+
+    fn sessions(state: &AppState) -> Vec<crate::browser::BrowserSession> {
+        state.providers.browser.list_sessions()
+    }
+
+    fn active_output_id(state: &AppState) -> Option<String> {
+        state.providers.bridge.bridges.lock().unwrap().active_output_id.clone()
+    }
+
+    fn browser_output_info(session: &crate::browser::BrowserSession, active_id: &Option<String>) -> OutputInfo {
+        let id = Self::output_id(&session.id);
+        let state = if active_id.as_deref() == Some(&id) {
+            "active"
+        } else {
+            "online"
+        };
+        OutputInfo {
+            id,
+            kind: "browser".to_string(),
+            name: session.name.clone(),
+            state: state.to_string(),
+            provider_id: Some(Self::provider_id().to_string()),
+            provider_name: Some("Browser".to_string()),
+            supported_rates: None,
+            capabilities: OutputCapabilities {
+                device_select: false,
+                volume: false,
+            },
+        }
+    }
+}
+
+fn estimate_bitrate_kbps(path: &std::path::Path, duration_ms: u64) -> Option<u32> {
+    if duration_ms == 0 {
+        return None;
+    }
+    let size = std::fs::metadata(path).ok()?.len();
+    if size == 0 {
+        return None;
+    }
+    let bits = size.saturating_mul(8);
+    let kbps = bits
+        .saturating_mul(1000)
+        .saturating_div(duration_ms)
+        .saturating_div(1000);
+    u32::try_from(kbps).ok()
+}
+
+fn container_from_path(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "flac" => Some("FLAC"),
+        "mp3" => Some("MP3"),
+        "aac" => Some("AAC"),
+        "m4a" => Some("MP4"),
+        "ogg" => Some("OGG"),
+        "opus" => Some("OPUS"),
+        "wav" => Some("WAV"),
+        _ => None,
+    }
+}
+
+#[async_trait]
+impl OutputProvider for BrowserProvider {
+    fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
+        let sessions = Self::sessions(state);
+        let state_label = if sessions.is_empty() {
+            "idle"
+        } else {
+            "available"
+        };
+        vec![ProviderInfo {
+            id: Self::provider_id().to_string(),
+            kind: "browser".to_string(),
+            name: "Browser".to_string(),
+            state: state_label.to_string(),
+            capabilities: OutputCapabilities {
+                device_select: false,
+                volume: false,
+            },
+        }]
+    }
+
+    async fn outputs_for_provider(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<OutputsResponse, ProviderError> {
+        if provider_id != Self::provider_id() {
+            return Err(ProviderError::BadRequest("unknown provider id".to_string()));
+        }
+        let sessions = Self::sessions(state);
+        let active_id = Self::active_output_id(state);
+        let outputs = sessions
+            .iter()
+            .map(|s| Self::browser_output_info(s, &active_id))
+            .collect();
+        Ok(OutputsResponse {
+            active_id,
+            outputs,
+        })
+    }
+
+    fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
+        let sessions = Self::sessions(state);
+        let active_id = Self::active_output_id(state);
+        sessions
+            .iter()
+            .map(|s| Self::browser_output_info(s, &active_id))
+            .collect()
+    }
+
+    fn can_handle_output_id(&self, output_id: &str) -> bool {
+        output_id.starts_with("browser:")
+    }
+
+    fn can_handle_provider_id(&self, _state: &AppState, provider_id: &str) -> bool {
+        provider_id == Self::provider_id()
+    }
+
+    fn inject_active_output_if_missing(
+        &self,
+        _state: &AppState,
+        outputs: &mut Vec<OutputInfo>,
+        active_output_id: &str,
+    ) {
+        if Self::parse_output_id(active_output_id).is_none() {
+            return;
+        }
+        if outputs.iter().any(|o| o.id == active_output_id) {
+            return;
+        }
+        outputs.push(OutputInfo {
+            id: active_output_id.to_string(),
+            kind: "browser".to_string(),
+            name: "Browser (offline)".to_string(),
+            state: "offline".to_string(),
+            provider_id: Some(Self::provider_id().to_string()),
+            provider_name: Some("Browser".to_string()),
+            supported_rates: None,
+            capabilities: OutputCapabilities {
+                device_select: false,
+                volume: false,
+            },
+        });
+    }
+
+    async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError> {
+        let active_id = Self::active_output_id(state)
+            .ok_or_else(|| ProviderError::Unavailable("no active output selected".to_string()))?;
+        let Some(session_id) = Self::parse_output_id(&active_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        if state.providers.browser.get_session(&session_id).is_some() {
+            Ok(())
+        } else {
+            Err(ProviderError::Unavailable("browser offline".to_string()))
+        }
+    }
+
+    async fn select_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError> {
+        let Some(session_id) = Self::parse_output_id(output_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        let session = state.providers.browser.get_session(&session_id)
+            .ok_or_else(|| ProviderError::Unavailable("browser offline".to_string()))?;
+
+        {
+            let player = state.providers.bridge.player.lock().unwrap();
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+        }
+
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        {
+            let mut player = state.providers.bridge.player.lock().unwrap();
+            player.cmd_tx = cmd_tx.clone();
+        }
+        {
+            let mut bridges = state.providers.bridge.bridges.lock().unwrap();
+            bridges.active_output_id = Some(output_id.to_string());
+            bridges.active_bridge_id = None;
+        }
+
+        spawn_browser_worker(
+            session_id,
+            session.sender.clone(),
+            cmd_rx,
+            state.playback.manager.status().clone(),
+            state.playback.manager.queue_service().queue().clone(),
+            state.events.clone(),
+            state.providers.bridge.public_base_url.clone(),
+        );
+        Ok(())
+    }
+
+    async fn status_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<StatusResponse, ProviderError> {
+        let Some(session_id) = Self::parse_output_id(output_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        let session = state.providers.browser.get_session(&session_id)
+            .ok_or_else(|| ProviderError::Unavailable("browser offline".to_string()))?;
+        let active_output_id = Self::active_output_id(state);
+        if active_output_id.as_deref() != Some(output_id) {
+            return Err(ProviderError::BadRequest("output is not active".to_string()));
+        }
+
+        let status = state.playback.manager.status().inner().lock().unwrap();
+        let (title, artist, album, format, sample_rate) =
+            match status.now_playing.as_ref() {
+                Some(path) => {
+                    let lib = state.library.read().unwrap();
+                    match lib.find_track_by_path(path) {
+                        Some(crate::models::LibraryEntry::Track {
+                            file_name,
+                            sample_rate,
+                            artist,
+                            album,
+                            format,
+                            ..
+                        }) => (Some(file_name), artist, album, Some(format), sample_rate),
+                        _ => (None, None, None, None, None),
+                    }
+                }
+                None => (None, None, None, None, None),
+            };
+        let container = status.container.clone().or_else(|| {
+            status
+                .now_playing
+                .as_ref()
+                .and_then(|p| container_from_path(p))
+                .map(|s| s.to_string())
+        });
+        let source_codec = status.source_codec.clone().or_else(|| format.clone());
+        let bitrate_kbps = status
+            .duration_ms
+            .and_then(|duration_ms| status.now_playing.as_ref().and_then(|p| estimate_bitrate_kbps(p, duration_ms)));
+
+        let resp = StatusResponse {
+            now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
+            paused: status.paused,
+            bridge_online: true,
+            elapsed_ms: status.elapsed_ms,
+            duration_ms: status.duration_ms,
+            source_codec,
+            source_bit_depth: status.source_bit_depth,
+            container,
+            output_sample_format: status.output_sample_format.clone(),
+            resampling: status.resampling,
+            resample_from_hz: status.resample_from_hz,
+            resample_to_hz: status.resample_to_hz,
+            sample_rate,
+            channels: status.channels,
+            output_sample_rate: status.sample_rate,
+            output_device: Some(session.name.clone()),
+            title,
+            artist,
+            album,
+            format,
+            output_id: Some(output_id.to_string()),
+            bitrate_kbps,
+            underrun_frames: None,
+            underrun_events: None,
+            buffer_size_frames: status.buffer_size_frames,
+            buffered_frames: status.buffered_frames,
+            buffer_capacity_frames: status.buffer_capacity_frames,
+            has_previous: status.has_previous,
+        };
+        drop(status);
+        Ok(resp)
+    }
+
+    async fn stop_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<(), ProviderError> {
+        let Some(session_id) = Self::parse_output_id(output_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        if let Some(session) = state.providers.browser.get_session(&session_id) {
+            let _ = session.sender.do_send(crate::browser::BrowserOutbound(
+                "{\"type\":\"stop\"}".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}

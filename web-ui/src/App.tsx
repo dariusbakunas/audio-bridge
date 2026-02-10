@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
-import {apiUrl, fetchJson, postJson} from "./api";
+import {apiUrl, apiWsUrl, fetchJson, postJson} from "./api";
 import {
   AlbumListResponse,
   AlbumSummary,
@@ -264,6 +264,11 @@ export default function App() {
   const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const browserWsRef = useRef<WebSocket | null>(null);
+  const browserSessionIdRef = useRef<string | null>(null);
+  const browserPathRef = useRef<string | null>(null);
+  const lastBrowserStatusSentRef = useRef<number>(0);
 
   const closeTrackMenu = useCallback(() => {
     setTrackMenuPath(null);
@@ -680,6 +685,159 @@ export default function App() {
     },
     onError: () => setError("Live status disconnected.")
   });
+
+  const sendBrowserStatus = useCallback((force = false) => {
+    const ws = browserWsRef.current;
+    const audio = audioRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !audio) return;
+    const now = Date.now();
+    if (!force && now - lastBrowserStatusSentRef.current < 500) {
+      return;
+    }
+    lastBrowserStatusSentRef.current = now;
+    const hasSrc = Boolean(audio.src);
+    const duration = hasSrc && Number.isFinite(audio.duration)
+      ? Math.floor(audio.duration * 1000)
+      : null;
+    const elapsed = hasSrc && Number.isFinite(audio.currentTime)
+      ? Math.floor(audio.currentTime * 1000)
+      : null;
+    ws.send(JSON.stringify({
+      type: "status",
+      paused: audio.paused,
+      elapsed_ms: elapsed,
+      duration_ms: duration,
+      now_playing: browserPathRef.current
+    }));
+  }, []);
+
+  const sendBrowserEnded = useCallback(() => {
+    const ws = browserWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "ended" }));
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const handleTimeUpdate = () => sendBrowserStatus();
+    const handlePause = () => sendBrowserStatus(true);
+    const handlePlay = () => sendBrowserStatus(true);
+    const handleDurationChange = () => sendBrowserStatus(true);
+    const handleEnded = () => {
+      browserPathRef.current = null;
+      sendBrowserEnded();
+      sendBrowserStatus(true);
+    };
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("durationchange", handleDurationChange);
+    audio.addEventListener("ended", handleEnded);
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("durationchange", handleDurationChange);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, [sendBrowserStatus, sendBrowserEnded]);
+
+  useEffect(() => {
+    let mounted = true;
+    let retryTimer: number | null = null;
+    const connect = () => {
+      if (!mounted) return;
+      const ws = new WebSocket(apiWsUrl("/browser/ws"));
+      browserWsRef.current = ws;
+      ws.onopen = () => {
+        const name = `Browser (${navigator.platform || "unknown"})`;
+        ws.send(JSON.stringify({ type: "hello", name }));
+      };
+      ws.onmessage = (event) => {
+        let payload: any;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        const audio = audioRef.current;
+        if (!audio) return;
+        switch (payload?.type) {
+          case "hello":
+            browserSessionIdRef.current = payload.session_id ?? null;
+            break;
+          case "play": {
+            const url = payload.url as string | undefined;
+            if (!url) return;
+            const startPaused = Boolean(payload.start_paused);
+            const seekMs = typeof payload.seek_ms === "number" ? payload.seek_ms : null;
+            browserPathRef.current = typeof payload.path === "string" ? payload.path : null;
+            const applyStart = () => {
+              if (seekMs !== null) {
+                audio.currentTime = seekMs / 1000;
+              }
+              if (startPaused) {
+                audio.pause();
+              } else {
+                audio.play().catch(() => {});
+              }
+              sendBrowserStatus(true);
+            };
+            audio.src = url;
+            audio.load();
+            if (seekMs === null) {
+              applyStart();
+            } else {
+              const onLoaded = () => {
+                audio.removeEventListener("loadedmetadata", onLoaded);
+                applyStart();
+              };
+              audio.addEventListener("loadedmetadata", onLoaded);
+            }
+            break;
+          }
+          case "pause_toggle":
+            if (audio.paused) {
+              audio.play().catch(() => {});
+            } else {
+              audio.pause();
+            }
+            break;
+          case "stop":
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+            browserPathRef.current = null;
+            sendBrowserStatus(true);
+            break;
+          case "seek":
+            if (typeof payload.ms === "number") {
+              audio.currentTime = payload.ms / 1000;
+              sendBrowserStatus(true);
+            }
+            break;
+          default:
+            break;
+        }
+      };
+      ws.onerror = () => {
+        ws.close();
+      };
+      ws.onclose = () => {
+        if (!mounted) return;
+        retryTimer = window.setTimeout(connect, 1500);
+      };
+    };
+    connect();
+    return () => {
+      mounted = false;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+      browserWsRef.current?.close();
+    };
+  }, [sendBrowserStatus]);
   useEffect(() => {
     if (!activeOutputId) {
       setStatus(null);
@@ -1243,6 +1401,8 @@ export default function App() {
         canPlay={Boolean(activeOutputId)}
         onPlayFrom={handleQueuePlayFrom}
       />
+
+      <audio ref={audioRef} preload="auto" style={{ display: "none" }} />
 
     </div>
   );

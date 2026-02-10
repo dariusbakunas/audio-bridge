@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, StatusResponse};
 use crate::output_providers::bridge_provider::BridgeProvider;
+use crate::output_providers::browser_provider::BrowserProvider;
 use crate::output_providers::local_provider::LocalProvider;
 use crate::state::AppState;
 use tracing::warn;
@@ -89,7 +90,11 @@ impl OutputRegistry {
 
     /// Create a registry with the default providers.
     pub(crate) fn default() -> Self {
-        Self::new(vec![Box::new(BridgeProvider), Box::new(LocalProvider)])
+        Self::new(vec![
+            Box::new(BridgeProvider),
+            Box::new(LocalProvider),
+            Box::new(BrowserProvider),
+        ])
     }
 
     /// List providers across all implementations.
@@ -350,6 +355,7 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
         let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
+        let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
         AppState::new(
             library,
             metadata_db,
@@ -357,6 +363,7 @@ mod tests {
             crate::state::MetadataWake::new(),
             bridge_state,
             local_state,
+            browser_state,
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),

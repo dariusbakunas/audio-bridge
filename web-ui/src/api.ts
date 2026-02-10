@@ -8,6 +8,18 @@ export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
+export function apiWsUrl(path: string): string {
+  const url = apiUrl(path);
+  if (url.startsWith("http://")) {
+    return url.replace("http://", "ws://");
+  }
+  if (url.startsWith("https://")) {
+    return url.replace("https://", "wss://");
+  }
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}${url}`;
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(apiUrl(path), {
     ...init,

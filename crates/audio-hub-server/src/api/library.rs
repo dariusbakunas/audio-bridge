@@ -6,7 +6,9 @@ use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
 use actix_web::body::SizedStream;
 use actix_web::http::{header, StatusCode};
 use serde::Deserialize;
+use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::process::Command;
 use tokio_util::io::ReaderStream;
 use utoipa::ToSchema;
 
@@ -25,6 +27,17 @@ pub struct LibraryQuery {
 pub struct StreamQuery {
     /// Absolute path to the media file.
     pub path: String,
+}
+
+/// Query parameters for transcode stream requests.
+#[derive(Deserialize, ToSchema)]
+pub struct TranscodeQuery {
+    /// Absolute path to the media file.
+    pub path: String,
+    /// Output format (mp3, opus, aac, wav).
+    pub format: Option<String>,
+    /// Optional audio bitrate in kbps (ignored for wav).
+    pub bitrate_kbps: Option<u32>,
 }
 
 #[utoipa::path(
@@ -129,8 +142,26 @@ pub async fn stream_track(
     let stream = ReaderStream::new(file.take(len));
     let body = SizedStream::new(len, stream);
 
+    let content_type = match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "flac" => "audio/flac",
+        "mp3" => "audio/mpeg",
+        "aac" => "audio/aac",
+        "m4a" => "audio/mp4",
+        "ogg" => "audio/ogg",
+        "opus" => "audio/ogg",
+        "wav" => "audio/wav",
+        _ => "application/octet-stream",
+    };
+
     let mut resp = HttpResponse::build(status_code);
     resp.insert_header((header::ACCEPT_RANGES, "bytes"));
+    resp.insert_header((header::CONTENT_TYPE, content_type));
     if let Some((start, end)) = range {
         resp.insert_header((
             header::CONTENT_RANGE,
@@ -139,6 +170,120 @@ pub async fn stream_track(
     }
     resp.insert_header((header::CONTENT_LENGTH, len.to_string()));
     resp.body(body)
+}
+
+#[utoipa::path(
+    get,
+    path = "/stream/transcode",
+    params(
+        ("path" = String, Query, description = "Track path under the library root"),
+        ("format" = Option<String>, Query, description = "Output format: mp3, opus, aac, wav"),
+        ("bitrate_kbps" = Option<u32>, Query, description = "Optional bitrate in kbps")
+    ),
+    responses(
+        (status = 200, description = "Transcoded audio stream"),
+        (status = 400, description = "Invalid request"),
+        (status = 500, description = "Transcode failed")
+    )
+)]
+#[get("/stream/transcode")]
+/// Stream a transcoded audio track (requires ffmpeg in PATH).
+pub async fn transcode_track(
+    state: web::Data<AppState>,
+    query: web::Query<TranscodeQuery>,
+) -> impl Responder {
+    let path = std::path::PathBuf::from(&query.path);
+    let path = match state.output.controller.canonicalize_under_root(&state, &path) {
+        Ok(dir) => dir,
+        Err(err) => return err.into_response(),
+    };
+
+    let format = query.format.as_deref().unwrap_or("mp3");
+    let bitrate_kbps = query.bitrate_kbps;
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-nostdin")
+        .arg("-i")
+        .arg(&path)
+        .arg("-vn")
+        .arg("-sn")
+        .arg("-dn");
+
+    let content_type = match format.to_ascii_lowercase().as_str() {
+        "mp3" => {
+            let bitrate = bitrate_kbps.unwrap_or(192);
+            cmd.arg("-c:a")
+                .arg("libmp3lame")
+                .arg("-b:a")
+                .arg(format!("{bitrate}k"))
+                .arg("-f")
+                .arg("mp3");
+            "audio/mpeg"
+        }
+        "opus" => {
+            let bitrate = bitrate_kbps.unwrap_or(128);
+            cmd.arg("-c:a")
+                .arg("libopus")
+                .arg("-b:a")
+                .arg(format!("{bitrate}k"))
+                .arg("-f")
+                .arg("ogg");
+            "audio/ogg"
+        }
+        "aac" => {
+            let bitrate = bitrate_kbps.unwrap_or(192);
+            cmd.arg("-c:a")
+                .arg("aac")
+                .arg("-b:a")
+                .arg(format!("{bitrate}k"))
+                .arg("-f")
+                .arg("adts");
+            "audio/aac"
+        }
+        "wav" => {
+            cmd.arg("-c:a")
+                .arg("pcm_s16le")
+                .arg("-f")
+                .arg("wav");
+            "audio/wav"
+        }
+        _ => {
+            return HttpResponse::BadRequest()
+                .body("invalid format (use mp3, opus, aac, wav)");
+        }
+    };
+
+    cmd.arg("pipe:1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return HttpResponse::InternalServerError()
+                .body(format!("failed to start ffmpeg: {err}"));
+        }
+    };
+
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            return HttpResponse::InternalServerError()
+                .body("failed to capture ffmpeg output");
+        }
+    };
+
+    actix_web::rt::spawn(async move {
+        let _ = child.wait().await;
+    });
+
+    let stream = ReaderStream::new(stdout);
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, content_type))
+        .streaming(stream)
 }
 
 #[utoipa::path(
