@@ -52,10 +52,22 @@ impl BrowserWs {
             == Some(output_id)
     }
 
-    fn handle_status(&self, paused: bool, elapsed_ms: Option<u64>, duration_ms: Option<u64>, now_playing: Option<String>) {
+    fn handle_status(
+        &self,
+        paused: bool,
+        elapsed_ms: Option<u64>,
+        duration_ms: Option<u64>,
+        now_playing: Option<String>,
+    ) {
         let Some(session_id) = self.session_id.as_deref() else { return };
         let output_id = format!("browser:{session_id}");
         if !self.is_active(&output_id) {
+            return;
+        }
+
+        if now_playing.is_none() && elapsed_ms.is_none() && duration_ms.is_none() {
+            self.state.playback.manager.status().on_stop();
+            self.state.providers.browser.update_last_duration(session_id, None);
             return;
         }
 

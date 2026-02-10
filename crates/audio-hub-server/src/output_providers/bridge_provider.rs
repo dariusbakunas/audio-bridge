@@ -215,6 +215,7 @@ impl OutputProvider for BridgeProvider {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
+        let prior_active_output_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         let (bridge_id, device_id) = parse_output_id(output_id)
             .map_err(|e| ProviderError::BadRequest(e))?;
         let http_addr = {
@@ -253,8 +254,13 @@ impl OutputProvider for BridgeProvider {
         };
 
         let resume_info = {
-                let status = state.playback.manager.status().inner().lock().unwrap();
-            (status.now_playing.clone(), status.elapsed_ms, status.paused)
+            let status = state.playback.manager.status().inner().lock().unwrap();
+            (
+                status.now_playing.clone(),
+                status.elapsed_ms,
+                status.paused,
+                status.user_paused,
+            )
         };
 
         {
@@ -296,18 +302,27 @@ impl OutputProvider for BridgeProvider {
 
         Self::ensure_active_connected(state).await?;
 
-        if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
+        if let Some(path) = resume_info.0 {
             let ext_hint = path
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            let start_paused = resume_info.2;
+            let mut start_paused = resume_info.2;
+            if prior_active_output_id
+                .as_deref()
+                .map(|id| id.starts_with("browser:"))
+                .unwrap_or(false)
+            {
+                if !resume_info.3 {
+                    start_paused = false;
+                }
+            }
             let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
                 crate::bridge::BridgeCommand::Play {
                     path,
                     ext_hint,
-                    seek_ms: Some(elapsed_ms),
+                    seek_ms: resume_info.1,
                     start_paused,
                 },
             );

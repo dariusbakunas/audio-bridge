@@ -200,6 +200,11 @@ impl OutputProvider for BrowserProvider {
         let session = state.providers.browser.get_session(&session_id)
             .ok_or_else(|| ProviderError::Unavailable("browser offline".to_string()))?;
 
+        let resume_info = {
+            let status = state.playback.manager.status().inner().lock().unwrap();
+            (status.now_playing.clone(), status.elapsed_ms, status.paused)
+        };
+
         {
             let player = state.providers.bridge.player.lock().unwrap();
             let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
@@ -225,6 +230,23 @@ impl OutputProvider for BrowserProvider {
             state.events.clone(),
             state.providers.bridge.public_base_url.clone(),
         );
+
+        if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
+            let ext_hint = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let start_paused = resume_info.2;
+            let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
+                crate::bridge::BridgeCommand::Play {
+                    path,
+                    ext_hint,
+                    seek_ms: Some(elapsed_ms),
+                    start_paused,
+                },
+            );
+        }
         Ok(())
     }
 
@@ -317,9 +339,19 @@ impl OutputProvider for BrowserProvider {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         };
         if let Some(session) = state.providers.browser.get_session(&session_id) {
-            let _ = session.sender.do_send(crate::browser::BrowserOutbound(
-                "{\"type\":\"stop\"}".to_string(),
-            ));
+            let paused = state
+                .playback
+                .manager
+                .status()
+                .inner()
+                .lock()
+                .map(|s| s.paused)
+                .unwrap_or(false);
+            if !paused {
+                let _ = session.sender.do_send(crate::browser::BrowserOutbound(
+                    "{\"type\":\"pause_toggle\"}".to_string(),
+                ));
+            }
         }
         Ok(())
     }
