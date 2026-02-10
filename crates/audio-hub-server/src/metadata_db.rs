@@ -10,7 +10,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::musicbrainz::MusicBrainzMatch;
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -30,6 +30,7 @@ pub struct TrackRecord {
     pub year: Option<i32>,
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
     pub format: Option<String>,
     pub mtime_ms: i64,
     pub size_bytes: i64,
@@ -55,6 +56,7 @@ pub struct AlbumSummary {
     pub track_count: i64,
     pub cover_art_path: Option<String>,
     pub cover_art_url: Option<String>,
+    pub hi_res: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -147,6 +149,7 @@ impl MetadataDb {
             Option<String>,
             Option<String>,
             Option<u32>,
+            Option<u32>,
         )> = tx
             .query_row(
                 r#"
@@ -159,7 +162,8 @@ impl MetadataDb {
                        al.mbid,
                        al.title,
                        aa.name,
-                       t.disc_number
+                       t.disc_number,
+                       t.bit_depth
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -178,6 +182,7 @@ impl MetadataDb {
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
+                    row.get(10)?,
                 )),
             )
             .optional()
@@ -193,6 +198,7 @@ impl MetadataDb {
             album_title,
             album_artist,
             disc_number,
+            bit_depth,
         )) = existing
         {
             let album_title_same = match (record.album.as_deref(), album_title.as_deref()) {
@@ -210,11 +216,13 @@ impl MetadataDb {
                 _ => false,
             };
             let disc_same = record.disc_number == disc_number;
+            let bit_depth_same = record.bit_depth == bit_depth;
             if mtime_ms == record.mtime_ms
                 && size_bytes == record.size_bytes
                 && album_title_same
                 && album_artist_same
                 && disc_same
+                && bit_depth_same
             {
                 return tx.commit().context("commit metadata tx");
             }
@@ -250,8 +258,8 @@ impl MetadataDb {
             r#"
             INSERT INTO tracks (
                 path, file_name, title, artist_id, album_id, track_number, disc_number,
-                duration_ms, sample_rate, format, mtime_ms, size_bytes, mb_no_match_key
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                duration_ms, sample_rate, bit_depth, format, mtime_ms, size_bytes, mb_no_match_key
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             ON CONFLICT(path) DO UPDATE SET
                 file_name = excluded.file_name,
                 title = excluded.title,
@@ -261,6 +269,7 @@ impl MetadataDb {
                 disc_number = excluded.disc_number,
                 duration_ms = excluded.duration_ms,
                 sample_rate = excluded.sample_rate,
+                bit_depth = excluded.bit_depth,
                 format = excluded.format,
                 mtime_ms = excluded.mtime_ms,
                 size_bytes = excluded.size_bytes,
@@ -276,6 +285,7 @@ impl MetadataDb {
                 record.disc_number,
                 record.duration_ms.map(|v| v as i64),
                 record.sample_rate.map(|v| v as i64),
+                record.bit_depth.map(|v| v as i64),
                 record.format,
                 record.mtime_ms,
                 record.size_bytes,
@@ -525,7 +535,7 @@ impl MetadataDb {
                 r#"
                 SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
-                       t.sample_rate, t.format, t.mtime_ms, t.size_bytes
+                       t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -554,9 +564,12 @@ impl MetadataDb {
                         sample_rate: row
                             .get::<_, Option<i64>>(10)?
                             .map(|v| v as u32),
-                        format: row.get(11)?,
-                        mtime_ms: row.get(12)?,
-                        size_bytes: row.get(13)?,
+                        bit_depth: row
+                            .get::<_, Option<i64>>(11)?
+                            .map(|v| v as u32),
+                        format: row.get(12)?,
+                        mtime_ms: row.get(13)?,
+                        size_bytes: row.get(14)?,
                     })
                 },
             )
@@ -900,7 +913,8 @@ impl MetadataDb {
         let mut stmt = conn.prepare(
             r#"
             SELECT al.id, al.title, ar.name, al.year, al.mbid,
-                   COUNT(t.id) AS track_count, al.cover_art_path
+                   COUNT(t.id) AS track_count, al.cover_art_path,
+                   MAX(t.bit_depth) AS max_bit_depth
             FROM albums al
             LEFT JOIN artists ar ON ar.id = al.artist_id
             LEFT JOIN tracks t ON t.album_id = al.id
@@ -919,6 +933,8 @@ impl MetadataDb {
             |row| {
                 let album_id: i64 = row.get(0)?;
                 let cover_path: Option<String> = row.get(6)?;
+                let max_bit_depth: Option<i64> = row.get(7)?;
+                let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                 let cover_art_url = cover_path
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
@@ -932,6 +948,7 @@ impl MetadataDb {
                     track_count: row.get(5)?,
                     cover_art_path: cover_path,
                     cover_art_url,
+                    hi_res,
                 })
             },
         )?;
@@ -945,7 +962,8 @@ impl MetadataDb {
             .query_row(
                 r#"
                 SELECT al.id, al.title, ar.name, al.year, al.mbid,
-                       COUNT(t.id) AS track_count, al.cover_art_path
+                       COUNT(t.id) AS track_count, al.cover_art_path,
+                       MAX(t.bit_depth) AS max_bit_depth
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
                 LEFT JOIN tracks t ON t.album_id = al.id
@@ -956,6 +974,8 @@ impl MetadataDb {
                 |row| {
                     let album_id: i64 = row.get(0)?;
                     let cover_path: Option<String> = row.get(6)?;
+                    let max_bit_depth: Option<i64> = row.get(7)?;
+                    let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                     let cover_art_url = cover_path
                         .as_deref()
                         .filter(|value| !value.trim().is_empty())
@@ -969,6 +989,7 @@ impl MetadataDb {
                         track_count: row.get(5)?,
                         cover_art_path: cover_path,
                         cover_art_url,
+                        hi_res,
                     })
                 },
             )
@@ -1224,6 +1245,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
             disc_number INTEGER,
             duration_ms INTEGER,
             sample_rate INTEGER,
+            bit_depth INTEGER,
             format TEXT,
             mtime_ms INTEGER,
             size_bytes INTEGER,
@@ -1286,6 +1308,16 @@ fn init_schema(conn: &Connection) -> Result<()> {
     if version < 4 {
         conn.execute("ALTER TABLE albums ADD COLUMN caa_release_candidates TEXT", [])
             .context("migrate albums caa_release_candidates")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
+    if version < 5 {
+        conn.execute("ALTER TABLE tracks ADD COLUMN bit_depth INTEGER", [])
+            .context("migrate tracks bit_depth")?;
         conn.execute(
             "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
             params![SCHEMA_VERSION.to_string()],

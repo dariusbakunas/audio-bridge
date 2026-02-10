@@ -92,6 +92,7 @@ export interface AlbumSummary {
   track_count: number;
   cover_art_path?: string | null;
   cover_art_url?: string | null;
+  hi_res: boolean;
 }
 
 export interface TrackSummary {

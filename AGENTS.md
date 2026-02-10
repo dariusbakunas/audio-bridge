@@ -18,6 +18,7 @@
 - Build all binaries (host): `make build` or `cargo build --release -p bridge -p audio-hub-server -p hub-cli`
 - Tests (workspace): `cargo test`
 - Clean: `make clean`
+- Live integration tests (MusicBrainz + Cover Art Archive): `cargo test -p audio-hub-server live_ -- --ignored --nocapture`
 
 ## Run (quick start)
 - Receiver (Pi/target): `cargo run --release -p bridge -- --http-bind 0.0.0.0:5556 listen`

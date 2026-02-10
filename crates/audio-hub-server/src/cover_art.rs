@@ -500,6 +500,11 @@ impl CoverArtClient {
     }
 }
 
+pub fn fetch_cover_front(mbid: &str, user_agent: &str) -> Result<(String, Vec<u8>)> {
+    let client = CoverArtClient::new(user_agent);
+    client.fetch_front(mbid)
+}
+
 fn fetch_and_store_cover(
     db: &MetadataDb,
     store: &CoverArtStore,

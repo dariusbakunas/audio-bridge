@@ -148,7 +148,7 @@ impl MusicBrainzClient {
             })
             .unwrap_or((None, None, None));
 
-        let (album_mbid, album_title, release_year, release_candidates) = best
+        let (mut album_mbid, mut album_title, mut release_year, mut release_candidates) = best
             .releases
             .as_ref()
             .map(|releases| {
@@ -165,6 +165,25 @@ impl MusicBrainzClient {
                 (first, title, year, rest)
             })
             .unwrap_or((None, None, None, Vec::new()));
+
+        if album_mbid.is_none() {
+            if let Some(album_name) = album.map(str::trim).filter(|value| !value.is_empty()) {
+                if let Ok(releases) = self.search_releases(album_name, artist, 5) {
+                    if let Some(first) = releases.first() {
+                        album_mbid = Some(first.release_mbid.clone());
+                        album_title = Some(first.title.clone());
+                        if release_year.is_none() {
+                            release_year = first.year;
+                        }
+                        release_candidates = releases
+                            .into_iter()
+                            .skip(1)
+                            .map(|release| release.release_mbid)
+                            .collect();
+                    }
+                }
+            }
+        }
 
         Ok(MusicBrainzLookup::Match(MusicBrainzMatch {
             recording_mbid: Some(best.id),
@@ -450,6 +469,7 @@ fn enrich_candidate(
         year: None,
         duration_ms: None,
         sample_rate: None,
+        bit_depth: None,
         format: None,
         mtime_ms: 0,
         size_bytes: 0,
@@ -775,5 +795,56 @@ mod tests {
         };
         let best = select_best_recording(None, Some(single)).unwrap();
         assert_eq!(best.id, "one");
+    }
+
+    #[test]
+    #[ignore]
+    fn live_lookup_release_and_cover_art() {
+        let cfg = MusicBrainzConfig {
+            enabled: Some(true),
+            user_agent: Some("audio-hub-tests/0.1 (local testing)".to_string()),
+            base_url: None,
+            rate_limit_ms: Some(1000),
+        };
+        let client = MusicBrainzClient::new(&cfg)
+            .expect("client init")
+            .expect("client enabled");
+        let releases = client
+            .search_releases("The Getaway", "Red Hot Chili Peppers", 5)
+            .expect("search releases");
+        assert!(!releases.is_empty(), "expected release candidates");
+        let mbid = releases
+            .iter()
+            .find(|rel| rel.score.unwrap_or(0) > 0)
+            .map(|rel| rel.release_mbid.as_str())
+            .unwrap_or_else(|| releases[0].release_mbid.as_str());
+        let (mime, bytes) = crate::cover_art::fetch_cover_front(mbid, client.user_agent())
+            .expect("cover art fetch");
+        assert!(
+            mime.starts_with("image/"),
+            "expected image mime, got {mime}"
+        );
+        assert!(bytes.len() > 1024, "expected non-empty cover art");
+    }
+
+    #[test]
+    #[ignore]
+    fn live_release_search_with_parenthetical() {
+        let cfg = MusicBrainzConfig {
+            enabled: Some(true),
+            user_agent: Some("audio-hub-tests/0.1 (local testing)".to_string()),
+            base_url: None,
+            rate_limit_ms: Some(1000),
+        };
+        let client = MusicBrainzClient::new(&cfg)
+            .expect("client init")
+            .expect("client enabled");
+        let releases = client
+            .search_releases("Hunting High and Low (2015 Remaster)", "A-ha", 5)
+            .expect("search releases");
+        assert!(
+            releases.iter().any(|rel| rel.title.contains("Hunting High and Low")),
+            "expected a matching release title"
+        );
     }
 }

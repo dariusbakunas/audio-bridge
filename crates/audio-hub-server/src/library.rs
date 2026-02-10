@@ -243,6 +243,7 @@ fn is_supported_extension(ext: &str) -> bool {
 pub struct TrackMeta {
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
     pub album: Option<String>,
     pub artist: Option<String>,
     pub album_artist: Option<String>,
@@ -294,6 +295,7 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
     if let Some(track) = probed.format.default_track() {
         let params = &track.codec_params;
         meta.sample_rate = params.sample_rate;
+        meta.bit_depth = params.bits_per_sample;
         if let (Some(frames), Some(rate)) = (params.n_frames, params.sample_rate) {
             if rate > 0 {
                 meta.duration_ms = Some(frames.saturating_mul(1000) / rate as u64);

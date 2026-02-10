@@ -1,4 +1,5 @@
 import { AlbumSummary, TrackSummary } from "../types";
+import hiResBadge from "../assets/hi-res.png";
 import TrackMenu from "./TrackMenu";
 
 interface AlbumDetailViewProps {
@@ -98,7 +99,20 @@ export default function AlbumDetailView({
           <div className="album-detail-right">
             <div className="album-meta">
               <div className="eyebrow">Album</div>
-              <h2>{album?.title ?? "Unknown album"}</h2>
+              <h2 className="album-detail-title">
+                <span className="album-detail-title-text">
+                  {album?.title ?? "Unknown album"}
+                </span>
+                {album?.hi_res ? (
+                  <span
+                    className="hires-badge detail"
+                    style={{ backgroundImage: `url(${hiResBadge})` }}
+                    role="img"
+                    aria-label="Hi-res audio"
+                    title="Hi-res audio (24-bit)"
+                  />
+                ) : null}
+              </h2>
               <div className="muted">{album?.artist ?? "Unknown artist"}</div>
               <div className="muted small">
                 {album?.year ? `${album.year} · ` : ""}

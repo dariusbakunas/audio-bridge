@@ -27,7 +27,8 @@ const albums: AlbumSummary[] = [
     year: 2007,
     mbid: null,
     track_count: 10,
-    cover_art_url: cover1
+    cover_art_url: cover1,
+    hi_res: true
   },
   {
     id: 2,
@@ -36,7 +37,8 @@ const albums: AlbumSummary[] = [
     year: 2021,
     mbid: null,
     track_count: 9,
-    cover_art_url: null
+    cover_art_url: null,
+    hi_res: false
   },
   {
     id: 3,
@@ -45,7 +47,8 @@ const albums: AlbumSummary[] = [
     year: 1991,
     mbid: null,
     track_count: 9,
-    cover_art_url: cover2
+    cover_art_url: cover2,
+    hi_res: false
   }
 ];
 

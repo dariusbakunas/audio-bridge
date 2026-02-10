@@ -1,4 +1,5 @@
 import { AlbumSummary } from "../types";
+import hiResBadge from "../assets/hi-res.png?q=1";
 
 interface AlbumsViewProps {
   albums: AlbumSummary[];
@@ -97,7 +98,18 @@ export default function AlbumsView({
                   </button>
                 </div>
                 <div className="album-card-info">
-                  <div className="album-title">{album.title}</div>
+                  <div className="album-title">
+                    <span className="album-title-text">{album.title}</span>
+                    {album.hi_res ? (
+                      <span
+                        className="hires-badge"
+                        style={{ backgroundImage: `url(${hiResBadge})` }}
+                        role="img"
+                        aria-label="Hi-res audio"
+                        title="Hi-res audio (24-bit)"
+                      />
+                    ) : null}
+                  </div>
                   <div className="muted small">{album.artist ?? "Unknown artist"}</div>
                 </div>
               </div>

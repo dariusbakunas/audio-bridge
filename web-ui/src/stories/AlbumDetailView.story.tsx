@@ -24,7 +24,8 @@ const album: AlbumSummary = {
   year: 2007,
   mbid: "9c48f1d6-4e4b-4d5c-9d6b-2e4c9845a13a",
   track_count: 10,
-  cover_art_url: cover1
+  cover_art_url: cover1,
+  hi_res: true
 };
 
 const tracks: TrackSummary[] = [

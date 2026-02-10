@@ -1,7 +1,7 @@
 .album-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
   gap: 16px;
 }
 
@@ -144,10 +144,46 @@
 
 .album-title {
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.album-title-text {
+  flex: 1;
+  min-width: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.hires-badge {
+  display: inline-block;
+  margin-left: auto;
+  width: 26px;
+  aspect-ratio: 1;
+  border-radius: 0;
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.hires-badge.detail {
+  width: 32px;
+  aspect-ratio: 1;
+  margin-left: 8px;
+  background-size: 100% 100%;
+}
+
+.album-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.album-detail-title .hires-badge {
+  margin-left: 8px;
 }
 
 .album-view {

@@ -56,6 +56,7 @@ impl MetadataService {
             year: meta.year,
             duration_ms: meta.duration_ms,
             sample_rate: meta.sample_rate,
+            bit_depth: meta.bit_depth,
             format: meta.format.clone(),
             mtime_ms: fs_meta
                 .modified()
@@ -497,6 +498,7 @@ mod tests {
             year: Some(1999),
             duration_ms: Some(1234),
             sample_rate: Some(44100),
+            bit_depth: Some(24),
             format: Some("FLAC".to_string()),
             ..TrackMeta::default()
         };
@@ -511,6 +513,7 @@ mod tests {
         assert_eq!(record.year, Some(1999));
         assert_eq!(record.duration_ms, Some(1234));
         assert_eq!(record.sample_rate, Some(44100));
+        assert_eq!(record.bit_depth, Some(24));
         assert_eq!(record.format.as_deref(), Some("FLAC"));
         assert_eq!(record.size_bytes, fs_meta.len() as i64);
     }
