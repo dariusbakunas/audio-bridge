@@ -1,6 +1,6 @@
 [package]
 name = "audio-hub-server"
-version = "0.5.5"
+version = "0.6.0"
 edition = "2024"
 build = "build.rs"
 repository = "https://github.com/dariusbakunas/audio-bridge.git"
