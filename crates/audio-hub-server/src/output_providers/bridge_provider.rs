@@ -308,16 +308,11 @@ impl OutputProvider for BridgeProvider {
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            let mut start_paused = resume_info.2;
-            if prior_active_output_id
-                .as_deref()
-                .map(|id| id.starts_with("browser:"))
-                .unwrap_or(false)
-            {
-                if !resume_info.3 {
-                    start_paused = false;
-                }
-            }
+            let start_paused = start_paused_for_resume(
+                prior_active_output_id.as_deref(),
+                resume_info.2,
+                resume_info.3,
+            );
             let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
                 crate::bridge::BridgeCommand::Play {
                     path,
@@ -731,6 +726,21 @@ fn fetch_bridge_status(http_addr: std::net::SocketAddr) -> Result<crate::bridge_
     BridgeTransportClient::new(http_addr, String::new()).status()
 }
 
+fn start_paused_for_resume(
+    prior_active_output_id: Option<&str>,
+    paused: bool,
+    user_paused: bool,
+) -> bool {
+    if prior_active_output_id
+        .map(|id| id.starts_with("browser:"))
+        .unwrap_or(false)
+        && !user_paused
+    {
+        return false;
+    }
+    paused
+}
+
 /// Estimate bitrate from file size and duration.
 fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32> {
     let duration_ms = duration_ms?;
@@ -789,6 +799,25 @@ mod tests {
         let file = root.join("track.flac");
         let _ = std::fs::write(&file, vec![0u8; 1000]);
         assert!(estimate_bitrate_kbps(&file, Some(0)).is_none());
+    }
+
+    #[test]
+    fn start_paused_for_resume_respects_user_pause_on_browser_switch() {
+        assert!(start_paused_for_resume(Some("browser:abc"), true, true));
+        assert!(start_paused_for_resume(Some("browser:abc"), false, true));
+    }
+
+    #[test]
+    fn start_paused_for_resume_forces_play_when_not_user_paused() {
+        assert!(!start_paused_for_resume(Some("browser:abc"), true, false));
+        assert!(!start_paused_for_resume(Some("browser:abc"), false, false));
+    }
+
+    #[test]
+    fn start_paused_for_resume_preserves_pause_for_non_browser() {
+        assert!(start_paused_for_resume(Some("bridge:one:dev"), true, false));
+        assert!(!start_paused_for_resume(Some("bridge:one:dev"), false, true));
+        assert!(!start_paused_for_resume(None, false, true));
     }
 
     #[test]
