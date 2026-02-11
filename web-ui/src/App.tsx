@@ -15,7 +15,7 @@ import {
   TrackSummary
 } from "./types";
 import AlbumDetailView from "./components/AlbumDetailView";
-import AlbumMetadataModal from "./components/AlbumMetadataModal";
+import AlbumMetadataDialog from "./components/AlbumMetadataDialog";
 import AlbumsView from "./components/AlbumsView";
 import FoldersView from "./components/FoldersView";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
@@ -45,20 +45,12 @@ interface LogEventEntry {
   event: LogEvent;
 }
 
-type MatchTarget =
-  | {
-      kind: "track";
-      path: string;
-      title: string;
-      artist: string;
-      album?: string | null;
-    }
-  | {
-      kind: "album";
-      albumId: number;
-      title: string;
-      artist: string;
-    };
+type MatchTarget = {
+  path: string;
+  title: string;
+  artist: string;
+  album?: string | null;
+};
 
 type EditTarget = {
   path: string;
@@ -77,6 +69,7 @@ type EditTarget = {
 type AlbumEditTarget = {
   albumId: number;
   label: string;
+  artist: string;
   defaults: {
     title?: string | null;
     albumArtist?: string | null;
@@ -394,7 +387,6 @@ export default function App() {
         entry && entry.kind === "track" ? entry.artist ?? "Unknown artist" : "Unknown artist";
       const album = entry && entry.kind === "track" ? entry.album ?? "" : "";
       setMatchTarget({
-        kind: "track",
         path,
         title,
         artist,
@@ -411,7 +403,6 @@ export default function App() {
       const artist = track?.artist ?? "Unknown artist";
       const album = track?.album ?? selectedAlbum?.title ?? "";
       setMatchTarget({
-        kind: "track",
         path,
         title,
         artist,
@@ -421,16 +412,6 @@ export default function App() {
     [albumTracks, selectedAlbum]
   );
 
-  const openAlbumMatch = useCallback(() => {
-    if (!selectedAlbum) return;
-    setMatchTarget({
-      kind: "album",
-      albumId: selectedAlbum.id,
-      title: selectedAlbum.title,
-      artist: selectedAlbum.artist ?? "Unknown artist"
-    });
-  }, [selectedAlbum]);
-
   const openAlbumEditor = useCallback(() => {
     if (!selectedAlbum) return;
     const label = selectedAlbum.artist
@@ -439,6 +420,7 @@ export default function App() {
     setAlbumEditTarget({
       albumId: selectedAlbum.id,
       label,
+      artist: selectedAlbum.artist ?? "Unknown artist",
       defaults: {
         title: selectedAlbum.title,
         albumArtist: selectedAlbum.artist ?? null,
@@ -499,7 +481,7 @@ export default function App() {
     ? {
         title: matchTarget.title,
         artist: matchTarget.artist,
-        album: matchTarget.kind === "track" ? matchTarget.album ?? "" : ""
+        album: matchTarget.album ?? ""
       }
     : { title: "", artist: "", album: "" };
   const editLabel = editTarget?.label ?? "";
@@ -1270,7 +1252,6 @@ export default function App() {
               onMenuQueue={(path) => runTrackMenuAction(handleQueue, path)}
               onMenuPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
               onMenuRescan={(path) => runTrackMenuAction(handleRescanTrack, path)}
-              onFixAlbumMatch={openAlbumMatch}
               onFixTrackMatch={(path) => runTrackMenuAction(openTrackMatchForAlbum, path)}
               onEditTrackMetadata={(path) =>
                 runTrackMenuAction(openTrackEditorForAlbum, path)
@@ -1352,11 +1333,10 @@ export default function App() {
 
       <MusicBrainzMatchModal
         open={Boolean(matchTarget)}
-        kind={matchTarget?.kind ?? "track"}
+        kind="track"
         targetLabel={matchLabel}
         defaults={matchDefaults}
-        trackPath={matchTarget?.kind === "track" ? matchTarget.path : null}
-        albumId={matchTarget?.kind === "album" ? matchTarget.albumId : null}
+        trackPath={matchTarget?.path ?? null}
         onClose={() => setMatchTarget(null)}
       />
 
@@ -1377,13 +1357,20 @@ export default function App() {
         }}
       />
 
-      <AlbumMetadataModal
+      <AlbumMetadataDialog
         open={Boolean(albumEditTarget)}
         albumId={albumEditTarget?.albumId ?? null}
         targetLabel={albumEditLabel}
+        artist={albumEditTarget?.artist ?? ""}
         defaults={albumEditDefaults}
+        onBeforeUpdate={async () => {
+          if (!albumEditTarget?.albumId) return;
+          if (nowPlayingAlbumId !== albumEditTarget.albumId) return;
+          if (!isPlaying) return;
+          await handlePause();
+        }}
         onClose={() => setAlbumEditTarget(null)}
-        onSaved={(updatedAlbumId) => {
+        onUpdated={(updatedAlbumId) => {
           if (albumViewId !== null) {
             setAlbumViewId(updatedAlbumId);
             loadAlbumTracks(updatedAlbumId);

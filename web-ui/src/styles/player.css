@@ -87,6 +87,16 @@
   fill: currentColor;
 }
 
+.icon-btn.small {
+  width: 36px;
+  height: 36px;
+}
+
+.icon-btn.small svg {
+  width: 18px;
+  height: 18px;
+}
+
 .icon-btn.primary {
   width: 52px;
   height: 52px;
@@ -131,4 +141,3 @@
 .build-footer {
   font-family: "IBM Plex Mono", monospace;
 }
-

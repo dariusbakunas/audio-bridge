@@ -20,6 +20,34 @@
   border: 1px solid var(--border);
 }
 
+.modal-tabs {
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  width: fit-content;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.modal-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.modal-tab.active {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
 .mb-match {
   display: flex;
   flex-direction: column;
@@ -77,6 +105,7 @@
   text-align: left;
   background: transparent;
   cursor: pointer;
+  flex-wrap: wrap;
 }
 
 .mb-match-item.selected {
@@ -104,6 +133,30 @@
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.8rem;
   gap: 4px;
+}
+
+.mb-match-item-details {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.mb-match-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mb-match-detail-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .track-meta {

@@ -37,6 +37,7 @@ export default function MusicBrainzMatchModal({
   const [album, setAlbum] = useState(defaults.album ?? "");
   const [results, setResults] = useState<MusicBrainzMatchCandidate[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export default function MusicBrainzMatchModal({
     setAlbum(defaults.album ?? "");
     setResults([]);
     setSelectedIndex(null);
+    setExpandedIndex(null);
     setError(null);
   }, [open, defaults.title, defaults.artist, defaults.album, kind]);
 
@@ -66,6 +68,7 @@ export default function MusicBrainzMatchModal({
     setLoading(true);
     setError(null);
     setSelectedIndex(null);
+    setExpandedIndex(null);
     try {
       const body = {
         kind,
@@ -183,7 +186,10 @@ export default function MusicBrainzMatchModal({
               key={`${item.recording_mbid ?? item.release_mbid ?? item.title}-${index}`}
               type="button"
               className={`mb-match-item${selectedIndex === index ? " selected" : ""}`}
-              onClick={() => setSelectedIndex(index)}
+              onClick={() => {
+                setSelectedIndex(index);
+                setExpandedIndex((prev) => (prev === index ? null : index));
+              }}
             >
               <div className="mb-match-item-main">
                 {item.release_mbid ? (
@@ -209,6 +215,26 @@ export default function MusicBrainzMatchModal({
                   <span>—</span>
                 )}
               </div>
+              {expandedIndex === index ? (
+                <div className="mb-match-item-details">
+                  <div className="mb-match-detail">
+                    <span className="mb-match-detail-label">Release</span>
+                    <span>{item.release_title ?? "—"}</span>
+                  </div>
+                  <div className="mb-match-detail">
+                    <span className="mb-match-detail-label">Release MBID</span>
+                    <span>{item.release_mbid ?? "—"}</span>
+                  </div>
+                  <div className="mb-match-detail">
+                    <span className="mb-match-detail-label">Recording MBID</span>
+                    <span>{item.recording_mbid ?? "—"}</span>
+                  </div>
+                  <div className="mb-match-detail">
+                    <span className="mb-match-detail-label">Artist MBID</span>
+                    <span>{item.artist_mbid ?? "—"}</span>
+                  </div>
+                </div>
+              ) : null}
             </button>
           ))}
           {!loading && results.length === 0 ? (

@@ -23,7 +23,6 @@ interface AlbumDetailViewProps {
   onMenuQueue: (path: string) => void;
   onMenuPlayNext: (path: string) => void;
   onMenuRescan: (path: string) => void;
-  onFixAlbumMatch: () => void;
   onFixTrackMatch: (path: string) => void;
   onEditTrackMetadata: (path: string) => void;
   onEditAlbumMetadata: () => void;
@@ -50,7 +49,6 @@ export default function AlbumDetailView({
   onMenuQueue,
   onMenuPlayNext,
   onMenuRescan,
-  onFixAlbumMatch,
   onFixTrackMatch,
   onEditTrackMetadata,
   onEditAlbumMetadata
@@ -127,11 +125,18 @@ export default function AlbumDetailView({
                     : "Cover: unavailable"}
               </div>
               <div className="album-meta-actions">
-                <button className="btn ghost small" onClick={onFixAlbumMatch} disabled={!album}>
-                  Fix MusicBrainz match
-                </button>
-                <button className="btn ghost small" onClick={onEditAlbumMetadata} disabled={!album}>
-                  Edit album tags
+                <button
+                  className="icon-btn small"
+                  type="button"
+                  onClick={onEditAlbumMetadata}
+                  disabled={!album}
+                  aria-label="Edit album metadata"
+                  title="Edit album metadata"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11z" />
+                    <path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                  </svg>
                 </button>
               </div>
             </div>

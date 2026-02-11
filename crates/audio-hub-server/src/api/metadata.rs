@@ -578,7 +578,10 @@ pub async fn musicbrainz_match_search(
                         year: item.year,
                     })
                     .collect::<Vec<_>>(),
-                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+                Err(err) => {
+                    tracing::warn!(error = %err, title, artist, "musicbrainz track search failed");
+                    return HttpResponse::InternalServerError().body(err.to_string());
+                }
             }
         }
         MusicBrainzMatchKind::Album => {
@@ -596,7 +599,10 @@ pub async fn musicbrainz_match_search(
                         year: item.year,
                     })
                     .collect::<Vec<_>>(),
-                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+                Err(err) => {
+                    tracing::warn!(error = %err, title, artist, "musicbrainz album search failed");
+                    return HttpResponse::InternalServerError().body(err.to_string());
+                }
             }
         }
     };

@@ -220,6 +220,9 @@
 
 .album-meta-actions {
   margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .album-tracklist {

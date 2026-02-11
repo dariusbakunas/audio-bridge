@@ -94,8 +94,9 @@ export function Default() {
         onMenuQueue={action("menu-queue")}
         onMenuPlayNext={action("menu-play-next")}
         onMenuRescan={action("menu-rescan")}
-        onFixAlbumMatch={action("fix-album-match")}
         onFixTrackMatch={action("fix-track-match")}
+        onEditTrackMetadata={action("edit-track-metadata")}
+        onEditAlbumMetadata={action("edit-album-metadata")}
       />
     </div>
   );
@@ -125,8 +126,9 @@ export function EmptyTracks() {
         onMenuQueue={action("menu-queue")}
         onMenuPlayNext={action("menu-play-next")}
         onMenuRescan={action("menu-rescan")}
-        onFixAlbumMatch={action("fix-album-match")}
         onFixTrackMatch={action("fix-track-match")}
+        onEditTrackMetadata={action("edit-track-metadata")}
+        onEditAlbumMetadata={action("edit-album-metadata")}
       />
     </div>
   );
