@@ -251,6 +251,9 @@ export default function App() {
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const albumsReloadTimerRef = useRef<number | null>(null);
+  const albumsReloadQueuedRef = useRef(false);
+  const albumsLoadingRef = useRef(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -897,7 +900,10 @@ export default function App() {
   }, [libraryDir, loadLibrary]);
 
   const loadAlbums = useCallback(async () => {
-    setAlbumsLoading(true);
+    if (!albumsLoadingRef.current) {
+      setAlbumsLoading(true);
+    }
+    albumsLoadingRef.current = true;
     try {
       const response = await fetchJson<AlbumListResponse>("/albums?limit=200");
       setAlbums(response.items ?? []);
@@ -905,20 +911,42 @@ export default function App() {
     } catch (err) {
       setAlbumsError((err as Error).message);
     } finally {
+      albumsLoadingRef.current = false;
       setAlbumsLoading(false);
+      if (albumsReloadQueuedRef.current) {
+        albumsReloadQueuedRef.current = false;
+        if (albumsReloadTimerRef.current === null) {
+          albumsReloadTimerRef.current = window.setTimeout(() => {
+            albumsReloadTimerRef.current = null;
+            loadAlbums();
+          }, 250);
+        }
+      }
     }
   }, []);
 
+  const requestAlbumsReload = useCallback(() => {
+    if (albumsLoadingRef.current) {
+      albumsReloadQueuedRef.current = true;
+      return;
+    }
+    if (albumsReloadTimerRef.current !== null) return;
+    albumsReloadTimerRef.current = window.setTimeout(() => {
+      albumsReloadTimerRef.current = null;
+      loadAlbums();
+    }, 250);
+  }, [loadAlbums]);
+
   useEffect(() => {
     loadAlbums();
-  }, [loadAlbums]);
+  }, [requestAlbumsReload]);
 
   useEffect(() => {
     let mounted = true;
     const stream = new EventSource(apiUrl("/albums/stream"));
     stream.addEventListener("albums", () => {
       if (!mounted) return;
-      loadAlbums();
+      requestAlbumsReload();
     });
     stream.onerror = () => {
       if (!mounted) return;

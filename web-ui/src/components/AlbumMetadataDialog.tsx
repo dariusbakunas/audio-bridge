@@ -362,6 +362,17 @@ export default function AlbumMetadataDialog({
             <span className="muted small">Target</span>
             <div className="mb-match-target-title">{targetLabel}</div>
           </div>
+          <div className="mb-match-help">
+            <span
+              className="mb-match-help-icon"
+              title="Applies MusicBrainz IDs to the library database only; it does not modify audio files."
+              aria-label="Help"
+              role="img"
+            >
+              ?
+            </span>
+            <span className="muted small">Matches update the library database only.</span>
+          </div>
 
           <div className="mb-match-form">
             <label className="mb-match-field">
@@ -446,6 +457,21 @@ export default function AlbumMetadataDialog({
                       <span className="mb-match-detail-label">Artist MBID</span>
                       <span>{item.artist_mbid ?? "—"}</span>
                     </div>
+                    {item.release_mbid ? (
+                      <div className="mb-match-detail">
+                        <span className="mb-match-detail-label">MusicBrainz</span>
+                        <span className="mb-match-detail-links">
+                          <a
+                            className="mb-match-link"
+                            href={`https://musicbrainz.org/release/${item.release_mbid}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Release
+                          </a>
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </button>

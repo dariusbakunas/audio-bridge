@@ -77,6 +77,54 @@ impl LibraryIndex {
         false
     }
 
+    pub fn upsert_track_entry(
+        &mut self,
+        path: &Path,
+        file_name: &str,
+        ext_hint: &str,
+        meta: &TrackMeta,
+    ) -> bool {
+        let dir = match path.parent() {
+            Some(dir) => dir,
+            None => return false,
+        };
+        let entries = self.entries_by_dir.entry(dir.to_path_buf()).or_default();
+        let path_str = path.to_string_lossy().to_string();
+        let entry = LibraryEntry::Track {
+            path: path_str.clone(),
+            file_name: file_name.to_string(),
+            ext_hint: ext_hint.to_string(),
+            duration_ms: meta.duration_ms,
+            sample_rate: meta.sample_rate,
+            album: meta.album.clone(),
+            artist: meta.artist.clone(),
+            format: meta.format.clone().unwrap_or_else(|| "<unknown>".to_string()),
+        };
+        entries.retain(|entry| {
+            if let LibraryEntry::Track { path, .. } = entry {
+                return path != &path_str;
+            }
+            true
+        });
+        entries.push(entry);
+
+        let mut dirs = Vec::new();
+        let mut tracks = Vec::new();
+        for entry in entries.drain(..) {
+            match &entry {
+                LibraryEntry::Dir { name, .. } => dirs.push((name.to_lowercase(), entry)),
+                LibraryEntry::Track { file_name, .. } => {
+                    tracks.push((file_name.to_lowercase(), entry));
+                }
+            }
+        }
+        dirs.sort_by(|a, b| a.0.cmp(&b.0));
+        tracks.sort_by(|a, b| a.0.cmp(&b.0));
+        entries.extend(dirs.into_iter().map(|(_, entry)| entry));
+        entries.extend(tracks.into_iter().map(|(_, entry)| entry));
+        true
+    }
+
     pub fn remove_track(&mut self, path: &Path) -> bool {
         let dir = match path.parent() {
             Some(dir) => dir,

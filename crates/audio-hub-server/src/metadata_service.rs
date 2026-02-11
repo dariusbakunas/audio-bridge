@@ -135,13 +135,20 @@ impl MetadataService {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("<unknown>");
+        let ext_hint = full_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let record = Self::build_track_record(full_path, file_name, &normalized_meta, &fs_meta);
         let _ = self.db.clear_musicbrainz_no_match(&record.path);
         if let Err(err) = self.upsert_track_record(full_path, &normalized_meta, &record) {
             return Err(HttpResponse::InternalServerError().body(err));
         }
         if let Ok(mut index) = library.write() {
-            index.update_track_meta(full_path, &normalized_meta);
+            if !index.update_track_meta(full_path, &normalized_meta) {
+                index.upsert_track_entry(full_path, file_name, &ext_hint, &normalized_meta);
+            }
         }
         self.events.library_changed();
         self.metadata_wake.notify();

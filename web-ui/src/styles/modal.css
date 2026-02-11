@@ -58,6 +58,26 @@
   font-weight: 600;
 }
 
+.mb-match-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mb-match-help-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--bg-accent);
+}
+
 .mb-match-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -157,6 +177,22 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.mb-match-detail-links {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mb-match-link {
+  color: var(--accent-2);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.mb-match-link:hover {
+  text-decoration: underline;
 }
 
 .track-meta {

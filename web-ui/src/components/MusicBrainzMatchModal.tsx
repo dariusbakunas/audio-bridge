@@ -215,26 +215,53 @@ export default function MusicBrainzMatchModal({
                   <span>—</span>
                 )}
               </div>
-              {expandedIndex === index ? (
-                <div className="mb-match-item-details">
-                  <div className="mb-match-detail">
-                    <span className="mb-match-detail-label">Release</span>
-                    <span>{item.release_title ?? "—"}</span>
+                {expandedIndex === index ? (
+                  <div className="mb-match-item-details">
+                    <div className="mb-match-detail">
+                      <span className="mb-match-detail-label">Release</span>
+                      <span>{item.release_title ?? "—"}</span>
+                    </div>
+                    <div className="mb-match-detail">
+                      <span className="mb-match-detail-label">Release MBID</span>
+                      <span>{item.release_mbid ?? "—"}</span>
+                    </div>
+                    <div className="mb-match-detail">
+                      <span className="mb-match-detail-label">Recording MBID</span>
+                      <span>{item.recording_mbid ?? "—"}</span>
+                    </div>
+                    <div className="mb-match-detail">
+                      <span className="mb-match-detail-label">Artist MBID</span>
+                      <span>{item.artist_mbid ?? "—"}</span>
+                    </div>
+                    {item.release_mbid || item.recording_mbid ? (
+                      <div className="mb-match-detail">
+                        <span className="mb-match-detail-label">MusicBrainz</span>
+                        <span className="mb-match-detail-links">
+                          {item.release_mbid ? (
+                            <a
+                              className="mb-match-link"
+                              href={`https://musicbrainz.org/release/${item.release_mbid}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Release
+                            </a>
+                          ) : null}
+                          {item.recording_mbid ? (
+                            <a
+                              className="mb-match-link"
+                              href={`https://musicbrainz.org/recording/${item.recording_mbid}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Recording
+                            </a>
+                          ) : null}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="mb-match-detail">
-                    <span className="mb-match-detail-label">Release MBID</span>
-                    <span>{item.release_mbid ?? "—"}</span>
-                  </div>
-                  <div className="mb-match-detail">
-                    <span className="mb-match-detail-label">Recording MBID</span>
-                    <span>{item.recording_mbid ?? "—"}</span>
-                  </div>
-                  <div className="mb-match-detail">
-                    <span className="mb-match-detail-label">Artist MBID</span>
-                    <span>{item.artist_mbid ?? "—"}</span>
-                  </div>
-                </div>
-              ) : null}
+                ) : null}
             </button>
           ))}
           {!loading && results.length === 0 ? (

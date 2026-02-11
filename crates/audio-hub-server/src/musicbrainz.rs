@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 use crate::config::MusicBrainzConfig;
@@ -208,14 +208,14 @@ impl MusicBrainzClient {
         self.wait_rate_limit();
 
         let url = format!("{}/recording", self.base_url);
-        let resp = self
-            .agent
-            .get(&url)
-            .query("fmt", "json")
-            .query("query", &query)
-            .query("limit", &limit.to_string())
-            .call()
-            .context("musicbrainz request failed")?;
+        let resp = self.call_request(
+            self.agent
+                .get(&url)
+                .query("fmt", "json")
+                .query("query", &query)
+                .query("limit", &limit.to_string()),
+            &url,
+        )?;
 
         let body_str = resp
             .into_body()
@@ -287,14 +287,14 @@ impl MusicBrainzClient {
         self.wait_rate_limit();
 
         let url = format!("{}/release", self.base_url);
-        let resp = self
-            .agent
-            .get(&url)
-            .query("fmt", "json")
-            .query("query", &query)
-            .query("limit", &limit.to_string())
-            .call()
-            .context("musicbrainz request failed")?;
+        let resp = self.call_request(
+            self.agent
+                .get(&url)
+                .query("fmt", "json")
+                .query("query", &query)
+                .query("limit", &limit.to_string()),
+            &url,
+        )?;
 
         let body_str = resp
             .into_body()
@@ -352,17 +352,47 @@ impl MusicBrainzClient {
         *last = Instant::now();
     }
 
+    fn call_request(
+        &self,
+        request: ureq::RequestBuilder<ureq::typestate::WithoutBody>,
+        url: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>> {
+        let resp = match request.config().http_status_as_error(false).build().call() {
+            Ok(resp) => resp,
+            Err(err) => {
+                bail!("musicbrainz request failed (transport) url={url}: {err}");
+            }
+        };
+        let code = resp.status();
+        if code.as_u16() >= 400 {
+            let body = resp
+                .into_body()
+                .with_config()
+                .limit(200_000)
+                .read_to_string()
+                .unwrap_or_default();
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                bail!("musicbrainz request failed (status {code}) url={url}");
+            }
+            let snippet: String = trimmed.chars().take(300).collect();
+            let suffix = if trimmed.chars().count() > 300 { "..." } else { "" };
+            bail!("musicbrainz request failed (status {code}) url={url}: {snippet}{suffix}");
+        }
+        Ok(resp)
+    }
+
     fn search_best_recording(&self, query: &str) -> Result<Option<RecordingResult>> {
         self.wait_rate_limit();
 
         let url = format!("{}/recording", self.base_url);
-        let resp = self
-            .agent
-            .get(&url)
-            .query("fmt", "json")
-            .query("query", query)
-            .call()
-            .context("musicbrainz request failed")?;
+        let resp = self.call_request(
+            self.agent
+                .get(&url)
+                .query("fmt", "json")
+                .query("query", query),
+            &url,
+        )?;
 
         let body_str = resp
             .into_body()
