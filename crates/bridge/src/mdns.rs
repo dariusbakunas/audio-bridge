@@ -31,6 +31,7 @@ pub(crate) fn spawn_mdns_advertiser(
         ("id".to_string(), id.clone()),
         ("name".to_string(), name.clone()),
         ("api_port".to_string(), http_bind.port().to_string()),
+        ("version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
     ]
     .into_iter()
     .collect();

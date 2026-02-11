@@ -321,7 +321,35 @@ impl OutputController {
             .to_ascii_lowercase();
         state.playback.manager
             .play(path, ext_hint, seek_ms, start_paused)
-            .map_err(|_| OutputControllerError::PlayerOffline)
+            .map_err(|_| {
+                let active_output_id = state
+                    .providers
+                    .bridge
+                    .bridges
+                    .lock()
+                    .ok()
+                    .and_then(|bridges| bridges.active_output_id.clone());
+                let bridge_online = state.providers.bridge
+                    .bridge_online
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let worker_running = state.providers.bridge
+                    .worker_running
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let status_cached = state.providers.bridge
+                    .status_cache
+                    .lock()
+                    .ok()
+                    .map(|cache| !cache.is_empty())
+                    .unwrap_or(false);
+                tracing::warn!(
+                    output_id = ?active_output_id,
+                    bridge_online,
+                    worker_running,
+                    status_cached,
+                    "play dispatch failed: player offline"
+                );
+                OutputControllerError::PlayerOffline
+            })
     }
 
     /// Canonicalize a path and ensure it is under the library root.

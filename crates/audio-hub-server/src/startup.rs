@@ -22,6 +22,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
 use crate::bridge_transport::BridgeTransportClient;
+use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config};
 use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::cover_art::CoverArtFetcher;
@@ -112,6 +113,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     setup_shutdown(state.providers.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
+    spawn_bridge_device_streams_for_config(state.clone());
+    spawn_bridge_status_streams_for_config(state.clone());
     HttpServer::new(move || {
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173")

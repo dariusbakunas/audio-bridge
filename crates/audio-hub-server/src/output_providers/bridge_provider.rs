@@ -33,6 +33,9 @@ impl BridgeProvider {
         if state.providers.bridge
             .bridge_online
             .load(std::sync::atomic::Ordering::Relaxed)
+            && state.providers.bridge
+                .worker_running
+                .load(std::sync::atomic::Ordering::Relaxed)
         {
             return Ok(());
         }
@@ -49,6 +52,25 @@ impl BridgeProvider {
             };
             (bridge.id.clone(), bridge.http_addr)
         };
+        if state
+            .providers
+            .bridge
+            .status_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&bridge_id).cloned())
+            .is_some()
+        {
+            state.providers.bridge
+                .bridge_online
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            if state.providers.bridge
+                .worker_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return Ok(());
+            }
+        }
 
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
         {
@@ -65,6 +87,8 @@ impl BridgeProvider {
             state.playback.manager.queue_service().queue().clone(),
             state.providers.bridge.bridge_online.clone(),
             state.providers.bridge.bridges.clone(),
+            state.providers.bridge.status_cache.clone(),
+            state.providers.bridge.worker_running.clone(),
             state.providers.bridge.public_base_url.clone(),
             state.events.clone(),
         );
@@ -91,7 +115,7 @@ impl BridgeProvider {
         let bridges_state = state.providers.bridge.bridges.lock().unwrap();
         let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
-        let (outputs, failed) = build_outputs_from_bridges_with_failures(&merged);
+        let (outputs, failed) = build_outputs_from_bridges_with_failures(state, &merged);
         let active_bridge_id = bridges_state.active_bridge_id.clone();
         drop(bridges_state);
         drop(discovered);
@@ -159,9 +183,9 @@ impl OutputProvider for BridgeProvider {
             (bridge.clone(), bridges_state.active_output_id.clone())
         };
 
-        let mut outputs = build_outputs_for_bridge(&bridge)
+        let mut outputs = build_outputs_for_bridge(state, &bridge)
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
-        inject_active_output_for_bridge(&mut outputs, active_output_id.as_deref(), &bridge);
+        inject_active_output_for_bridge(state, &mut outputs, active_output_id.as_deref(), &bridge);
 
         Ok(OutputsResponse {
             active_id: active_output_id,
@@ -200,7 +224,7 @@ impl OutputProvider for BridgeProvider {
         let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
         let merged = merge_bridges(&bridges_state.bridges, &discovered);
         if let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) {
-            inject_active_output_for_bridge(outputs, Some(active_output_id), bridge);
+            inject_active_output_for_bridge(state, outputs, Some(active_output_id), bridge);
         }
     }
 
@@ -215,6 +239,13 @@ impl OutputProvider for BridgeProvider {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
+        state.providers.bridge
+            .output_switch_in_flight
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+            *until = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        }
+        state.playback.manager.set_manual_advance_in_flight(true);
         let prior_active_output_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         let (bridge_id, device_id) = parse_output_id(output_id)
             .map_err(|e| ProviderError::BadRequest(e))?;
@@ -223,33 +254,54 @@ impl OutputProvider for BridgeProvider {
             let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
             let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) else {
+                state.providers.bridge
+                    .output_switch_in_flight
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+                    *until = None;
+                }
                 return Err(ProviderError::BadRequest("unknown bridge id".to_string()));
             };
             bridge.http_addr
         };
 
-        let device_name = match BridgeTransportClient::new(http_addr, String::new()).list_devices() {
-            Ok(devices) => {
-                if let Some(device) = devices.iter().find(|d| d.id == device_id) {
-                    device.name.clone()
-                } else if let Some(device) = devices.iter().find(|d| d.name == device_id) {
-                    device.name.clone()
-                } else {
-                    tracing::warn!(
-                        bridge_id = %bridge_id,
-                        device_id = %device_id,
-                        "output select rejected: unknown device"
-                    );
-                    return Err(ProviderError::BadRequest("unknown device".to_string()));
-                }
-            }
+        let devices = match list_devices_cached_or_fetch(
+            state,
+            &bridge_id,
+            &bridge_id,
+            http_addr,
+        ) {
+            Ok(devices) => devices,
             Err(e) => {
+                state.providers.bridge
+                    .output_switch_in_flight
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+                    *until = None;
+                }
                 tracing::warn!(
                     bridge_id = %bridge_id,
                     error = %e,
                     "output select failed: device list"
                 );
                 return Err(ProviderError::Internal(format!("{e:#}")));
+            }
+        };
+        let device_name = match resolve_device_name(&devices, &device_id) {
+            Some(name) => name,
+            None => {
+                state.providers.bridge
+                    .output_switch_in_flight
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+                    *until = None;
+                }
+                tracing::warn!(
+                    bridge_id = %bridge_id,
+                    device_id = %device_id,
+                    "output select rejected: unknown device"
+                );
+                return Err(ProviderError::BadRequest("unknown device".to_string()));
             }
         };
 
@@ -269,6 +321,12 @@ impl OutputProvider for BridgeProvider {
         }
 
         if let Err(e) = switch_active_bridge(state, &bridge_id, http_addr) {
+            state.providers.bridge
+                .output_switch_in_flight
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+                *until = None;
+            }
             tracing::warn!(
                 bridge_id = %bridge_id,
                 error = %e,
@@ -277,6 +335,12 @@ impl OutputProvider for BridgeProvider {
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
         if let Err(e) = BridgeTransportClient::new(http_addr, String::new()).set_device(&device_name) {
+            state.providers.bridge
+                .output_switch_in_flight
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut until) = state.providers.bridge.output_switch_until.lock() {
+                *until = None;
+            }
             tracing::warn!(
                 bridge_id = %bridge_id,
                 device = %device_name,
@@ -331,9 +395,8 @@ impl OutputProvider for BridgeProvider {
         state: &AppState,
         output_id: &str,
     ) -> Result<StatusResponse, ProviderError> {
-        if parse_output_id(output_id).is_err() {
-            return Err(ProviderError::BadRequest("invalid output id".to_string()));
-        }
+        let (bridge_id, _) =
+            parse_output_id(output_id).map_err(|_| ProviderError::BadRequest("invalid output id".to_string()))?;
         let (active_output_id, http_addr) = {
             let bridges = state.providers.bridge.bridges.lock().unwrap();
             let http_addr = bridges.active_bridge_id.as_ref().and_then(|active_id| {
@@ -348,8 +411,6 @@ impl OutputProvider for BridgeProvider {
         if active_output_id.as_deref() != Some(output_id) {
             return Err(ProviderError::BadRequest("output is not active".to_string()));
         }
-        Self::ensure_active_connected(state).await?;
-
         let status = state.playback.manager.status().inner().lock().unwrap();
         let (title, artist, album, format, sample_rate, bitrate_kbps) =
             match status.now_playing.as_ref() {
@@ -406,31 +467,9 @@ impl OutputProvider for BridgeProvider {
             has_previous: status.has_previous,
         };
         drop(status);
-        if let Some(http_addr) = http_addr {
-            match BridgeTransportClient::new(http_addr, String::new()).status() {
-                Ok(remote) => {
-                    resp.paused = remote.paused;
-                    resp.elapsed_ms = remote.elapsed_ms;
-                    resp.duration_ms = remote.duration_ms;
-                    resp.source_codec = remote.source_codec;
-                    resp.source_bit_depth = remote.source_bit_depth;
-                    resp.container = remote.container;
-                    resp.output_sample_format = remote.output_sample_format;
-                    resp.resampling = remote.resampling;
-                    resp.resample_from_hz = remote.resample_from_hz;
-                    resp.resample_to_hz = remote.resample_to_hz;
-                    resp.channels = remote.channels;
-                    resp.output_sample_rate = remote.sample_rate;
-                    resp.output_device = remote.device;
-                    resp.underrun_frames = remote.underrun_frames;
-                    resp.underrun_events = remote.underrun_events;
-                    resp.buffer_size_frames = remote.buffer_size_frames;
-                    resp.buffered_frames = remote.buffered_frames;
-                    resp.buffer_capacity_frames = remote.buffer_capacity_frames;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "bridge status poll failed");
-                }
+        if http_addr.is_some() {
+            if let Some(remote) = get_cached_status(state, &bridge_id) {
+                apply_remote_status(&mut resp, remote);
             }
         }
         Ok(resp)
@@ -461,6 +500,7 @@ impl OutputProvider for BridgeProvider {
 
 /// Build output entries from bridges, tracking per-bridge failures.
 fn build_outputs_from_bridges_with_failures(
+    state: &AppState,
     bridges: &[crate::config::BridgeConfigResolved],
 ) -> (Vec<OutputInfo>, Vec<String>) {
     let mut outputs = Vec::new();
@@ -469,7 +509,12 @@ fn build_outputs_from_bridges_with_failures(
     let mut failed = Vec::new();
 
     for bridge in bridges {
-        let devices = match list_devices_with_retry(bridge, 3) {
+        let devices = match list_devices_cached_or_fetch(
+            state,
+            &bridge.id,
+            &bridge.name,
+            bridge.http_addr,
+        ) {
             Ok(list) => {
                 tracing::info!(
                     bridge_id = %bridge.id,
@@ -526,9 +571,11 @@ fn build_outputs_from_bridges_with_failures(
 
 /// Query a single bridge for device outputs.
 fn build_outputs_for_bridge(
+    state: &AppState,
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>, anyhow::Error> {
-    let devices = list_devices_with_retry(bridge, 3)?;
+    let devices =
+        list_devices_cached_or_fetch(state, &bridge.id, &bridge.name, bridge.http_addr)?;
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
     for device in &devices {
@@ -559,6 +606,74 @@ fn build_outputs_for_bridge(
         });
     }
     Ok(outputs)
+}
+
+fn list_devices_cached_or_fetch(
+    state: &AppState,
+    bridge_id: &str,
+    bridge_name: &str,
+    http_addr: std::net::SocketAddr,
+) -> Result<Vec<HttpDeviceInfo>, anyhow::Error> {
+    if let Ok(cache) = state.providers.bridge.device_cache.lock() {
+        if let Some(devices) = cache.get(bridge_id) {
+            return Ok(devices.clone());
+        }
+    }
+    let bridge = crate::config::BridgeConfigResolved {
+        id: bridge_id.to_string(),
+        name: bridge_name.to_string(),
+        http_addr,
+    };
+    let devices = list_devices_with_retry(&bridge, 3)?;
+    if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+        cache.insert(bridge_id.to_string(), devices.clone());
+    }
+    Ok(devices)
+}
+
+fn resolve_device_name(devices: &[HttpDeviceInfo], device_id: &str) -> Option<String> {
+    devices
+        .iter()
+        .find(|d| d.id == device_id)
+        .or_else(|| devices.iter().find(|d| d.name == device_id))
+        .map(|d| d.name.clone())
+}
+
+fn get_cached_status(
+    state: &AppState,
+    bridge_id: &str,
+) -> Option<crate::bridge_transport::HttpStatusResponse> {
+    state
+        .providers
+        .bridge
+        .status_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(bridge_id).cloned())
+}
+
+fn apply_remote_status(
+    resp: &mut StatusResponse,
+    remote: crate::bridge_transport::HttpStatusResponse,
+) {
+    resp.paused = remote.paused;
+    resp.elapsed_ms = remote.elapsed_ms;
+    resp.duration_ms = remote.duration_ms;
+    resp.source_codec = remote.source_codec;
+    resp.source_bit_depth = remote.source_bit_depth;
+    resp.container = remote.container;
+    resp.output_sample_format = remote.output_sample_format;
+    resp.resampling = remote.resampling;
+    resp.resample_from_hz = remote.resample_from_hz;
+    resp.resample_to_hz = remote.resample_to_hz;
+    resp.channels = remote.channels;
+    resp.output_sample_rate = remote.sample_rate;
+    resp.output_device = remote.device;
+    resp.underrun_frames = remote.underrun_frames;
+    resp.underrun_events = remote.underrun_events;
+    resp.buffer_size_frames = remote.buffer_size_frames;
+    resp.buffered_frames = remote.buffered_frames;
+    resp.buffer_capacity_frames = remote.buffer_capacity_frames;
 }
 
 fn list_devices_with_retry(
@@ -681,6 +796,7 @@ fn short_device_id(id: &str) -> String {
 
 /// Add a placeholder output when the active output is missing from discovery.
 fn inject_active_output_for_bridge(
+    state: &AppState,
     outputs: &mut Vec<OutputInfo>,
     active_output_id: Option<&str>,
     bridge: &crate::config::BridgeConfigResolved,
@@ -695,9 +811,9 @@ fn inject_active_output_for_bridge(
     if bridge_id != bridge.id {
         return;
     }
-    let status = match fetch_bridge_status(bridge.http_addr) {
-        Ok(status) => status,
-        Err(_) => return,
+    let status = match get_cached_status(state, &bridge.id) {
+        Some(status) => status,
+        None => return,
     };
     let device_name = status
         .device
@@ -720,10 +836,6 @@ fn inject_active_output_for_bridge(
             volume: false,
         },
     });
-}
-
-fn fetch_bridge_status(http_addr: std::net::SocketAddr) -> Result<crate::bridge_transport::HttpStatusResponse, anyhow::Error> {
-    BridgeTransportClient::new(http_addr, String::new()).status()
 }
 
 fn start_paused_for_resume(
@@ -761,7 +873,9 @@ fn estimate_bitrate_kbps(path: &PathBuf, duration_ms: Option<u64>) -> Option<u32
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
     use super::*;
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn normalize_supported_rates_rejects_invalid() {
@@ -842,9 +956,79 @@ mod tests {
             },
         }];
 
-        inject_active_output_for_bridge(&mut outputs, Some(active_id), &bridge);
+        let state = make_state(bridge.clone());
+        inject_active_output_for_bridge(&state, &mut outputs, Some(active_id), &bridge);
 
         assert_eq!(outputs.len(), 1);
+    }
+
+    fn make_state(bridge: crate::config::BridgeConfigResolved) -> AppState {
+        let tmp = std::env::temp_dir().join(format!(
+            "audio-hub-bridge-provider-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let library = crate::library::scan_library(&tmp).expect("scan library");
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(crate::state::BridgeState {
+            bridges: vec![bridge],
+            active_bridge_id: None,
+            active_output_id: None,
+        }));
+        let bridge_state = Arc::new(crate::state::BridgeProviderState::new(
+            cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(crate::state::LocalProviderState {
+            enabled: false,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+        let status = crate::status_store::StatusStore::new(
+            Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
+            crate::events::EventBus::new(),
+        );
+        let queue = Arc::new(Mutex::new(crate::state::QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(
+            queue,
+            status.clone(),
+            crate::events::EventBus::new(),
+        );
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status,
+            queue_service,
+        );
+        let device_selection = crate::state::DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        };
+        let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
+        let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+        AppState::new(
+            library,
+            metadata_db,
+            None,
+            crate::state::MetadataWake::new(),
+            bridge_state,
+            local_state,
+            browser_state,
+            playback_manager,
+            device_selection,
+            crate::events::EventBus::new(),
+            Arc::new(crate::events::LogBus::new(64)),
+        )
     }
 }
 /// Switch the active bridge id and stop the current bridge worker.

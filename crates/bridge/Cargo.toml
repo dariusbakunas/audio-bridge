@@ -15,6 +15,7 @@ ctrlc = { workspace = true }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 actix-web = "4.9.0"
+futures-util = "0.3.31"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.137"
 mdns-sd = "0.17.2"

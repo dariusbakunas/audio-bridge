@@ -232,6 +232,20 @@ pub struct BridgeProviderState {
     pub bridge_online: Arc<AtomicBool>,
     /// Discovered bridges keyed by id.
     pub discovered_bridges: Arc<Mutex<std::collections::HashMap<String, DiscoveredBridge>>>,
+    /// Active bridge device stream subscriptions.
+    pub device_streams: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Active bridge status stream subscriptions.
+    pub status_streams: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Cached device lists by bridge id.
+    pub device_cache: Arc<Mutex<std::collections::HashMap<String, Vec<crate::bridge_transport::HttpDeviceInfo>>>>,
+    /// Cached status snapshots by bridge id.
+    pub status_cache: Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
+    /// Whether the bridge worker loop is running.
+    pub worker_running: Arc<AtomicBool>,
+    /// Output switch in progress (suppresses auto-advance).
+    pub output_switch_in_flight: Arc<AtomicBool>,
+    /// Output switch suppression window.
+    pub output_switch_until: Arc<Mutex<Option<std::time::Instant>>>,
     /// Public base URL for stream endpoints.
     pub public_base_url: String,
 }
@@ -250,6 +264,13 @@ impl BridgeProviderState {
             bridges,
             bridge_online,
             discovered_bridges,
+            device_streams: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            device_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            status_streams: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            status_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            worker_running: Arc::new(AtomicBool::new(false)),
+            output_switch_in_flight: Arc::new(AtomicBool::new(false)),
+            output_switch_until: Arc::new(Mutex::new(None)),
             public_base_url,
         }
     }

@@ -5,6 +5,10 @@
 use actix_web::web;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 
+use crate::bridge_device_streams::{
+    spawn_bridge_device_stream_for_discovered,
+    spawn_bridge_status_stream_for_discovered,
+};
 use crate::state::AppState;
 
 pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
@@ -47,6 +51,17 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                     let id = property_value(&info, "id")
                         .unwrap_or_else(|| info.get_fullname().to_string());
                     let name = property_value(&info, "name").unwrap_or_else(|| id.clone());
+                    let version = property_value(&info, "version");
+                    if !is_bridge_version_compatible(version.as_deref()) {
+                        tracing::warn!(
+                            bridge_id = %id,
+                            bridge_name = %name,
+                            bridge_version = %version.unwrap_or_else(|| "unknown".to_string()),
+                            server_version = env!("CARGO_PKG_VERSION"),
+                            "mdns: skipping bridge with incompatible version"
+                        );
+                        continue;
+                    }
                     let addr = first_ipv4_addr(&info);
                     let Some(ip) = addr else {
                         tracing::warn!(fullname = %info.get_fullname(), "mdns: resolved without IPv4");
@@ -69,6 +84,8 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                             },
                         );
                     }
+                    spawn_bridge_device_stream_for_discovered(state.clone(), id.clone());
+                    spawn_bridge_status_stream_for_discovered(state.clone(), id.clone());
                     state.events.outputs_changed();
                     tracing::info!(
                         bridge_id = %id,
@@ -81,6 +98,12 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                     if let Some(id) = fullname_to_id.remove(&name) {
                         if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
                             map.remove(&id);
+                        }
+                        if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+                            cache.remove(&id);
+                        }
+                        if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+                            cache.remove(&id);
                         }
                         state.events.outputs_changed();
                         tracing::info!(bridge_id = %id, "mdns: bridge removed");
@@ -116,6 +139,12 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
                 if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
                     map.remove(&id);
                 }
+                if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+                    cache.remove(&id);
+                }
+                if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+                    cache.remove(&id);
+                }
                 state.events.outputs_changed();
                 tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");
             }
@@ -146,6 +175,23 @@ fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr
             mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
             _ => None,
         })
+}
+
+fn is_bridge_version_compatible(version: Option<&str>) -> bool {
+    let Some(version) = version else {
+        return false;
+    };
+    let Some(bridge_major) = parse_major(version) else {
+        return false;
+    };
+    let Some(server_major) = parse_major(env!("CARGO_PKG_VERSION")) else {
+        return false;
+    };
+    bridge_major == server_major
+}
+
+fn parse_major(version: &str) -> Option<u64> {
+    version.split('.').next()?.parse().ok()
 }
 
 #[cfg(test)]

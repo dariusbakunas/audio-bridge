@@ -3,6 +3,7 @@
 //! Wraps the bridge HTTP API with timeouts and JSON parsing.
 
 use std::net::SocketAddr;
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ pub struct HttpDevicesResponse {
 }
 
 /// Device info returned by the bridge HTTP API.
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone, PartialEq, Eq)]
 pub struct HttpDeviceInfo {
     /// Device identifier reported by the bridge.
     pub id: String,
@@ -31,6 +32,17 @@ pub struct HttpDeviceInfo {
 }
 
 pub type HttpStatusResponse = BridgeStatus;
+
+/// HTTP response payload for the bridge device stream.
+#[derive(Debug, serde::Deserialize, Clone, PartialEq, Eq)]
+pub struct HttpDevicesSnapshot {
+    /// Devices reported by the bridge.
+    pub devices: Vec<HttpDeviceInfo>,
+    /// Selected device name (if any).
+    pub selected: Option<String>,
+    /// Selected device id (if any).
+    pub selected_id: Option<String>,
+}
 
 /// JSON payload for starting playback on the bridge.
 #[derive(Debug, serde::Serialize)]
@@ -109,6 +121,106 @@ impl BridgeTransportClient {
             .read_json()
             .map_err(|e| anyhow::anyhow!("http status decode failed: {e}"))?;
         Ok(resp)
+    }
+
+    /// Listen for bridge device updates via server-sent events.
+    pub fn listen_devices_stream<F>(&self, mut on_snapshot: F) -> Result<()>
+    where
+        F: FnMut(HttpDevicesSnapshot),
+    {
+        let url = format!("http://{}/devices/stream", self.http_addr);
+        let resp = ureq::get(&url)
+            .header("Accept", "text/event-stream")
+            .config()
+            .timeout_per_call(None)
+            .build()
+            .call()
+            .map_err(|e| anyhow::anyhow!("http devices stream failed: {e}"))?;
+
+        let mut reader = std::io::BufReader::new(resp.into_body().into_reader());
+        let mut event = String::new();
+        let mut data_lines: Vec<String> = Vec::new();
+        loop {
+            let mut line = String::new();
+            let bytes = reader
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("http devices stream read failed: {e}"))?;
+            if bytes == 0 {
+                return Err(anyhow::anyhow!("http devices stream ended"));
+            }
+            let line = line.trim_end_matches(&['\r', '\n'][..]);
+            if line.is_empty() {
+                if !data_lines.is_empty() {
+                    let payload = data_lines.join("\n");
+                    if event == "devices" {
+                        match serde_json::from_str::<HttpDevicesSnapshot>(&payload) {
+                            Ok(snapshot) => on_snapshot(snapshot),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "http devices stream decode failed");
+                            }
+                        }
+                    }
+                }
+                event.clear();
+                data_lines.clear();
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data_lines.push(rest.trim_start().to_string());
+            }
+        }
+    }
+
+    /// Listen for bridge status updates via server-sent events.
+    pub fn listen_status_stream<F>(&self, mut on_snapshot: F) -> Result<()>
+    where
+        F: FnMut(HttpStatusResponse),
+    {
+        let url = format!("http://{}/status/stream", self.http_addr);
+        let resp = ureq::get(&url)
+            .header("Accept", "text/event-stream")
+            .config()
+            .timeout_per_call(None)
+            .build()
+            .call()
+            .map_err(|e| anyhow::anyhow!("http status stream failed: {e}"))?;
+
+        let mut reader = std::io::BufReader::new(resp.into_body().into_reader());
+        let mut event = String::new();
+        let mut data_lines: Vec<String> = Vec::new();
+        loop {
+            let mut line = String::new();
+            let bytes = reader
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("http status stream read failed: {e}"))?;
+            if bytes == 0 {
+                return Err(anyhow::anyhow!("http status stream ended"));
+            }
+            let line = line.trim_end_matches(&['\r', '\n'][..]);
+            if line.is_empty() {
+                if !data_lines.is_empty() {
+                    let payload = data_lines.join("\n");
+                    if event == "status" {
+                        match serde_json::from_str::<HttpStatusResponse>(&payload) {
+                            Ok(snapshot) => on_snapshot(snapshot),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "http status stream decode failed");
+                            }
+                        }
+                    }
+                }
+                event.clear();
+                data_lines.clear();
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data_lines.push(rest.trim_start().to_string());
+            }
+        }
     }
 
     /// Ask the bridge to play the specified path via the hub stream URL.
