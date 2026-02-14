@@ -11,9 +11,9 @@ RUN dpkg --add-architecture arm64 \
     librsvg2-dev:arm64 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN set -eux; \
-    dpkg -L libglib2.0-dev:arm64 | grep -E 'glib-2\.0\.pc$' || true; \
-    find /usr -name glib-2.0.pc -print || true
+RUN which aarch64-linux-gnu-pkg-config
+ENV PKG_CONFIG=aarch64-linux-gnu-pkg-config
+
 # Prefer sysroot paths used by cross toolchains
 
 ENV SYSROOT=/usr/aarch64-linux-gnu \
