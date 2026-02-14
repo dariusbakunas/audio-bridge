@@ -1,5 +1,12 @@
 [target.x86_64-unknown-linux-gnu]
-dockerfile = "cross/Dockerfile.x86_64"
+pre-build = [
+    "apt-get update",
+    "apt-get install -y --no-install-recommends pkg-config libasound2-dev",
+]
 
 [target.aarch64-unknown-linux-gnu]
-dockerfile = "cross/Dockerfile.aarch64"
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update",
+    "apt-get install -y --no-install-recommends pkg-config libasound2-dev:arm64",
+]
