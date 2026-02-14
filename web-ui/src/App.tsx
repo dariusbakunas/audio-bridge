@@ -613,12 +613,10 @@ export default function App() {
     handlePlay,
     handlePlayAlbumTrack,
     handlePlayAlbumById,
-    handlePlayAlbum,
     handleQueue,
     handlePlayNext
   } = usePlaybackActions({
     activeOutputId,
-    albumTracks,
     rescanBusy,
     setError,
     setActiveOutputId,
@@ -1271,7 +1269,10 @@ export default function App() {
               isPaused={isPaused}
               onPause={handlePause}
               formatMs={formatMs}
-              onPlayAlbum={handlePlayAlbum}
+              onPlayAlbum={() => {
+                if (!selectedAlbum) return;
+                handlePlayAlbumById(selectedAlbum.id);
+              }}
               onPlayTrack={handlePlayAlbumTrack}
               trackMenuPath={trackMenuPath}
               trackMenuPosition={trackMenuPosition}

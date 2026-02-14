@@ -111,6 +111,7 @@ impl PlaybackManager {
         start_paused: bool,
     ) -> Result<(), ()> {
         let transport = self.transport();
+
         transport
             .play(path.clone(), ext_hint, seek_ms, start_paused)
             .map_err(|_| ())?;

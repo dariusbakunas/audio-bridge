@@ -142,3 +142,5 @@ samples/
 web-ui/node_modules/
 web-ui/dist/
 web-ui/.vite/
+config.toml
+.env

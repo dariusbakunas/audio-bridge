@@ -52,6 +52,24 @@ impl BridgeProvider {
             };
             (bridge.id.clone(), bridge.http_addr)
         };
+        if let Ok(status) = BridgeTransportClient::new(addr, String::new()).status() {
+            if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+                cache.insert(bridge_id.clone(), status);
+            }
+            if crate::bridge::update_online_and_should_emit(
+                &state.providers.bridge.bridge_online,
+                true,
+            ) {
+                state.events.outputs_changed();
+            }
+            state.events.status_changed();
+            if state.providers.bridge
+                .worker_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return Ok(());
+            }
+        }
         if state
             .providers
             .bridge

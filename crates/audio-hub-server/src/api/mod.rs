@@ -43,6 +43,7 @@ pub use outputs::{
 pub use playback::{
     pause_toggle,
     play_track,
+    play_album,
     seek,
     status_for_output,
     stop,

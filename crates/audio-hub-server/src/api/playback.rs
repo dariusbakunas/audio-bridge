@@ -6,7 +6,7 @@ use actix_web::{get, post, web, HttpResponse, Responder};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
-use crate::models::{PlayRequest, QueueMode, StatusResponse};
+use crate::models::{AlbumQueueMode, PlayAlbumRequest, PlayRequest, QueueMode, StatusResponse};
 use crate::state::AppState;
 
 /// Seek request payload (milliseconds).
@@ -45,6 +45,69 @@ pub async fn play_track(state: web::Data<AppState>, body: web::Json<PlayRequest>
         Err(err) => return err.into_response(),
     };
     tracing::info!(output_id = %output_id, "play dispatched");
+    HttpResponse::Ok().finish()
+}
+
+#[utoipa::path(
+    post,
+    path = "/play/album",
+    request_body = PlayAlbumRequest,
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Album not found"),
+        (status = 500, description = "Player offline")
+    )
+)]
+#[post("/play/album")]
+/// Start playback for the requested album.
+pub async fn play_album(state: web::Data<AppState>, body: web::Json<PlayAlbumRequest>) -> impl Responder {
+    let album_id = body.album_id;
+    let paths = match state.metadata.db.list_track_paths_by_album_id(album_id) {
+        Ok(paths) => paths,
+        Err(err) => {
+            tracing::warn!(error = %err, album_id, "album play list failed");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    if paths.is_empty() {
+        return HttpResponse::NotFound().body("album has no tracks");
+    }
+
+    let mut resolved = Vec::with_capacity(paths.len());
+    for path_str in paths {
+        let path = PathBuf::from(path_str);
+        let path = match state.output.controller.canonicalize_under_root(&state, &path) {
+            Ok(path) => path,
+            Err(err) => return err.into_response(),
+        };
+        resolved.push(path);
+    }
+
+    let mode = body.queue_mode.clone().unwrap_or(AlbumQueueMode::Replace);
+    if matches!(mode, AlbumQueueMode::Replace) {
+        state.playback.manager.queue_clear();
+    }
+
+    let mut iter = resolved.into_iter();
+    let Some(first) = iter.next() else {
+        return HttpResponse::NotFound().body("album has no tracks");
+    };
+    let rest: Vec<_> = iter.collect();
+    if !rest.is_empty() {
+        state.playback.manager.queue_add_paths(rest);
+    }
+
+    tracing::info!(album_id, "album play request");
+    let output_id = match state.output.controller
+        .play_request(&state, first, QueueMode::Keep, body.output_id.as_deref())
+        .await
+    {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    tracing::info!(output_id = %output_id, album_id, "album play dispatched");
     HttpResponse::Ok().finish()
 }
 

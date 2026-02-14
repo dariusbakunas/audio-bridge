@@ -61,6 +61,19 @@ pub struct PlayRequest {
     pub output_id: Option<String>,
 }
 
+/// Playback request payload for the `/play/album` endpoint.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct PlayAlbumRequest {
+    /// Album id to play.
+    pub album_id: i64,
+    /// Queue handling mode for the album tracks.
+    #[serde(default)]
+    pub queue_mode: Option<AlbumQueueMode>,
+    /// Optional output id to target.
+    #[serde(default)]
+    pub output_id: Option<String>,
+}
+
 /// Defines how a play request interacts with the existing queue.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -70,6 +83,16 @@ pub enum QueueMode {
     /// Replace the queue with only the new track.
     Replace,
     /// Append the new track to the queue.
+    Append,
+}
+
+/// Defines how album playback interacts with the existing queue.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumQueueMode {
+    /// Replace the current queue with the album tracks.
+    Replace,
+    /// Append the album tracks to the current queue.
     Append,
 }
 

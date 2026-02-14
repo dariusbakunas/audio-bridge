@@ -136,6 +136,16 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
                     }
                 }
             } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
+                let active_bridge_id = state
+                    .providers
+                    .bridge
+                    .bridges
+                    .lock()
+                    .ok()
+                    .and_then(|s| s.active_bridge_id.clone());
+                if active_bridge_id.as_deref() == Some(&id) {
+                    continue;
+                }
                 if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
                     map.remove(&id);
                 }

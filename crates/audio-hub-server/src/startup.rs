@@ -135,6 +135,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::rescan_library)
             .service(api::rescan_track)
             .service(api::play_track)
+            .service(api::play_album)
             .service(api::pause_toggle)
             .service(api::stop)
             .service(api::seek)

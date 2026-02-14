@@ -1,10 +1,9 @@
 import { useCallback } from "react";
-import { fetchJson, postJson } from "../api";
-import { TrackListResponse, TrackSummary } from "../types";
+import { postJson } from "../api";
+import { TrackSummary } from "../types";
 
 interface PlaybackActionsOptions {
   activeOutputId: string | null;
-  albumTracks: TrackSummary[];
   rescanBusy: boolean;
   setError: (message: string | null) => void;
   setActiveOutputId: (id: string | null) => void;
@@ -13,7 +12,6 @@ interface PlaybackActionsOptions {
 
 export function usePlaybackActions({
   activeOutputId,
-  albumTracks,
   rescanBusy,
   setError,
   setActiveOutputId,
@@ -107,17 +105,11 @@ export function usePlaybackActions({
     async (albumId: number) => {
       if (!activeOutputId) return;
       try {
-        const response = await fetchJson<TrackListResponse>(
-          `/tracks?album_id=${albumId}&limit=500`
-        );
-        const paths = response.items.map((track) => track.path).filter(Boolean);
-        if (!paths.length) return;
-        const [first, ...rest] = paths;
-        await postJson("/queue/clear");
-        if (rest.length > 0) {
-          await postJson("/queue", { paths: rest });
-        }
-        await postJson("/play", { path: first, queue_mode: "keep" });
+        await postJson("/play/album", {
+          album_id: albumId,
+          queue_mode: "replace",
+          output_id: activeOutputId
+        });
       } catch (err) {
         setError((err as Error).message);
       }
@@ -155,22 +147,6 @@ export function usePlaybackActions({
     [setError]
   );
 
-  const handlePlayAlbum = useCallback(async () => {
-    if (!albumTracks.length) return;
-    const paths = albumTracks.map((track) => track.path).filter(Boolean);
-    if (!paths.length) return;
-    const [first, ...rest] = paths;
-    try {
-      await postJson("/queue/clear");
-      if (rest.length > 0) {
-        await postJson("/queue", { paths: rest });
-      }
-      await postJson("/play", { path: first, queue_mode: "keep" });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [albumTracks, setError]);
-
   return {
     handleRescanLibrary,
     handleRescanTrack,
@@ -182,7 +158,6 @@ export function usePlaybackActions({
     handlePlayAlbumTrack,
     handlePlayAlbumById,
     handleQueueAlbumTrack,
-    handlePlayAlbum,
     handleQueue,
     handlePlayNext
   };
