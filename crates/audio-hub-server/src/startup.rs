@@ -771,6 +771,8 @@ mod tests {
             local_name: None,
             local_device: None,
             musicbrainz: None,
+            tls_cert: None,
+            tls_key: None,
         };
         let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
         assert_eq!(result.0, None);
@@ -792,6 +794,8 @@ mod tests {
             local_name: None,
             local_device: None,
             musicbrainz: None,
+            tls_cert: None,
+            tls_key: None,
         };
         let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
         assert_eq!(result, (None, None));
