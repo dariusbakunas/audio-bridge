@@ -5,7 +5,6 @@ members = [
     "crates/audio-bridge-types",
     "crates/hub-cli",
     "crates/audio-hub-server",
-    "web-ui/src-tauri",
 ]
 
 [workspace.package]

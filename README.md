@@ -286,7 +286,7 @@ and plays locally without running a separate bridge.
 
 Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.
 
-Tauri desktop bundles are built alongside the Rust releases and attached to the same GitHub Release tag.
+Tauri desktop bundles are built in a separate GitHub Actions workflow and attached to the same GitHub Release tag.
 
 ### Releasing a single crate
 
