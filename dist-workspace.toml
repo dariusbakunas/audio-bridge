@@ -19,7 +19,7 @@ install-updater = false
 [dist.dependencies.apt]
 libasound2-dev = "*"
 libglib2.0-dev = "*"
-libwebkit2gtk-4.1-dev = "*"
+libwebkit2gtk-4.0-dev = "*"
 libappindicator3-dev = "*"
 librsvg2-dev = "*"
 pkg-config = "*"
