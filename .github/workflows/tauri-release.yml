@@ -42,7 +42,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev libsoup-3.0-dev patchelf
+          sudo apt-get install -y pkg-config libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev libappindicator3-dev librsvg2-dev libsoup-3.0-dev patchelf
       - name: Install frontend dependencies
         working-directory: web-ui
         run: npm ci
@@ -54,5 +54,6 @@ jobs:
           projectPath: "web-ui"
           tauriScript: "npm run tauri"
           tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
           releaseDraft: false
           args: ${{ matrix.args }}
