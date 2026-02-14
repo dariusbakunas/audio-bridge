@@ -69,7 +69,7 @@ export default {
   title: "Settings/SettingsView",
   component: SettingsView,
   argTypes: {
-    section: { control: { type: "radio" }, options: ["metadata", "logs"] },
+    section: { control: { type: "radio" }, options: ["metadata", "connection", "logs"] },
     logsError: { control: "text" },
     rescanBusy: { control: "boolean" },
     empty: { control: "boolean" }
@@ -77,7 +77,7 @@ export default {
 };
 
 type SettingsViewArgs = {
-  section: "metadata" | "logs";
+  section: "metadata" | "connection" | "logs";
   logsError: string;
   rescanBusy: boolean;
   empty: boolean;
@@ -89,6 +89,11 @@ const Template = (args: SettingsViewArgs) => (
       active={true}
       section={args.section}
       onSectionChange={action("section-change")}
+      apiBase="http://192.168.1.10:8080"
+      apiBaseDefault=""
+      onApiBaseChange={action("api-base-change")}
+      onApiBaseReset={action("api-base-reset")}
+      onReconnect={action("reconnect")}
       metadataEvents={args.empty ? [] : metadataEvents}
       logEvents={args.empty ? [] : logEvents}
       logsError={args.logsError || null}
@@ -122,6 +127,14 @@ export const LogsEmpty = Template.bind({});
 LogsEmpty.args = {
   section: "logs",
   logsError: "Stream disconnected.",
+  rescanBusy: false,
+  empty: true
+};
+
+export const Connection = Template.bind({});
+Connection.args = {
+  section: "connection",
+  logsError: "",
   rescanBusy: false,
   empty: true
 };

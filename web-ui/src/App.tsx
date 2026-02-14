@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
-import {apiUrl, apiWsUrl, fetchJson, postJson} from "./api";
+import {apiUrl, apiWsUrl, fetchJson, getDefaultApiBase, getStoredApiBase, postJson, setStoredApiBase} from "./api";
 import {
   AlbumListResponse,
   AlbumSummary,
@@ -235,7 +235,7 @@ export default function App() {
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [settingsSection, setSettingsSection] = useState<"metadata" | "logs">("metadata");
+  const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection">("metadata");
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -328,7 +328,7 @@ export default function App() {
   type ViewState = {
     view: "albums" | "folders" | "album" | "settings";
     albumId?: number | null;
-    settingsSection?: "metadata" | "logs";
+    settingsSection?: "metadata" | "logs" | "connection";
     browserView?: "library" | "albums";
   };
 
@@ -379,6 +379,17 @@ export default function App() {
     return match?.id ?? null;
   }, [albums, status?.album, status?.artist]);
   const activeAlbumId = nowPlayingAlbumId ?? heuristicAlbumId;
+
+  const [apiBaseOverride, setApiBaseOverride] = useState<string>(() => getStoredApiBase());
+  const apiBaseDefault = useMemo(() => getDefaultApiBase(), []);
+  const handleApiBaseChange = useCallback((value: string) => {
+    setApiBaseOverride(value);
+    setStoredApiBase(value);
+  }, []);
+  const handleApiBaseReset = useCallback(() => {
+    setApiBaseOverride("");
+    setStoredApiBase("");
+  }, []);
 
   const openTrackMatchForLibrary = useCallback(
     (path: string) => {
@@ -1299,6 +1310,11 @@ export default function App() {
                 browserView
               })
             }
+            apiBase={apiBaseOverride}
+            apiBaseDefault={apiBaseDefault}
+            onApiBaseChange={handleApiBaseChange}
+            onApiBaseReset={handleApiBaseReset}
+            onReconnect={() => window.location.reload()}
             metadataEvents={metadataEvents}
             logEvents={logEvents}
             logsError={logsError}

@@ -1,0 +1,28 @@
+{
+  "productName": "Audio Hub",
+  "version": "0.1.0",
+  "identifier": "com.audiohub.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Audio Hub",
+        "width": 1280,
+        "height": 800
+      }
+    ]
+  }
+  ,
+  "bundle": {
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

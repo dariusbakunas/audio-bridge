@@ -150,6 +150,25 @@ npm run dev
 
 By default the Vite dev server proxies API requests to `http://localhost:8080`. If your hub server is on a different host/port, set `VITE_API_BASE` when running `npm run dev`.
 
+## Desktop App (Tauri)
+
+The desktop app reuses the existing React/Vite UI and runs inside a Tauri shell.
+
+### Dev
+
+```bash
+cd web-ui
+npm install
+VITE_API_BASE=http://<SERVER_IP>:8080 npm run tauri:dev
+```
+
+### Build
+
+```bash
+cd web-ui
+VITE_API_BASE=http://<SERVER_IP>:8080 npm run tauri:build
+```
+
 ## Server config
 
 Use a TOML config to define the media path, outputs, and default output:
@@ -266,6 +285,8 @@ and plays locally without running a separate bridge.
 ## Releases
 
 Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.
+
+Tauri desktop bundles are built alongside the Rust releases and attached to the same GitHub Release tag.
 
 ### Releasing a single crate
 

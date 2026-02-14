@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { LogEvent, MetadataEvent } from "../types";
 
 interface MetadataEventEntry {
@@ -13,8 +14,13 @@ interface LogEventEntry {
 
 interface SettingsViewProps {
   active: boolean;
-  section: "metadata" | "logs";
-  onSectionChange: (section: "metadata" | "logs") => void;
+  section: "metadata" | "logs" | "connection";
+  onSectionChange: (section: "metadata" | "logs" | "connection") => void;
+  apiBase: string;
+  apiBaseDefault: string;
+  onApiBaseChange: (value: string) => void;
+  onApiBaseReset: () => void;
+  onReconnect: () => void;
   metadataEvents: MetadataEventEntry[];
   logEvents: LogEventEntry[];
   logsError: string | null;
@@ -38,10 +44,25 @@ export default function SettingsView({
   onRescanLibrary,
   onClearLogs,
   describeMetadataEvent,
-  metadataDetailLines
+  metadataDetailLines,
+  apiBase,
+  apiBaseDefault,
+  onApiBaseChange,
+  onApiBaseReset,
+  onReconnect
 }: SettingsViewProps) {
   const isMetadata = section === "metadata";
   const isLogs = section === "logs";
+  const isConnection = section === "connection";
+  const [apiBaseDraft, setApiBaseDraft] = useState(apiBase);
+
+  useEffect(() => {
+    setApiBaseDraft(apiBase);
+  }, [apiBase]);
+
+  const trimmedDraft = apiBaseDraft.trim();
+  const isDirty = trimmedDraft !== apiBase.trim();
+  const effectiveBase = apiBase.trim() || apiBaseDefault.trim();
   return (
     <section className={`settings-screen ${active ? "active" : ""}`}>
       <div className="settings-stack">
@@ -51,6 +72,12 @@ export default function SettingsView({
             onClick={() => onSectionChange("metadata")}
           >
             Metadata
+          </button>
+          <button
+            className={`settings-tab ${isConnection ? "active" : ""}`}
+            onClick={() => onSectionChange("connection")}
+          >
+            Connection
           </button>
           <button
             className={`settings-tab ${isLogs ? "active" : ""}`}
@@ -135,6 +162,63 @@ export default function SettingsView({
                   );
                 })}
                 {logEvents.length === 0 ? <div className="muted small">No logs yet.</div> : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isConnection ? (
+          <div className="card">
+            <div className="card-header">
+              <span>Hub server</span>
+              <div className="card-actions">
+                <button
+                  className="btn ghost small"
+                  onClick={() => {
+                    setApiBaseDraft("");
+                    onApiBaseReset();
+                  }}
+                  disabled={!apiBase.trim() && !apiBaseDraft.trim()}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+            <div className="settings-panel">
+              <div className="muted small">
+                Set the base URL for the hub server (example: http://192.168.1.10:8080).
+                Leave blank to use the default.
+              </div>
+              <div className="muted small">
+                After saving, refresh the app to reconnect live streams.
+              </div>
+              <div className="settings-field">
+                <label className="settings-label" htmlFor="api-base-input">
+                  API base URL
+                </label>
+                <input
+                  id="api-base-input"
+                  className="settings-input"
+                  type="url"
+                  placeholder={apiBaseDefault || "http://<SERVER_IP>:8080"}
+                  value={apiBaseDraft}
+                  onChange={(event) => setApiBaseDraft(event.target.value)}
+                />
+              </div>
+              <div className="settings-actions">
+                <button className="btn ghost small" onClick={onReconnect}>
+                  Reconnect now
+                </button>
+                <button
+                  className="btn ghost small"
+                  onClick={() => onApiBaseChange(apiBaseDraft)}
+                  disabled={!isDirty}
+                >
+                  Save
+                </button>
+              </div>
+              <div className="muted small">
+                Effective base: {effectiveBase ? effectiveBase : "current origin"}
               </div>
             </div>
           </div>

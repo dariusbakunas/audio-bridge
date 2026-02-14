@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --port 5173",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build"
   },
@@ -17,6 +20,7 @@
   "devDependencies": {
     "@types/react": "18.3.5",
     "@types/react-dom": "18.3.0",
+    "@tauri-apps/cli": "2.0.0",
     "@storybook/addon-essentials": "^8.6.3",
     "@storybook/react-vite": "^8.6.3",
     "@vitejs/plugin-react": "4.3.1",

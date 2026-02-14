@@ -1,0 +1,15 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#0b0b0b" />
+  <text
+    x="256"
+    y="272"
+    text-anchor="middle"
+    font-size="78"
+    font-family="Space Grotesk, IBM Plex Sans, Helvetica Neue, Arial, sans-serif"
+    font-weight="600"
+    letter-spacing="2"
+    fill="#ffffff"
+  >
+    audio-hub
+  </text>
+</svg>

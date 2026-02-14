@@ -2,10 +2,41 @@ type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
 
 // @ts-ignore
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const API_BASE_STORAGE_KEY = "audioHub.apiBase";
+
+export function getStoredApiBase(): string {
+  try {
+    return localStorage.getItem(API_BASE_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredApiBase(value: string): void {
+  const trimmed = value.trim();
+  try {
+    if (trimmed) {
+      localStorage.setItem(API_BASE_STORAGE_KEY, trimmed);
+    } else {
+      localStorage.removeItem(API_BASE_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures (private mode, etc.)
+  }
+}
+
+export function getDefaultApiBase(): string {
+  return DEFAULT_API_BASE;
+}
+
+export function getEffectiveApiBase(): string {
+  const stored = getStoredApiBase().trim();
+  return stored || DEFAULT_API_BASE;
+}
 
 export function apiUrl(path: string): string {
-  return `${API_BASE}${path}`;
+  return `${getEffectiveApiBase()}${path}`;
 }
 
 export function apiWsUrl(path: string): string {

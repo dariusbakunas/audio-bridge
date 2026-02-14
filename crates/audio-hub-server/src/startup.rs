@@ -119,6 +119,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173")
             .allowed_origin("http://127.0.0.1:5173")
+            .allowed_origin("tauri://localhost")
+            .allowed_origin("http://tauri.localhost")
             .allowed_methods(vec!["GET", "POST", "HEAD"])
             .allowed_headers(vec![actix_web::http::header::CONTENT_TYPE])
             .max_age(3600);
