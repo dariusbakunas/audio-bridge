@@ -1,13 +1,5 @@
 [target.x86_64-unknown-linux-gnu]
-pre-build = [
-    "apt-get update",
-    "apt-get install -y --no-install-recommends pkg-config libasound2-dev libglib2.0-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev",
-]
+dockerfile = "cross/Dockerfile.x86_64"
 
 [target.aarch64-unknown-linux-gnu]
-pre-build = [
-    "dpkg --add-architecture arm64",
-    "apt-get update",
-    "apt-get install -y --no-install-recommends pkg-config libasound2-dev:arm64 libglib2.0-dev:arm64 libwebkit2gtk-4.0-dev:arm64 libappindicator3-dev:arm64 librsvg2-dev:arm64",
-]
-
+dockerfile = "cross/Dockerfile.aarch64"
