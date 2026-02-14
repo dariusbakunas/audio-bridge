@@ -30,13 +30,15 @@ enum BrowserServerMessage {
 pub struct BrowserWs {
     session_id: Option<String>,
     state: web::Data<AppState>,
+    base_url: Option<String>,
 }
 
 impl BrowserWs {
-    pub fn new(state: web::Data<AppState>) -> Self {
+    pub fn new(state: web::Data<AppState>, base_url: Option<String>) -> Self {
         Self {
             session_id: None,
             state,
+            base_url,
         }
     }
 
@@ -128,6 +130,7 @@ impl Actor for BrowserWs {
         let session_id = self.state.providers.browser.register_session(
             "Browser".to_string(),
             addr,
+            self.base_url.clone(),
         );
         self.session_id = Some(session_id.clone());
         self.state.events.outputs_changed();
@@ -202,5 +205,7 @@ pub async fn browser_ws(
     stream: web::Payload,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    ws::start(BrowserWs::new(state), &req, stream)
+    let conn = req.connection_info();
+    let base_url = Some(format!("{}://{}", conn.scheme(), conn.host()));
+    ws::start(BrowserWs::new(state, base_url), &req, stream)
 }

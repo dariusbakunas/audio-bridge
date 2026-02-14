@@ -144,3 +144,4 @@ web-ui/dist/
 web-ui/.vite/
 config.toml
 .env
+certs/

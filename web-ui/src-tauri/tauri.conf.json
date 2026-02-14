@@ -24,11 +24,7 @@
   "bundle": {
     "active": true,
     "macOS": {
-      "infoPlist": {
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
-      }
+      "exceptionDomain": "local"
     },
     "targets": [
       "dmg",

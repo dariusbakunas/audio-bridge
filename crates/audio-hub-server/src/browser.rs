@@ -32,6 +32,7 @@ pub struct BrowserSession {
     pub name: String,
     pub sender: Recipient<BrowserOutbound>,
     pub last_duration_ms: Option<u64>,
+    pub base_url: Option<String>,
 }
 
 impl BrowserProviderState {
@@ -42,13 +43,19 @@ impl BrowserProviderState {
         }
     }
 
-    pub fn register_session(&self, name: String, sender: Recipient<BrowserOutbound>) -> String {
+    pub fn register_session(
+        &self,
+        name: String,
+        sender: Recipient<BrowserOutbound>,
+        base_url: Option<String>,
+    ) -> String {
         let id = format!("browser-{}", self.counter.fetch_add(1, Ordering::Relaxed));
         let session = BrowserSession {
             id: id.clone(),
             name,
             sender,
             last_duration_ms: None,
+            base_url,
         };
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.insert(id.clone(), session);

@@ -150,6 +150,8 @@ npm run dev
 
 By default the Vite dev server proxies API requests to `http://localhost:8080`. If your hub server is on a different host/port, set `VITE_API_BASE` when running `npm run dev`.
 
+If you enable TLS on the hub server, use `https://` for `VITE_API_BASE` and in the desktop app connection settings.
+
 ## Desktop App (Tauri)
 
 The desktop app reuses the existing React/Vite UI and runs inside a Tauri shell.
@@ -159,14 +161,14 @@ The desktop app reuses the existing React/Vite UI and runs inside a Tauri shell.
 ```bash
 cd web-ui
 npm install
-VITE_API_BASE=http://<SERVER_IP>:8080 npm run tauri:dev
+VITE_API_BASE=https://<SERVER_IP>:8443 npm run tauri:dev
 ```
 
 ### Build
 
 ```bash
 cd web-ui
-VITE_API_BASE=http://<SERVER_IP>:8080 npm run tauri:build
+VITE_API_BASE=https://<SERVER_IP>:8443 npm run tauri:build
 ```
 
 ## Server config
@@ -178,6 +180,8 @@ Use a TOML config to define the media path, outputs, and default output:
 #
 # bind: HTTP address the server listens on
 # public_base_url: base URL reachable by the bridge (used for /stream URLs)
+# tls_cert: path to a PEM-encoded TLS certificate (optional)
+# tls_key: path to a PEM-encoded TLS private key (optional)
 # bridges: list of bridge devices to connect to
 # active_output: output id to use by default (bridge:{bridge_id}:{device_id})
 # local_outputs: enable local outputs on the hub host
@@ -185,8 +189,8 @@ Use a TOML config to define the media path, outputs, and default output:
 # musicbrainz: optional metadata enrichment settings (requires user_agent)
 # note: enrichment runs in a background job and only fills missing MBIDs
 
-bind = "0.0.0.0:8080"
-public_base_url = "http://192.168.1.10:8080"
+bind = "0.0.0.0:8443"
+public_base_url = "https://192.168.1.10:8443"
 media_dir = "/srv/music"
 active_output = "bridge:living-room:Built-in Output"
 # local_outputs = true
@@ -208,8 +212,46 @@ http_addr = "192.168.1.50:5556"
 
 `public_base_url` must be reachable by the bridge so it can pull `/stream` URLs (set it to the server’s LAN IP + port). Pass config via `--config` (you can still override the media path via `--media-dir`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
 
+If you enable TLS, update `public_base_url` to use `https://` and the TLS port.
+
 ```bash
 cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml
+```
+
+To enable HTTPS, provide a certificate and key (PEM):
+
+```bash
+cargo run --release -p audio-hub-server -- \
+  --bind 0.0.0.0:8443 \
+  --tls-cert /path/to/cert.pem \
+  --tls-key /path/to/key.pem \
+  --config crates/audio-hub-server/config.example.toml
+```
+
+Generate a local self-signed cert for development:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout certs/local.key \
+  -out certs/local.crt \
+  -subj "/CN=localhost"
+```
+
+Then run:
+
+```bash
+cargo run --release -p audio-hub-server -- \
+  --bind 0.0.0.0:8443 \
+  --tls-cert certs/local.crt \
+  --tls-key certs/local.key \
+  --config crates/audio-hub-server/config.example.toml
+```
+
+For a trusted local cert on macOS, use `mkcert` (recommended):
+
+```bash
+scripts/gen-dev-cert-mkcert.sh 192.168.1.10 localhost
 ```
 
 ## hub-cli keys (TUI)

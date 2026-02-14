@@ -13,7 +13,8 @@ use actix_web::dev::{Service, ServiceRequest, ServiceResponse};
 use actix_web::Error;
 use futures_util::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
+use rustls::ServerConfig as RustlsConfig;
 use crossbeam_channel::unbounded;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::time::Duration;
@@ -39,7 +40,8 @@ use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderStat
 pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> Result<()> {
     let cfg = load_config(args.config.as_ref())?;
     let bind = resolve_bind(args.bind, &cfg)?;
-    let public_base_url = config::public_base_url_from_config(&cfg, bind)?;
+    let tls_config = resolve_tls_config(&args, &cfg)?;
+    let public_base_url = config::public_base_url_from_config(&cfg, bind, tls_config.is_some())?;
     let media_dir = resolve_media_dir(args.media_dir, &cfg)?;
     tracing::info!(
         bind = %bind,
@@ -115,7 +117,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     spawn_discovered_health_watcher(state.clone());
     spawn_bridge_device_streams_for_config(state.clone());
     spawn_bridge_status_streams_for_config(state.clone());
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173")
             .allowed_origin("http://127.0.0.1:5173")
@@ -201,10 +203,19 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         }
 
         app
-    })
-    .bind(bind)?
-    .run()
-    .await?;
+    });
+
+    if let Some(tls_config) = tls_config {
+        server
+            .bind_rustls_0_22(bind, tls_config)?
+            .run()
+            .await?;
+    } else {
+        server
+            .bind(bind)?
+            .run()
+            .await?;
+    }
 
     Ok(())
 }
@@ -427,6 +438,46 @@ fn resolve_bind(
         None => config::bind_from_config(cfg)?
             .unwrap_or_else(|| "0.0.0.0:8080".parse().expect("default bind")),
     })
+}
+
+fn resolve_tls_config(args: &crate::Args, cfg: &config::ServerConfig) -> Result<Option<RustlsConfig>> {
+    let cert_path = args
+        .tls_cert
+        .as_ref()
+        .map(|p| p.to_path_buf())
+        .or_else(|| cfg.tls_cert.as_ref().map(PathBuf::from));
+    let key_path = args
+        .tls_key
+        .as_ref()
+        .map(|p| p.to_path_buf())
+        .or_else(|| cfg.tls_key.as_ref().map(PathBuf::from));
+
+    let (Some(cert_path), Some(key_path)) = (cert_path, key_path) else {
+        return Ok(None);
+    };
+
+    let cert_file = std::fs::File::open(&cert_path)
+        .with_context(|| format!("open tls cert {:?}", cert_path))?;
+    let mut cert_reader = std::io::BufReader::new(cert_file);
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| format!("read tls cert {:?}", cert_path))?;
+    if certs.is_empty() {
+        return Err(anyhow::anyhow!("tls cert is empty: {:?}", cert_path));
+    }
+
+    let key_file = std::fs::File::open(&key_path)
+        .with_context(|| format!("open tls key {:?}", key_path))?;
+    let mut key_reader = std::io::BufReader::new(key_file);
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .with_context(|| format!("read tls key {:?}", key_path))?
+        .ok_or_else(|| anyhow::anyhow!("tls key is empty: {:?}", key_path))?;
+
+    let config = RustlsConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|err| anyhow::anyhow!("invalid tls config: {err}"))?;
+    Ok(Some(config))
 }
 
 /// Resolve the media directory from args + config.

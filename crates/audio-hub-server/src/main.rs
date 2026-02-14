@@ -60,6 +60,14 @@ pub(crate) struct Args {
     /// Optional server config file (TOML)
     #[arg(long)]
     config: Option<PathBuf>,
+
+    /// TLS certificate path (PEM)
+    #[arg(long)]
+    tls_cert: Option<PathBuf>,
+
+    /// TLS private key path (PEM)
+    #[arg(long)]
+    tls_key: Option<PathBuf>,
 }
 
 #[actix_web::main]

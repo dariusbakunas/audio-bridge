@@ -32,6 +32,10 @@ pub struct ServerConfig {
     pub local_device: Option<String>,
     /// MusicBrainz enrichment settings.
     pub musicbrainz: Option<MusicBrainzConfig>,
+    /// Optional TLS certificate path (PEM).
+    pub tls_cert: Option<String>,
+    /// Optional TLS private key path (PEM).
+    pub tls_key: Option<String>,
 }
 
 /// Bridge config from TOML.
@@ -124,6 +128,7 @@ pub fn bind_from_config(cfg: &ServerConfig) -> Result<Option<std::net::SocketAdd
 pub fn public_base_url_from_config(
     cfg: &ServerConfig,
     bind: std::net::SocketAddr,
+    tls_enabled: bool,
 ) -> Result<String> {
     if let Some(url) = cfg.public_base_url.as_ref() {
         return Ok(url.trim_end_matches('/').to_string());
@@ -135,7 +140,8 @@ pub fn public_base_url_from_config(
         ));
     }
 
-    Ok(format!("http://{}", bind))
+    let scheme = if tls_enabled { "https" } else { "http" };
+    Ok(format!("{}://{}", scheme, bind))
 }
 
 #[cfg(test)]
@@ -155,9 +161,11 @@ mod tests {
             local_name: None,
             local_device: None,
             musicbrainz: None,
+            tls_cert: None,
+            tls_key: None,
         };
         let bind: std::net::SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let url = public_base_url_from_config(&cfg, bind).unwrap();
+        let url = public_base_url_from_config(&cfg, bind, false).unwrap();
         assert_eq!(url, "http://example.com");
     }
 
@@ -174,9 +182,11 @@ mod tests {
             local_name: None,
             local_device: None,
             musicbrainz: None,
+            tls_cert: None,
+            tls_key: None,
         };
         let bind: std::net::SocketAddr = "0.0.0.0:8080".parse().unwrap();
-        assert!(public_base_url_from_config(&cfg, bind).is_err());
+        assert!(public_base_url_from_config(&cfg, bind, false).is_err());
     }
 
     #[test]
@@ -192,6 +202,8 @@ mod tests {
             local_name: None,
             local_device: None,
             musicbrainz: None,
+            tls_cert: None,
+            tls_key: None,
         };
         let addr = bind_from_config(&cfg).unwrap().unwrap();
         assert_eq!(addr, "127.0.0.1:9000".parse().unwrap());

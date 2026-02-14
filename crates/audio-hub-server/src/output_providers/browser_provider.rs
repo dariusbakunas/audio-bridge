@@ -228,7 +228,10 @@ impl OutputProvider for BrowserProvider {
             state.playback.manager.status().clone(),
             state.playback.manager.queue_service().queue().clone(),
             state.events.clone(),
-            state.providers.bridge.public_base_url.clone(),
+            session
+                .base_url
+                .clone()
+                .unwrap_or_else(|| state.providers.bridge.public_base_url.clone()),
         );
 
         if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
