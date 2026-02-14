@@ -5,13 +5,15 @@ permissions:
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - '**[0-9]+.[0-9]+.[0-9]+*'
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
 
 jobs:
   build-tauri:
     name: "tauri-release (${{ matrix.platform }})"
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -48,6 +50,28 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web-ui
         run: npm ci
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            ref="${{ github.event.workflow_run.ref }}"
+            tag="${ref#refs/tags/}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Resolve release id
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_id=$(gh release view "${{ steps.tag.outputs.tag }}" --json id -q .id)
+          if [ -z "$release_id" ]; then
+            echo "Release not found for tag ${{ steps.tag.outputs.tag }}. Run cargo-dist release first."
+            exit 1
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@action-v0.6.0
         env:
@@ -55,7 +79,6 @@ jobs:
         with:
           projectPath: "web-ui"
           tauriScript: "npm run tauri"
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          releaseId: ${{ steps.release.outputs.release_id }}
           releaseDraft: false
           args: ${{ matrix.args }}

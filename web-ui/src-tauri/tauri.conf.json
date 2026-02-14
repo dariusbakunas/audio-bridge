@@ -15,11 +15,21 @@
         "width": 1280,
         "height": 800
       }
-    ]
+    ],
+    "security": {
+      "csp": "default-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:; img-src 'self' data: blob: http: https:; media-src 'self' data: blob: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval';"
+    }
   }
   ,
   "bundle": {
     "active": true,
+    "macOS": {
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
     "targets": [
       "dmg",
       "app",
