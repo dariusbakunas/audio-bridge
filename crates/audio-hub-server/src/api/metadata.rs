@@ -73,7 +73,10 @@ pub struct TrackResolveQuery {
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct TrackMetadataQuery {
-    pub path: String,
+    #[serde(default)]
+    pub track_id: Option<i64>,
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
@@ -122,7 +125,14 @@ pub async fn tracks_metadata(
     query: web::Query<TrackMetadataQuery>,
 ) -> impl Responder {
     let metadata_service = state.metadata_service();
-    match metadata_service.track_record_by_path(&query.path) {
+    let record = if let Some(track_id) = query.track_id {
+        metadata_service.track_record_by_id(track_id)
+    } else if let Some(path) = query.path.as_deref() {
+        metadata_service.track_record_by_path(path)
+    } else {
+        return HttpResponse::BadRequest().body("track_id or path is required");
+    };
+    match record {
         Ok(Some(record)) => HttpResponse::Ok().json(TrackMetadataResponse {
             path: record.path,
             title: record.title,
@@ -157,7 +167,18 @@ pub async fn tracks_metadata_update(
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &request.path) {
+    let path = if let Some(track_id) = request.track_id {
+        match state.metadata.db.track_path_for_id(track_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else if let Some(path) = request.path.as_ref() {
+        path.clone()
+    } else {
+        return HttpResponse::BadRequest().body("track_id or path is required");
+    };
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
         Err(response) => return response,
     };
@@ -197,7 +218,7 @@ pub async fn tracks_metadata_update(
             disc_number,
         },
     ) {
-        tracing::warn!(error = %err, path = %request.path, "track metadata update failed");
+        tracing::warn!(error = %err, path = %path, "track metadata update failed");
         return HttpResponse::InternalServerError().body(err.to_string());
     }
 

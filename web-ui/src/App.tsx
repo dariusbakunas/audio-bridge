@@ -62,7 +62,8 @@ type MatchTarget = {
 };
 
 type EditTarget = {
-  path: string;
+  path?: string;
+  trackId?: number;
   label: string;
   defaults: {
     title?: string | null;
@@ -493,6 +494,7 @@ export default function App() {
       const label = artist ? `${title} — ${artist}` : title;
       setEditTarget({
         path,
+        trackId: track?.id,
         label,
         defaults: {
           title,
@@ -1419,6 +1421,7 @@ export default function App() {
 
       <TrackMetadataModal
         open={Boolean(editTarget)}
+        trackId={editTarget?.trackId ?? null}
         trackPath={editTarget?.path ?? null}
         targetLabel={editLabel}
         defaults={editDefaults}

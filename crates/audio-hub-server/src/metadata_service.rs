@@ -165,6 +165,12 @@ impl MetadataService {
             .map_err(|err| err.to_string())
     }
 
+    pub fn track_record_by_id(&self, track_id: i64) -> Result<Option<TrackRecord>, String> {
+        self.db
+            .track_record_by_id(track_id)
+            .map_err(|err| err.to_string())
+    }
+
     pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>, String> {
         self.db
             .album_summary_by_id(album_id)

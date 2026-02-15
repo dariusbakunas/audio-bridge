@@ -199,8 +199,12 @@ pub struct TrackMetadataResponse {
 /// Update request for writing tag metadata to a track file.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct TrackMetadataUpdateRequest {
+    /// Optional track id from the metadata DB.
+    #[serde(default)]
+    pub track_id: Option<i64>,
     /// Absolute track path.
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]

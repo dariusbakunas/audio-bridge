@@ -5,7 +5,8 @@ import Modal from "./Modal";
 
 interface TrackMetadataModalProps {
   open: boolean;
-  trackPath: string | null;
+  trackId?: number | null;
+  trackPath?: string | null;
   targetLabel: string;
   defaults: {
     title?: string | null;
@@ -31,6 +32,7 @@ function parseOptionalInt(value: string, allowZero = false): number | undefined 
 
 export default function TrackMetadataModal({
   open,
+  trackId,
   trackPath,
   targetLabel,
   defaults,
@@ -64,12 +66,15 @@ export default function TrackMetadataModal({
     setDiscNumber(defaults.discNumber ? String(defaults.discNumber) : "");
     setError(null);
 
-    if (!trackPath) {
+    if (!trackId && !trackPath) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchJson<TrackMetadataResponse>(`/tracks/metadata?path=${encodeURIComponent(trackPath)}`)
+    const query = trackId
+      ? `track_id=${trackId}`
+      : `path=${encodeURIComponent(trackPath ?? "")}`;
+    fetchJson<TrackMetadataResponse>(`/tracks/metadata?${query}`)
       .then((response) => {
         if (!active || !response) return;
         setTitle(response.title ?? "");
@@ -93,6 +98,7 @@ export default function TrackMetadataModal({
     };
   }, [
     open,
+    trackId,
     trackPath,
     defaults.title,
     defaults.artist,
@@ -104,7 +110,7 @@ export default function TrackMetadataModal({
   ]);
 
   const handleSave = async () => {
-    if (!trackPath) return;
+    if (!trackId && !trackPath) return;
     const yearValue = parseOptionalInt(year);
     const trackValue = parseOptionalInt(trackNumber);
     const discValue = parseOptionalInt(discNumber);
@@ -121,7 +127,9 @@ export default function TrackMetadataModal({
       return;
     }
 
-    const payload: Record<string, string | number> = { path: trackPath };
+    const payload: Record<string, string | number> = trackId
+      ? { track_id: trackId }
+      : { path: trackPath ?? "" };
     const titleValue = title.trim();
     const artistValue = artist.trim();
     const albumValue = album.trim();

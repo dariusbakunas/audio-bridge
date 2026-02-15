@@ -577,6 +577,55 @@ impl MetadataDb {
             .context("fetch track record")
     }
 
+    pub fn track_record_by_id(&self, track_id: i64) -> Result<Option<TrackRecord>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                r#"
+                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title,
+                       t.track_number, t.disc_number, al.year, t.duration_ms,
+                       t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists aa ON aa.id = al.artist_id
+                WHERE t.id = ?1
+                "#,
+                params![track_id],
+                |row| {
+                    Ok(TrackRecord {
+                        path: row.get(0)?,
+                        file_name: row.get(1)?,
+                        title: row.get(2)?,
+                        artist: row.get(3)?,
+                        album_artist: row.get(4)?,
+                        album: row.get(5)?,
+                        track_number: row
+                            .get::<_, Option<i64>>(6)?
+                            .map(|v| v as u32),
+                        disc_number: row
+                            .get::<_, Option<i64>>(7)?
+                            .map(|v| v as u32),
+                        year: row.get(8)?,
+                        duration_ms: row
+                            .get::<_, Option<i64>>(9)?
+                            .map(|v| v as u64),
+                        sample_rate: row
+                            .get::<_, Option<i64>>(10)?
+                            .map(|v| v as u32),
+                        bit_depth: row
+                            .get::<_, Option<i64>>(11)?
+                            .map(|v| v as u32),
+                        format: row.get(12)?,
+                        mtime_ms: row.get(13)?,
+                        size_bytes: row.get(14)?,
+                    })
+                },
+            )
+            .optional()
+            .context("fetch track record")
+    }
+
     pub fn track_id_for_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn
