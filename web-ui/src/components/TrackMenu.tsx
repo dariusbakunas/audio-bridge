@@ -1,5 +1,6 @@
 import { CSSProperties } from "react";
 import type { MouseEvent } from "react";
+import { MoreVertical } from "lucide-react";
 
 interface TrackMenuProps {
   open: boolean;
@@ -38,7 +39,7 @@ export default function TrackMenu({
         }}
         data-track-menu="true"
       >
-        <span className="track-menu-dots" aria-hidden="true"></span>
+        <MoreVertical className="icon" aria-hidden="true" />
       </button>
       {open ? (
         <div

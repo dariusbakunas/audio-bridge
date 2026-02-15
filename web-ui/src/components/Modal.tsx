@@ -1,4 +1,5 @@
 import { ReactNode, useEffect } from "react";
+import { X } from "lucide-react";
 
 interface ModalProps {
   open: boolean;
@@ -27,8 +28,8 @@ export default function Modal({ open, title, onClose, headerRight, children }: M
           <span>{title}</span>
           <div className="card-actions">
             {headerRight}
-            <button className="btn ghost small" onClick={onClose}>
-              Close
+            <button className="icon-btn small" onClick={onClose} aria-label="Close">
+              <X className="icon" aria-hidden="true" />
             </button>
           </div>
         </div>

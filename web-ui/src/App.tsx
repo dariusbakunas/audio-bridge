@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
 import { toast, ToastContainer } from "react-toastify";
 import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  Grid3x3,
+  Library,
+  List,
+  Radio,
+  Search,
+  Settings
+} from "lucide-react";
+import {
   apiUrl,
   apiWsUrl,
   fetchJson,
@@ -109,7 +120,7 @@ function albumPlaceholder(title?: string | null, artist?: string | null): string
       .slice(0, 2)
       .toUpperCase();
   const label = initials || "NA";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#50555b"/><stop offset="100%" stop-color="#3f444a"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#ffffff" text-anchor="start">${label}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1a1d23"/><stop offset="100%" stop-color="#0f1215"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#d4965f" text-anchor="start">${label}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -238,6 +249,8 @@ export default function App() {
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumsLoading, setAlbumsLoading] = useState<boolean>(false);
   const [albumsError, setAlbumsError] = useState<string | null>(null);
+  const [albumSearch, setAlbumSearch] = useState<string>("");
+  const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
   const [albumViewId, setAlbumViewId] = useState<number | null>(null);
   const [albumTracks, setAlbumTracks] = useState<TrackSummary[]>([]);
   const [albumTracksLoading, setAlbumTracksLoading] = useState<boolean>(false);
@@ -343,6 +356,16 @@ export default function App() {
       () => albums.find((album) => album.id === albumViewId) ?? null,
       [albums, albumViewId]
   );
+  const filteredAlbums = useMemo(() => {
+    const query = albumSearch.trim().toLowerCase();
+    if (!query) return albums;
+    return albums.filter((album) => {
+      const title = album.title?.toLowerCase() ?? "";
+      const artist = album.artist?.toLowerCase() ?? "";
+      const year = album.year ? String(album.year) : "";
+      return title.includes(query) || artist.includes(query) || year.includes(query);
+    });
+  }, [albums, albumSearch]);
   const heuristicAlbumId = useMemo(() => {
     const albumKey = normalizeMatch(status?.album);
     if (!albumKey) return null;
@@ -1197,6 +1220,9 @@ export default function App() {
       <div className="layout">
         <aside className="side-nav">
           <div className="nav-brand">
+            <div className="nav-mark">
+              <Radio className="nav-mark-icon" aria-hidden="true" />
+            </div>
             <div>
               <div className="nav-title">Audio Hub</div>
               <div className="nav-subtitle">Lossless control with a live signal view.</div>
@@ -1212,14 +1238,7 @@ export default function App() {
                 })
               }
             >
-              <span className="nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path
-                    d="M4 4h16v12H4zM7 8h10v2H7zm0 4h6v2H7zM8 18h8v2H8z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
+              <Library className="nav-icon" aria-hidden="true" />
               <span>Albums</span>
             </button>
           </div>
@@ -1234,14 +1253,7 @@ export default function App() {
                 })
               }
             >
-              <span className="nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path
-                    d="M12 8.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm9.25 3.25c0-.5-.03-1-.1-1.48l2.02-1.57a.75.75 0 0 0 .17-.96l-1.92-3.32a.75.75 0 0 0-.91-.34l-2.38.96a9.5 9.5 0 0 0-2.56-1.48l-.36-2.52A.75.75 0 0 0 14.41 1h-3.82a.75.75 0 0 0-.74.64l-.36 2.52a9.5 9.5 0 0 0-2.56 1.48l-2.38-.96a.75.75 0 0 0-.91.34L1.72 8.34a.75.75 0 0 0 .17.96l2.02 1.57c-.07.48-.1.98-.1 1.48s.03 1 .1 1.48l-2.02 1.57a.75.75 0 0 0-.17.96l1.92 3.32a.75.75 0 0 0 .91.34l2.38-.96a9.5 9.5 0 0 0 2.56 1.48l.36 2.52a.75.75 0 0 0 .74.64h3.82a.75.75 0 0 0 .74-.64l.36-2.52a9.5 9.5 0 0 0 2.56-1.48l2.38.96a.75.75 0 0 0 .91-.34l1.92-3.32a.75.75 0 0 0-.17-.96l-2.02-1.57c.07-.48.1-.98.1-1.48Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
+              <Settings className="nav-icon" aria-hidden="true" />
               <span>Settings</span>
             </button>
           </div>
@@ -1259,12 +1271,7 @@ export default function App() {
                   title="Back"
                   type="button"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M15.5 5.5 9 12l6.5 6.5-1.5 1.5L6 12l8-8 1.5 1.5Z"
-                      fill="currentColor"
-                    />
-                  </svg>
+                  <ChevronLeft className="icon" aria-hidden="true" />
                 </button>
                 {canGoForward ? (
                   <button
@@ -1274,17 +1281,47 @@ export default function App() {
                     title="Forward"
                     type="button"
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                        d="m8.5 5.5 1.5-1.5 8 8-8 8-1.5-1.5L15 12 8.5 5.5Z"
-                        fill="currentColor"
-                      />
-                    </svg>
+                    <ChevronRight className="icon" aria-hidden="true" />
                   </button>
                 ) : null}
               </div>
               {viewTitle ? <h1>{viewTitle}</h1> : <span />}
               <div className="view-header-actions">
+                {!settingsOpen && albumViewId === null ? (
+                  <div className="header-tools">
+                    <div className="header-search">
+                      <Search className="icon" aria-hidden="true" />
+                      <input
+                        className="header-search-input"
+                        type="search"
+                        placeholder="Search albums, artists..."
+                        value={albumSearch}
+                        onChange={(event) => setAlbumSearch(event.target.value)}
+                        aria-label="Search albums"
+                      />
+                    </div>
+                    <div className="view-toggle" role="tablist" aria-label="Album view">
+                      <button
+                        type="button"
+                        className={`view-toggle-btn ${albumViewMode === "grid" ? "active" : ""}`}
+                        onClick={() => setAlbumViewMode("grid")}
+                        aria-pressed={albumViewMode === "grid"}
+                        title="Grid view"
+                      >
+                        <Grid3x3 className="icon" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={`view-toggle-btn ${albumViewMode === "list" ? "active" : ""}`}
+                        onClick={() => setAlbumViewMode("list")}
+                        aria-pressed={albumViewMode === "list"}
+                        title="List view"
+                      >
+                        <List className="icon" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <button
                   className={`icon-btn notification-btn ${notificationsOpen ? "active" : ""}`}
                   onClick={toggleNotifications}
@@ -1292,12 +1329,7 @@ export default function App() {
                   title="Notifications"
                   type="button"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.42l-1.34 2.68A1 1 0 0 0 6.04 16h11.92a1 1 0 0 0 .88-2.4L17.5 10.92V8.5A5.5 5.5 0 0 0 12 3Zm0 18a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 21Z"
-                      fill="currentColor"
-                    />
-                  </svg>
+                  <Bell className="icon" aria-hidden="true" />
                   {unreadCount > 0 ? (
                     <span className="notification-badge">
                       {unreadCount > 99 ? "99+" : unreadCount}
@@ -1311,7 +1343,7 @@ export default function App() {
           {!settingsOpen && albumViewId === null ? (
             <section className="grid">
               <AlbumsView
-                albums={albums}
+                albums={filteredAlbums}
                 loading={albumsLoading}
                 error={albumsError}
                 placeholder={albumPlaceholder}
@@ -1319,6 +1351,7 @@ export default function App() {
                 activeAlbumId={activeAlbumId}
                 isPlaying={isPlaying}
                 isPaused={isPaused}
+                viewMode={albumViewMode}
                 onSelectAlbum={(id) =>
                   navigateTo({
                     view: "album",
@@ -1447,6 +1480,7 @@ export default function App() {
           canGoPrevious={Boolean(status?.has_previous)}
           playButtonTitle={playButtonTitle}
           queueHasItems={Boolean(activeOutputId) && queue.length > 0}
+          queueOpen={queueOpen}
           activeOutput={activeOutput}
           activeAlbumId={activeAlbumId}
           uiBuildId={uiBuildId}
@@ -1463,7 +1497,7 @@ export default function App() {
           onPrevious={handlePreviousMedia}
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}
-          onQueueOpen={() => setQueueOpen(true)}
+          onQueueOpen={() => setQueueOpen((value) => !value)}
           onSelectOutput={() => setOutputsOpen(true)}
         />
       ) : null}

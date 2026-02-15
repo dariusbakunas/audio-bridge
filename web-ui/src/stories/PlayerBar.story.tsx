@@ -39,6 +39,7 @@ export default {
     showSignalPath: { control: "boolean" },
     canTogglePlayback: { control: "boolean" },
     queueHasItems: { control: "boolean" },
+    queueOpen: { control: "boolean" },
     activeAlbumId: { control: { type: "number", min: 0 } },
     hasOutput: { control: "boolean" },
     hasStatus: { control: "boolean" },
@@ -52,6 +53,7 @@ type PlayerBarArgs = {
   showSignalPath: boolean;
   canTogglePlayback: boolean;
   queueHasItems: boolean;
+  queueOpen: boolean;
   activeAlbumId: number;
   hasOutput: boolean;
   hasStatus: boolean;
@@ -79,6 +81,7 @@ const Template = (args: PlayerBarArgs) => (
       canTogglePlayback={args.canTogglePlayback}
       playButtonTitle={args.playButtonTitle || undefined}
       queueHasItems={args.queueHasItems}
+      queueOpen={args.queueOpen}
       activeOutput={args.hasOutput ? activeOutput : null}
       activeAlbumId={args.activeAlbumId > 0 ? args.activeAlbumId : null}
       uiBuildId="dev"
@@ -86,6 +89,7 @@ const Template = (args: PlayerBarArgs) => (
       onCoverError={action("cover-error")}
       onAlbumNavigate={action("navigate-album")}
       onPrimaryAction={action("primary-action")}
+      onPrevious={action("previous")}
       onNext={action("next")}
       onSignalOpen={action("signal-open")}
       onQueueOpen={action("queue-open")}
@@ -99,6 +103,7 @@ Playing.args = {
   showSignalPath: true,
   canTogglePlayback: true,
   queueHasItems: true,
+  queueOpen: false,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
@@ -112,6 +117,7 @@ Paused.args = {
   showSignalPath: false,
   canTogglePlayback: true,
   queueHasItems: true,
+  queueOpen: false,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
@@ -125,6 +131,7 @@ NothingPlaying.args = {
   showSignalPath: false,
   canTogglePlayback: false,
   queueHasItems: false,
+  queueOpen: false,
   activeAlbumId: 0,
   hasOutput: true,
   hasStatus: false,
@@ -138,6 +145,7 @@ NoNextTrack.args = {
   showSignalPath: true,
   canTogglePlayback: true,
   queueHasItems: false,
+  queueOpen: false,
   activeAlbumId: 1,
   hasOutput: true,
   hasStatus: true,
@@ -151,6 +159,7 @@ NoOutputSelected.args = {
   showSignalPath: true,
   canTogglePlayback: false,
   queueHasItems: false,
+  queueOpen: false,
   activeAlbumId: 1,
   hasOutput: false,
   hasStatus: true,

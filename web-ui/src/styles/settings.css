@@ -12,28 +12,27 @@
 
 .settings-tabs {
   display: flex;
-  gap: 12px;
-  padding: 8px;
-  border-radius: 14px;
-  background: var(--bg-accent);
-  border: 1px solid var(--border);
+  gap: 18px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--border);
   width: fit-content;
 }
 
 .settings-tab {
   border: none;
   background: transparent;
-  padding: 8px 14px;
-  border-radius: 999px;
+  padding: 6px 2px 8px;
+  border-bottom: 2px solid transparent;
   font-weight: 600;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--muted-2);
 }
 
 .settings-tab.active {
-  background: var(--card);
-  color: var(--ink);
-  box-shadow: var(--shadow);
+  background: transparent;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  box-shadow: none;
 }
 
 .settings-header {
@@ -60,8 +59,8 @@
   max-height: 320px;
   overflow: auto;
   padding: 14px;
-  border-radius: 16px;
-  background: var(--bg-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
 }
 
@@ -72,10 +71,10 @@
   max-height: 280px;
   overflow: auto;
   padding: 14px;
-  border-radius: 16px;
-  background: var(--bg-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.78rem;
 }
 
@@ -97,11 +96,11 @@
 
 .log-level.log-warn,
 .log-level.log-warning {
-  color: #d97706;
+  color: #fbbf24;
 }
 
 .log-level.log-error {
-  color: #d64545;
+  color: #ef4444;
 }
 
 .log-level.log-debug {
@@ -139,9 +138,9 @@
 }
 
 .settings-input {
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--card);
+  background: var(--bg-overlay);
   color: var(--ink);
   padding: 10px 12px;
   font-size: 0.95rem;
@@ -149,8 +148,8 @@
 }
 
 .settings-input:focus {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-2) 20%, transparent);
-  border-color: color-mix(in srgb, var(--accent-2) 60%, var(--border));
+  box-shadow: 0 0 0 2px rgba(212, 150, 95, 0.25);
+  border-color: var(--accent);
 }
 
 .settings-row {

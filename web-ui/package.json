@@ -14,6 +14,7 @@
     "storybook:build": "storybook build"
   },
   "dependencies": {
+    "lucide-react": "^0.469.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-toastify": "^10.0.5"

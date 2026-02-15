@@ -1,4 +1,5 @@
 import { OutputInfo, StatusResponse } from "../types";
+import { Activity, List, Volume2 } from "lucide-react";
 import PlayerControls from "./PlayerControls";
 
 interface PlayerBarProps {
@@ -11,6 +12,7 @@ interface PlayerBarProps {
   canGoPrevious: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
+  queueOpen: boolean;
   activeOutput: OutputInfo | null;
   activeAlbumId: number | null;
   uiBuildId: string;
@@ -35,6 +37,7 @@ export default function PlayerBar({
   canGoPrevious,
   playButtonTitle,
   queueHasItems,
+  queueOpen,
   activeOutput,
   activeAlbumId,
   uiBuildId,
@@ -51,6 +54,27 @@ export default function PlayerBar({
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   return (
     <div className="player-bar">
+      <div className="player-progress">
+        <div className="player-progress-track" />
+        <div
+          className="player-progress-fill"
+          style={{
+            width:
+              status?.duration_ms && status?.elapsed_ms
+                ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
+                : "0%"
+          }}
+        />
+        <div
+          className="player-progress-handle"
+          style={{
+            left:
+              status?.duration_ms && status?.elapsed_ms
+                ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
+                : "0%"
+          }}
+        />
+      </div>
       <div className="player-left">
         {status?.title || status?.now_playing ? (
           activeAlbumId ? (
@@ -105,45 +129,45 @@ export default function PlayerBar({
       </div>
       <div className="player-middle">
         <PlayerControls
-          showSignalPath={showSignalPath}
           canTogglePlayback={canTogglePlayback}
           canGoPrevious={canGoPrevious}
           isPaused={showPlayIcon}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasItems}
+          elapsedLabel={formatMs(status?.elapsed_ms)}
+          durationLabel={formatMs(status?.duration_ms)}
           onPrimaryAction={onPrimaryAction}
           onPrevious={onPrevious}
           onNext={onNext}
-          onSignalOpen={onSignalOpen}
-          onQueueOpen={onQueueOpen}
         />
-        <div className="progress">
-          <div className="progress-track"></div>
-          <div
-            className="progress-fill"
-            style={{
-              width:
-                status?.duration_ms && status?.elapsed_ms
-                  ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
-                  : "0%"
-            }}
-          ></div>
-        </div>
-        <div className="meta-row">
-          <span>
-            {formatMs(status?.elapsed_ms)} / {formatMs(status?.duration_ms)}
-          </span>
-          <span>{status?.format ?? "—"}</span>
-        </div>
       </div>
       <div className="player-right">
-        <div className="output-chip">
-          <span className="muted small">Output</span>
-          <span>{activeOutput?.name ?? "No output"}</span>
+        <div className="player-actions">
+          <button
+            className={`player-action player-action-signal${showSignalPath ? "" : " disabled"}`}
+            onClick={onSignalOpen}
+            disabled={!showSignalPath}
+            aria-label="Signal details"
+          >
+            <Activity className="icon" aria-hidden="true" />
+            <span className="player-action-label">
+              {status?.sample_rate && status?.source_bit_depth
+                ? `${Math.round(status.sample_rate / 1000)}k/${status.source_bit_depth}`
+                : "Signal"}
+            </span>
+          </button>
+          <button className="player-action player-action-output" onClick={onSelectOutput}>
+            <Volume2 className="icon" aria-hidden="true" />
+            <span className="player-action-label">{activeOutput?.name ?? "Select output"}</span>
+          </button>
+          <button
+            className={`icon-btn queue-btn${queueOpen ? " active" : ""}`}
+            aria-label="Queue"
+            onClick={onQueueOpen}
+          >
+            <List className="icon" aria-hidden="true" />
+          </button>
         </div>
-        <button className="btn ghost small" onClick={onSelectOutput}>
-          Select output
-        </button>
         <div className="muted small build-footer">UI build: {uiBuildId}</div>
       </div>
     </div>

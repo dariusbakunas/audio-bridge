@@ -26,21 +26,32 @@ export default function OutputsModal({
       headerRight={<span className="pill">{outputs.length} devices</span>}
     >
       <div className="output-list">
-        {outputs.map((output) => (
-          <button
-            key={output.id}
-            className={`output-row ${output.id === activeOutputId ? "active" : ""}`}
-            onClick={() => onSelectOutput(output.id)}
-          >
-            <div>
-              <div className="output-title">{output.name}</div>
-              <div className="muted small">
-                {output.provider_name ?? output.kind} - {output.state} - {formatRateRange(output)}
+        {outputs.map((output) => {
+          const isActive = output.id === activeOutputId;
+          const state = output.state?.toLowerCase() ?? "unknown";
+          return (
+            <button
+              key={output.id}
+              className={`output-row ${isActive ? "active" : ""}`}
+              onClick={() => onSelectOutput(output.id)}
+            >
+              <div className="output-main">
+                <div className="output-title">{output.name}</div>
+                <div className="muted small">
+                  {output.provider_name ?? output.kind} • {formatRateRange(output)}
+                </div>
+                <div className="muted small">{output.id}</div>
               </div>
-            </div>
-            <span className="chip">{output.id === activeOutputId ? "active" : "select"}</span>
-          </button>
-        ))}
+              <div className="output-meta">
+                <span className={`output-status status-${state}`}>
+                  <span className="status-dot" aria-hidden="true" />
+                  {output.state}
+                </span>
+                <span className="chip">{isActive ? "active" : "select"}</span>
+              </div>
+            </button>
+          );
+        })}
         {outputs.length === 0 ? (
           <p className="muted">No outputs reported. Check provider discovery.</p>
         ) : null}

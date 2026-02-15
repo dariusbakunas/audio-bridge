@@ -9,20 +9,26 @@
   font-size: 0.75rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", monospace;
 }
 
 .signal-value {
   margin-top: 4px;
   font-weight: 600;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .pill {
   font-size: 0.75rem;
   padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--bg-accent);
-  color: var(--muted);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--muted-2);
+  border: 1px solid var(--border);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .chip {
@@ -30,8 +36,10 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(18, 18, 18, 0.08);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  font-family: "JetBrains Mono", monospace;
 }
 
 .muted {
@@ -39,7 +47,7 @@
 }
 
 .mono {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.85rem;
 }
 
@@ -51,4 +59,3 @@
   margin-top: 12px;
   text-align: right;
 }
-

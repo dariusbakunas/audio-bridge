@@ -1,5 +1,6 @@
 import { QueueItem } from "../types";
 import QueueList from "./QueueList";
+import { X } from "lucide-react";
 
 interface QueueModalProps {
   open: boolean;
@@ -33,8 +34,8 @@ export default function QueueModal({
           <span>Queue</span>
           <div className="card-actions">
             <span className="pill">{items.length} items</span>
-            <button className="btn ghost small" onClick={onClose}>
-              Close
+            <button className="icon-btn small" onClick={onClose} aria-label="Close">
+              <X className="icon" aria-hidden="true" />
             </button>
           </div>
         </div>

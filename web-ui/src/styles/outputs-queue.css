@@ -1,36 +1,146 @@
 .output-row {
-  background: rgba(18, 18, 18, 0.04);
-  border-radius: 16px;
-  padding: 12px 14px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-strong);
   cursor: pointer;
   text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  gap: 16px;
+}
+
+.output-row:hover {
+  border-color: var(--accent);
+  background: var(--bg-overlay);
 }
 
 .output-row.active {
-  border-color: rgba(255, 107, 53, 0.6);
-  background: rgba(255, 107, 53, 0.08);
+  border-color: var(--accent);
+  background: var(--bg-overlay);
+}
+
+.output-row.active .output-title {
+  color: var(--accent);
 }
 
 .output-title {
   font-weight: 600;
 }
 
+.output-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.output-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.output-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-2);
+}
+
+.output-status .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-2);
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.15);
+}
+
+.output-status.status-active,
+.output-status.status-online {
+  color: #4ade80;
+}
+
+.output-status.status-active .status-dot,
+.output-status.status-online .status-dot {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.2);
+}
+
+.output-status.status-idle {
+  color: var(--muted-2);
+}
+
+.output-status.status-error,
+.output-status.status-offline {
+  color: #ef4444;
+}
+
+.output-status.status-error .status-dot,
+.output-status.status-offline .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+.output-row .muted.small {
+  font-family: "JetBrains Mono", monospace;
+  color: var(--muted-2);
+}
+
+.output-row .chip {
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--muted-2);
+}
+
+.output-row.active .chip {
+  background: var(--accent);
+  color: #0a0c0f;
+  border-color: var(--accent);
+}
+
+.output-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .queue-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
   align-items: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  cursor: pointer;
 }
 
-.queue-row:last-child {
-  border-bottom: none;
+.queue-row:hover {
+  border-color: var(--accent);
+  background: var(--bg-overlay);
 }
+
 
 .queue-main {
   display: flex;
@@ -50,7 +160,7 @@
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(18, 18, 18, 0.45);
+  background: rgba(10, 12, 15, 0.45);
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
@@ -67,7 +177,9 @@
   height: 36px;
   border-radius: 0;
   object-fit: cover;
-  background: var(--bg-accent);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 .queue-play {
@@ -76,10 +188,10 @@
   left: 50%;
   width: 22px;
   height: 22px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
   background: transparent;
-  color: #ffffff;
+  color: var(--ink);
   transform: translate(-50%, -50%);
   opacity: 0;
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -87,6 +199,19 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.queue-play:hover:not(:disabled) {
+  background: var(--accent);
+  color: #0a0c0f;
+  border-color: var(--accent);
+}
+
+.queue-play .icon {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.8;
 }
 
 .queue-play svg {
@@ -113,8 +238,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.8rem;
   gap: 4px;
+  color: var(--muted-2);
 }
-

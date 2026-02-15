@@ -1,6 +1,7 @@
 import { AlbumSummary, TrackSummary } from "../types";
 import hiResBadge from "../assets/hi-res.png";
 import TrackMenu from "./TrackMenu";
+import { Heart, Pause, Pencil, Play, Share2 } from "lucide-react";
 
 interface AlbumDetailViewProps {
   album: AlbumSummary | null;
@@ -55,10 +56,11 @@ export default function AlbumDetailView({
 }: AlbumDetailViewProps) {
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
+  const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
   return (
     <section className="album-view">
-      <div className="card album-detail">
-        <div className="album-detail-top">
+      <div className="album-hero">
+        <div className="album-hero-inner">
           <div className="album-detail-left">
             <div className="album-cover-frame large">
               <img
@@ -70,33 +72,11 @@ export default function AlbumDetailView({
                 }
                 alt={album?.title ?? "Album art"}
               />
-              <button
-                className="album-play large"
-                type="button"
-                onClick={() => {
-                  if (isActive) {
-                    onPause();
-                    return;
-                  }
-                  onPlayAlbum();
-                }}
-                disabled={!canPlay}
-                aria-label={isActive ? (isPaused ? "Resume playback" : "Pause playback") : "Play album"}
-                title={isActive ? (isPaused ? "Resume" : "Pause") : "Play album"}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  {isActivePlaying ? (
-                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" />
-                  ) : (
-                    <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
-                  )}
-                </svg>
-              </button>
             </div>
           </div>
           <div className="album-detail-right">
             <div className="album-meta">
-              <div className="eyebrow">Album</div>
+              <div className="album-eyebrow">Album</div>
               <h2 className="album-detail-title">
                 <span className="album-detail-title-text">
                   {album?.title ?? "Unknown album"}
@@ -111,42 +91,77 @@ export default function AlbumDetailView({
                   />
                 ) : null}
               </h2>
-              <div className="muted">{album?.artist ?? "Unknown artist"}</div>
-              <div className="muted small">
-                {album?.year ? `${album.year} · ` : ""}
-                {album?.track_count ?? tracks.length} tracks
+              <div className="album-meta-line">
+                <span>{album?.artist ?? "Unknown artist"}</span>
+                {album?.year ? <span className="meta-sep">•</span> : null}
+                {album?.year ? <span>{album.year}</span> : null}
+                <span className="meta-sep">•</span>
+                <span>{album?.track_count ?? tracks.length} tracks</span>
               </div>
-              <div className="muted small">{album?.mbid ? `MBID: ${album.mbid}` : "MBID: —"}</div>
-              <div className="muted small">
-                {album?.cover_art_url
-                  ? "Cover: cached"
-                  : album?.mbid
-                    ? "Cover: not cached"
-                    : "Cover: unavailable"}
-              </div>
-              <div className="album-meta-actions">
+              <div className="album-meta-sub mono">Total length: {formatMs(totalDuration)}</div>
+              <div className="album-actions">
                 <button
-                  className="icon-btn small"
+                  className="btn album-play-cta"
+                  type="button"
+                  onClick={() => {
+                    if (isActive) {
+                      onPause();
+                      return;
+                    }
+                    onPlayAlbum();
+                  }}
+                  disabled={!canPlay}
+                  aria-label={isActive ? (isPaused ? "Resume playback" : "Pause playback") : "Play album"}
+                  title={isActive ? (isPaused ? "Resume" : "Pause") : "Play album"}
+                >
+                  <Play className="icon" aria-hidden="true" />
+                  <span>{isActive ? (isPaused ? "Resume" : "Pause") : "Play Album"}</span>
+                </button>
+                <button
+                  className="icon-btn album-action-icon"
                   type="button"
                   onClick={onEditAlbumMetadata}
                   disabled={!album}
                   aria-label="Edit album metadata"
                   title="Edit album metadata"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11z" />
-                    <path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
-                  </svg>
+                  <Pencil className="icon" aria-hidden="true" />
+                </button>
+                <button
+                  className="icon-btn album-action-icon"
+                  type="button"
+                  aria-label="Favorite album"
+                  title="Favorite (not implemented)"
+                  onClick={() => {}}
+                >
+                  <Heart className="icon" aria-hidden="true" />
+                </button>
+                <button
+                  className="icon-btn album-action-icon"
+                  type="button"
+                  aria-label="Share album"
+                  title="Share (not implemented)"
+                  onClick={() => {}}
+                >
+                  <Share2 className="icon" aria-hidden="true" />
                 </button>
               </div>
             </div>
           </div>
         </div>
-        <div className="album-tracklist">
+      </div>
+      <div className="album-tracklist">
           {loading ? <p className="muted">Loading tracks...</p> : null}
           {error ? <p className="muted">{error}</p> : null}
           {!loading && !error ? (
             <div className="album-tracks">
+              <div className="album-track-header">
+                <span className="track-col-index">#</span>
+                <span className="track-col-title">Title</span>
+                <span className="track-col-format">Format</span>
+                <span className="track-col-duration">Duration</span>
+                <span className="track-col-actions"></span>
+              </div>
               {tracks.map((track, index) => {
                 const prevDisc = index > 0 ? tracks[index - 1]?.disc_number ?? null : null;
                 const disc = track.disc_number ?? null;
@@ -163,7 +178,7 @@ export default function AlbumDetailView({
                       </div>
                     ) : null}
                     <div className="album-track-row">
-                      <div className="album-track-main">
+                      <div className="track-cell-index">
                         <button
                           className="track-play-btn"
                           type="button"
@@ -173,17 +188,20 @@ export default function AlbumDetailView({
                           title="Play track"
                         >
                           <span className="track-index">{track.track_number ?? ""}</span>
-                          <svg className="track-play-icon" viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
-                          </svg>
+                          <Play className="track-play-icon" aria-hidden="true" />
                         </button>
-                        <div>
-                          <div className="album-track-title">{track.title ?? track.file_name}</div>
-                          <div className="muted small">{track.artist ?? "Unknown artist"}</div>
-                        </div>
+                      </div>
+                      <div className="track-cell-title">
+                        <div className="album-track-title">{track.title ?? track.file_name}</div>
+                        <div className="muted small">{track.artist ?? "Unknown artist"}</div>
+                      </div>
+                      <div className="album-track-format mono">
+                        {track.format ?? "—"}
+                      </div>
+                      <div className="album-track-duration mono">
+                        {formatMs(track.duration_ms)}
                       </div>
                       <div className="album-track-actions">
-                        <span className="muted small">{formatMs(track.duration_ms)}</span>
                         <TrackMenu
                           open={menuOpen}
                           canPlay={canPlay}
@@ -207,7 +225,6 @@ export default function AlbumDetailView({
             </div>
           ) : null}
         </div>
-      </div>
     </section>
   );
 }

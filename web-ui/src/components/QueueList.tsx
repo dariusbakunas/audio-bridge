@@ -1,5 +1,6 @@
 import { QueueItem } from "../types";
 import { apiUrl } from "../api";
+import { Play } from "lucide-react";
 
 interface QueueListProps {
   items: QueueItem[];
@@ -57,16 +58,13 @@ export default function QueueList({
                         })
                       }
                     >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />
-                      </svg>
+                      <Play className="icon" aria-hidden="true" />
                     </button>
                   </div>
                   <div>
                     <div className="queue-title">{item.file_name}</div>
                     <div className="muted small">
                       {item.artist ?? "Unknown artist"}
-                      {item.album ? ` - ${item.album}` : ""}
                     </div>
                   </div>
                 </div>
