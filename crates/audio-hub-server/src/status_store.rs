@@ -244,6 +244,7 @@ impl StatusStore {
                 last_duration_ms,
                 remote_duration_ms: remote.duration_ms,
                 remote_elapsed_ms: remote.elapsed_ms,
+                end_reason: remote.end_reason,
                 elapsed_ms: s.elapsed_ms,
                 duration_ms: s.duration_ms,
                 user_paused: s.user_paused,
@@ -258,6 +259,7 @@ impl StatusStore {
             last_duration_ms,
             remote_duration_ms: remote.duration_ms,
             remote_elapsed_ms: remote.elapsed_ms,
+            end_reason: remote.end_reason,
             elapsed_ms: None,
             duration_ms: None,
             user_paused: false,
@@ -357,6 +359,7 @@ mod tests {
             buffer_size_frames: None,
             buffered_frames: None,
             buffer_capacity_frames: None,
+            end_reason: None,
         }
     }
 

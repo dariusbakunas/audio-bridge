@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use audio_bridge_types::BridgeStatus as BridgeStatusSnapshot;
+use audio_bridge_types::{BridgeStatus as BridgeStatusSnapshot, PlaybackEndReason};
 
 /// Shared playback status state updated by the player pipeline.
 #[derive(Debug, Default)]
@@ -25,6 +25,7 @@ pub struct PlayerStatusState {
     pub buffer_size_frames: Option<u32>,
     pub buffered_frames: Option<Arc<AtomicU64>>,
     pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
+    pub end_reason: Option<PlaybackEndReason>,
 }
 
 pub type StatusSnapshot = BridgeStatusSnapshot;
@@ -69,6 +70,7 @@ impl PlayerStatusState {
             buffer_size_frames: self.buffer_size_frames,
             buffered_frames: self.buffered_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
             buffer_capacity_frames: self.buffer_capacity_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
+            end_reason: self.end_reason,
         }
     }
 
@@ -139,6 +141,7 @@ mod tests {
         state.played_frames = Some(Arc::new(AtomicU64::new(1)));
         state.paused_flag = Some(Arc::new(AtomicBool::new(false)));
         state.buffered_frames = Some(Arc::new(AtomicU64::new(1)));
+        state.end_reason = Some(PlaybackEndReason::Eof);
 
         state.clear_playback();
 
@@ -150,5 +153,6 @@ mod tests {
         assert!(state.played_frames.is_none());
         assert!(state.paused_flag.is_none());
         assert!(state.buffered_frames.is_none());
+        assert_eq!(state.end_reason, Some(PlaybackEndReason::Eof));
     }
 }

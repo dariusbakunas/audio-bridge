@@ -397,6 +397,7 @@ fn build_status_snapshot(state: &AppState) -> StatusSnapshot {
             buffer_size_frames: None,
             buffered_frames: None,
             buffer_capacity_frames: None,
+            end_reason: None,
         })
 }
 

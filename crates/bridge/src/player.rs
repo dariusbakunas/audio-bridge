@@ -16,6 +16,7 @@ use audio_player::device;
 use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
 use audio_player::pipeline;
 use crate::status::BridgeStatusState;
+use audio_bridge_types::PlaybackEndReason;
 
 /// Commands accepted by the playback worker thread.
 #[derive(Debug, Clone)]
@@ -82,6 +83,7 @@ fn player_thread_main(
                 current = None;
                 paused = false;
                 if let Ok(mut s) = status.lock() {
+                    s.end_reason = Some(PlaybackEndReason::Stopped);
                     s.clear_playback();
                 }
             }
@@ -163,6 +165,7 @@ fn preupdate_status_on_play(
 ) {
     if let Ok(mut s) = status.lock() {
         s.clear_playback();
+        s.end_reason = None;
         s.now_playing = Some(now_playing.to_string());
     }
 }
@@ -277,6 +280,7 @@ fn play_one_http(
         tls_insecure,
         "bridge http stream start"
     );
+    let stream_error = Arc::new(AtomicBool::new(false));
     let source = HttpRangeSource::new(
         url.clone(),
         HttpRangeConfig {
@@ -284,6 +288,7 @@ fn play_one_http(
             ..HttpRangeConfig::default()
         },
         Some(cancel.clone()),
+        Some(stream_error.clone()),
     );
     let (src_spec, srcq, duration_ms, source_info) =
         decode::start_streaming_decode_from_media_source_at(
@@ -320,6 +325,7 @@ fn play_one_http(
     let resampling = src_spec.rate != stream_config.sample_rate;
     {
         if let Ok(mut s) = status.lock() {
+            s.end_reason = None;
             s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
             s.device = device.description().ok().map(|d| d.to_string());
             s.sample_rate = Some(stream_config.sample_rate);
@@ -351,6 +357,8 @@ fn play_one_http(
         "bridge status updated from decoder"
     );
 
+    let cancel_for_status = cancel.clone();
+    let stream_error_for_status = stream_error.clone();
     let result = pipeline::play_decoded_source(
         &device,
         &config,
@@ -371,6 +379,16 @@ fn play_one_http(
 
     if session_id.load(Ordering::Relaxed) == my_id {
         if let Ok(mut s) = status.lock() {
+            let should_set = s.end_reason.is_none();
+            if should_set {
+                let cancelled = cancel_for_status.load(Ordering::Relaxed);
+                let had_error = stream_error_for_status.load(Ordering::Relaxed);
+                s.end_reason = Some(if result.is_ok() && !cancelled && !had_error {
+                    PlaybackEndReason::Eof
+                } else {
+                    PlaybackEndReason::Error
+                });
+            }
             s.clear_playback();
         }
     }

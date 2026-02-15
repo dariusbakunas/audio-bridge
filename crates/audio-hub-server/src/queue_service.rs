@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::models::{QueueItem, QueueResponse};
+use audio_bridge_types::PlaybackEndReason;
 use crate::events::EventBus;
 use crate::playback_transport::PlaybackTransport;
 use crate::state::{QueueState};
@@ -22,6 +23,7 @@ pub(crate) struct AutoAdvanceInputs {
     pub last_duration_ms: Option<u64>,
     pub remote_duration_ms: Option<u64>,
     pub remote_elapsed_ms: Option<u64>,
+    pub end_reason: Option<PlaybackEndReason>,
     pub elapsed_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub user_paused: bool,
@@ -35,19 +37,12 @@ fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
     if inputs.manual_advance_in_flight {
         return false;
     }
-    let ended = inputs.last_duration_ms.is_some()
-        && inputs.remote_duration_ms.is_none()
-        && inputs.remote_elapsed_ms.is_none()
+    let ended = matches!(inputs.end_reason, Some(PlaybackEndReason::Eof))
         && !inputs.user_paused
         && !inputs.seek_in_flight
         && inputs.now_playing;
     if ended && !inputs.auto_advance_in_flight {
         return true;
-    }
-    if !inputs.auto_advance_in_flight && !inputs.seek_in_flight {
-        if let (Some(elapsed), Some(duration)) = (inputs.elapsed_ms, inputs.duration_ms) {
-            return elapsed + 50 >= duration && !inputs.user_paused;
-        }
     }
     false
 }
@@ -368,6 +363,7 @@ mod tests {
             last_duration_ms: None,
             remote_duration_ms: None,
             remote_elapsed_ms: None,
+            end_reason: None,
             elapsed_ms: None,
             duration_ms: None,
             user_paused: false,
@@ -480,9 +476,7 @@ mod tests {
         service.add_paths(vec![path.clone()]);
 
         let inputs = AutoAdvanceInputs {
-            last_duration_ms: Some(1000),
-            remote_duration_ms: None,
-            remote_elapsed_ms: None,
+            end_reason: Some(PlaybackEndReason::Eof),
             ..make_inputs()
         };
 
@@ -490,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn maybe_auto_advance_dispatches_near_end() {
+    fn maybe_auto_advance_does_not_dispatch_near_end_without_eof() {
         let service = make_service();
         let transport = TestTransport::new(true);
         let path = PathBuf::from("/music/a.flac");
@@ -502,7 +496,7 @@ mod tests {
             ..make_inputs()
         };
 
-        assert!(service.maybe_auto_advance(&transport, inputs));
+        assert!(!service.maybe_auto_advance(&transport, inputs));
     }
 
     #[test]
@@ -512,16 +506,14 @@ mod tests {
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
 
         let paused_inputs = AutoAdvanceInputs {
-            elapsed_ms: Some(9950),
-            duration_ms: Some(10000),
+            end_reason: Some(PlaybackEndReason::Eof),
             user_paused: true,
             ..make_inputs()
         };
         assert!(!service.maybe_auto_advance(&transport, paused_inputs));
 
         let seek_inputs = AutoAdvanceInputs {
-            elapsed_ms: Some(9950),
-            duration_ms: Some(10000),
+            end_reason: Some(PlaybackEndReason::Eof),
             seek_in_flight: true,
             ..make_inputs()
         };
@@ -534,9 +526,7 @@ mod tests {
         let transport = TestTransport::new(true);
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
         let inputs = AutoAdvanceInputs {
-            last_duration_ms: Some(1000),
-            remote_duration_ms: None,
-            remote_elapsed_ms: None,
+            end_reason: Some(PlaybackEndReason::Eof),
             manual_advance_in_flight: true,
             now_playing: true,
             ..make_inputs()
@@ -550,9 +540,7 @@ mod tests {
         let transport = TestTransport::new(true);
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
         let inputs = AutoAdvanceInputs {
-            last_duration_ms: Some(1000),
-            remote_duration_ms: None,
-            remote_elapsed_ms: None,
+            end_reason: Some(PlaybackEndReason::Eof),
             user_paused: true,
             now_playing: true,
             ..make_inputs()

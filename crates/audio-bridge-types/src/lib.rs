@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackEndReason {
+    Eof,
+    Error,
+    Stopped,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BridgeStatus {
@@ -22,6 +31,7 @@ pub struct BridgeStatus {
     pub buffer_size_frames: Option<u32>,
     pub buffered_frames: Option<u64>,
     pub buffer_capacity_frames: Option<u64>,
+    pub end_reason: Option<PlaybackEndReason>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
