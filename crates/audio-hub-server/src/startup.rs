@@ -22,7 +22,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
-use crate::bridge_transport::BridgeTransportClient;
+use crate::bridge_transport::BridgeTransportClientBlocking;
 use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config};
 use crate::bridge_manager::parse_output_id;
 use crate::config;
@@ -548,7 +548,7 @@ fn apply_active_bridge_device(
     public_base_url: &str,
 ) {
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = BridgeTransportClient::new(http_addr, public_base_url.to_string(), None)
+        let _ = BridgeTransportClientBlocking::new(http_addr, public_base_url.to_string(), None)
             .set_device(&device_name);
     }
 }
@@ -649,7 +649,7 @@ fn resolve_active_output(
                     .find(|b| b.id == bridge_id)
                     .map(|b| b.http_addr);
                 if let Some(http_addr) = http_addr {
-                    if let Ok(devices) = BridgeTransportClient::new(http_addr, String::new(), None)
+                    if let Ok(devices) = BridgeTransportClientBlocking::new(http_addr, String::new(), None)
                         .list_devices()
                     {
                         if let Some(device) = devices.iter().find(|d| d.id == device_id) {
@@ -680,7 +680,7 @@ fn resolve_active_output(
                     if first_bridge.is_none() {
                         first_bridge = Some(bridge.clone());
                     }
-                    match BridgeTransportClient::new(bridge.http_addr, String::new(), None)
+                    match BridgeTransportClientBlocking::new(bridge.http_addr, String::new(), None)
                         .list_devices()
                     {
                         Ok(devices) if !devices.is_empty() => {

@@ -278,7 +278,7 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
 #[get("/outputs/stream")]
 /// Stream output updates via server-sent events.
 pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
-    let initial = normalize_outputs_response(state.output.controller.list_outputs(&state));
+    let initial = normalize_outputs_response(state.output.controller.list_outputs(&state).await);
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
     let mut pending = VecDeque::new();
     pending.push_back(sse_event("outputs", &initial_json));
@@ -318,7 +318,7 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
 
                 if refresh {
                     let outputs = normalize_outputs_response(
-                        ctx.state.output.controller.list_outputs(&ctx.state),
+                        ctx.state.output.controller.list_outputs(&ctx.state).await,
                     );
                     let json = serde_json::to_string(&outputs)
                         .unwrap_or_else(|_| "null".to_string());

@@ -53,7 +53,7 @@ pub async fn provider_outputs_list(
 /// List all outputs across providers.
 pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(normalize_outputs_response(
-        state.output.controller.list_outputs(&state),
+        state.output.controller.list_outputs(&state).await,
     ))
 }
 

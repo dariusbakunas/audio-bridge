@@ -80,7 +80,7 @@ impl OutputProvider for LocalProvider {
         if provider_id != Self::provider_id(state) {
             return Err(ProviderError::BadRequest("unknown provider id".to_string()));
         }
-        let mut outputs = self.list_outputs(state);
+        let mut outputs = self.list_outputs(state).await;
         if let Some(active_id) = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone() {
             if !outputs.iter().any(|o| o.id == active_id) {
                 self.inject_active_output_if_missing(state, &mut outputs, &active_id);
@@ -92,7 +92,7 @@ impl OutputProvider for LocalProvider {
         })
     }
 
-    fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
+    async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
         if !Self::is_enabled(state) {
             return Vec::new();
         }

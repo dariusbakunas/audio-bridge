@@ -44,7 +44,7 @@ pub(crate) trait OutputProvider: Send + Sync {
         provider_id: &str,
     ) -> Result<OutputsResponse, ProviderError>;
     /// List all outputs exposed by this provider.
-    fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo>;
+    async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo>;
     /// Return true if this provider can handle the output id.
     fn can_handle_output_id(&self, output_id: &str) -> bool;
     /// Return true if this provider can handle the provider id.
@@ -121,10 +121,10 @@ impl OutputRegistry {
     }
 
     /// List all outputs across providers and ensure active output is present.
-    pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
+    pub(crate) async fn list_outputs(&self, state: &AppState) -> OutputsResponse {
         let mut outputs = Vec::new();
         for provider in &self.providers {
-            outputs.extend(provider.list_outputs(state));
+            outputs.extend(provider.list_outputs(state).await);
         }
         let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         if let Some(active_id) = active_id.as_deref() {
@@ -246,7 +246,7 @@ mod tests {
             })
         }
 
-        fn list_outputs(&self, _state: &AppState) -> Vec<OutputInfo> {
+        async fn list_outputs(&self, _state: &AppState) -> Vec<OutputInfo> {
             Vec::new()
         }
 
@@ -379,7 +379,9 @@ mod tests {
         let inject_flag = provider.inject_called.clone();
         let registry = OutputRegistry::new(vec![Box::new(provider)]);
 
-        let _ = registry.list_outputs(&state);
+        let _ = actix_web::rt::System::new().block_on(async {
+            registry.list_outputs(&state).await
+        });
 
         assert!(*inject_flag.lock().unwrap());
     }

@@ -96,8 +96,8 @@ impl OutputController {
     }
 
     /// Return the list of known outputs (all providers).
-    pub(crate) fn list_outputs(&self, state: &AppState) -> OutputsResponse {
-        self.registry.list_outputs(state)
+    pub(crate) async fn list_outputs(&self, state: &AppState) -> OutputsResponse {
+        self.registry.list_outputs(state).await
     }
 
     /// Return the list of providers.
@@ -414,7 +414,7 @@ mod tests {
             })
         }
 
-        fn list_outputs(&self, _state: &AppState) -> Vec<OutputInfo> {
+        async fn list_outputs(&self, _state: &AppState) -> Vec<OutputInfo> {
             Vec::new()
         }
 

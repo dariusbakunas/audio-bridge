@@ -132,7 +132,7 @@ impl OutputProvider for BrowserProvider {
         })
     }
 
-    fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
+    async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
         let sessions = Self::sessions(state);
         let active_id = Self::active_output_id(state);
         sessions

@@ -52,7 +52,10 @@ impl BridgeProvider {
             };
             (bridge.id.clone(), bridge.http_addr)
         };
-        if let Ok(status) = BridgeTransportClient::new(addr, String::new(), Some(state.metadata.db.clone())).status() {
+        if let Ok(status) = BridgeTransportClient::new(addr, String::new(), Some(state.metadata.db.clone()))
+            .status()
+            .await
+        {
             if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                 cache.insert(bridge_id.clone(), status);
             }
@@ -130,14 +133,14 @@ impl BridgeProvider {
         Ok(())
     }
 
-    fn list_outputs_internal(state: &AppState) -> Vec<OutputInfo> {
-        let bridges_state = state.providers.bridge.bridges.lock().unwrap();
-        let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
-        let merged = merge_bridges(&bridges_state.bridges, &discovered);
-        let (outputs, failed) = build_outputs_from_bridges_with_failures(state, &merged);
-        let active_bridge_id = bridges_state.active_bridge_id.clone();
-        drop(bridges_state);
-        drop(discovered);
+    async fn list_outputs_internal(state: &AppState) -> Vec<OutputInfo> {
+        let (merged, active_bridge_id) = {
+            let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
+            let merged = merge_bridges(&bridges_state.bridges, &discovered);
+            (merged, bridges_state.active_bridge_id.clone())
+        };
+        let (outputs, failed) = build_outputs_from_bridges_with_failures(state, &merged).await;
         for id in failed {
             let is_active = active_bridge_id.as_deref() == Some(id.as_str());
             tracing::warn!(
@@ -203,6 +206,7 @@ impl OutputProvider for BridgeProvider {
         };
 
         let mut outputs = build_outputs_for_bridge(state, &bridge)
+            .await
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
         inject_active_output_for_bridge(state, &mut outputs, active_output_id.as_deref(), &bridge);
 
@@ -212,8 +216,8 @@ impl OutputProvider for BridgeProvider {
         })
     }
 
-    fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
-        Self::list_outputs_internal(state)
+    async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
+        Self::list_outputs_internal(state).await
     }
 
     fn can_handle_output_id(&self, output_id: &str) -> bool {
@@ -289,7 +293,9 @@ impl OutputProvider for BridgeProvider {
             &bridge_id,
             &bridge_id,
             http_addr,
-        ) {
+        )
+        .await
+        {
             Ok(devices) => devices,
             Err(e) => {
                 state.providers.bridge
@@ -353,7 +359,10 @@ impl OutputProvider for BridgeProvider {
             );
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
-        if let Err(e) = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone())).set_device(&device_name) {
+        if let Err(e) = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()))
+            .set_device(&device_name)
+            .await
+        {
             state.providers.bridge
                 .output_switch_in_flight
                 .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -513,12 +522,13 @@ impl OutputProvider for BridgeProvider {
         };
         BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()))
             .stop()
+            .await
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))
     }
 }
 
 /// Build output entries from bridges, tracking per-bridge failures.
-fn build_outputs_from_bridges_with_failures(
+async fn build_outputs_from_bridges_with_failures(
     state: &AppState,
     bridges: &[crate::config::BridgeConfigResolved],
 ) -> (Vec<OutputInfo>, Vec<String>) {
@@ -533,7 +543,9 @@ fn build_outputs_from_bridges_with_failures(
             &bridge.id,
             &bridge.name,
             bridge.http_addr,
-        ) {
+        )
+        .await
+        {
             Ok(list) => {
                 tracing::info!(
                     bridge_id = %bridge.id,
@@ -589,12 +601,12 @@ fn build_outputs_from_bridges_with_failures(
 }
 
 /// Query a single bridge for device outputs.
-fn build_outputs_for_bridge(
+async fn build_outputs_for_bridge(
     state: &AppState,
     bridge: &crate::config::BridgeConfigResolved,
 ) -> Result<Vec<OutputInfo>, anyhow::Error> {
     let devices =
-        list_devices_cached_or_fetch(state, &bridge.id, &bridge.name, bridge.http_addr)?;
+        list_devices_cached_or_fetch(state, &bridge.id, &bridge.name, bridge.http_addr).await?;
     let mut outputs = Vec::new();
     let mut name_counts = std::collections::HashMap::<String, usize>::new();
     for device in &devices {
@@ -627,7 +639,7 @@ fn build_outputs_for_bridge(
     Ok(outputs)
 }
 
-fn list_devices_cached_or_fetch(
+async fn list_devices_cached_or_fetch(
     state: &AppState,
     bridge_id: &str,
     bridge_name: &str,
@@ -643,7 +655,7 @@ fn list_devices_cached_or_fetch(
         name: bridge_name.to_string(),
         http_addr,
     };
-    let devices = list_devices_with_retry(&bridge, 3)?;
+    let devices = list_devices_with_retry(&bridge, 3).await?;
     if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
         cache.insert(bridge_id.to_string(), devices.clone());
     }
@@ -695,26 +707,30 @@ fn apply_remote_status(
     resp.buffer_capacity_frames = remote.buffer_capacity_frames;
 }
 
-fn list_devices_with_retry(
+async fn list_devices_with_retry(
     bridge: &crate::config::BridgeConfigResolved,
     attempts: usize,
 ) -> Result<Vec<HttpDeviceInfo>, anyhow::Error> {
-    list_devices_with_retry_fn(bridge, attempts, || {
-        BridgeTransportClient::new(bridge.http_addr, String::new(), None).list_devices()
+    list_devices_with_retry_fn(bridge, attempts, || async {
+        BridgeTransportClient::new(bridge.http_addr, String::new(), None)
+            .list_devices()
+            .await
     })
+    .await
 }
 
-fn list_devices_with_retry_fn<F>(
+async fn list_devices_with_retry_fn<F, Fut>(
     bridge: &crate::config::BridgeConfigResolved,
     attempts: usize,
     mut list_fn: F,
 ) -> Result<Vec<HttpDeviceInfo>, anyhow::Error>
 where
-    F: FnMut() -> Result<Vec<HttpDeviceInfo>, anyhow::Error>,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<HttpDeviceInfo>, anyhow::Error>>,
 {
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=attempts {
-        match list_fn() {
+        match list_fn().await {
             Ok(list) => {
                 if attempt > 1 {
                     tracing::info!(
@@ -736,7 +752,7 @@ where
                         attempt,
                         "outputs: device list failed; retrying"
                     );
-                    std::thread::sleep(backoff);
+                    tokio::time::sleep(backoff).await;
                 }
             }
         }
@@ -761,18 +777,21 @@ mod tests_retry {
     fn list_devices_with_retry_fn_succeeds_after_retry() {
         let bridge = make_bridge();
         let calls = AtomicUsize::new(0);
-        let devices = list_devices_with_retry_fn(&bridge, 3, || {
-            let attempt = calls.fetch_add(1, Ordering::SeqCst);
-            if attempt < 2 {
-                Err(anyhow::anyhow!("timeout"))
-            } else {
-                Ok(vec![HttpDeviceInfo {
-                    id: "dev1".to_string(),
-                    name: "Device 1".to_string(),
-                    min_rate: 0,
-                    max_rate: 0,
-                }])
-            }
+        let devices = actix_web::rt::System::new().block_on(async {
+            list_devices_with_retry_fn(&bridge, 3, || async {
+                let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                if attempt < 2 {
+                    Err(anyhow::anyhow!("timeout"))
+                } else {
+                    Ok(vec![HttpDeviceInfo {
+                        id: "dev1".to_string(),
+                        name: "Device 1".to_string(),
+                        min_rate: 0,
+                        max_rate: 0,
+                    }])
+                }
+            })
+            .await
         })
         .expect("retry should succeed");
 
@@ -784,9 +803,12 @@ mod tests_retry {
     fn list_devices_with_retry_fn_returns_last_error() {
         let bridge = make_bridge();
         let calls = AtomicUsize::new(0);
-        let result = list_devices_with_retry_fn(&bridge, 2, || {
-            calls.fetch_add(1, Ordering::SeqCst);
-            Err(anyhow::anyhow!("timeout"))
+        let result = actix_web::rt::System::new().block_on(async {
+            list_devices_with_retry_fn(&bridge, 2, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(anyhow::anyhow!("timeout"))
+            })
+            .await
         });
 
         assert!(result.is_err());
