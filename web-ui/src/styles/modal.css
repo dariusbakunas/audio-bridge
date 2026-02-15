@@ -255,7 +255,10 @@
 
 .side-panel-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: var(--player-height);
   background: rgba(0, 0, 0, 0.8);
   display: flex;
   justify-content: flex-end;
@@ -265,7 +268,7 @@
 
 .side-panel {
   width: min(384px, 100%);
-  height: calc(100% - var(--player-height));
+  height: 100%;
   background: var(--bg-panel);
   border-left: 1px solid var(--border-strong);
   padding: 20px 22px;
