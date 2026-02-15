@@ -53,12 +53,17 @@ jobs:
       - name: Resolve release tag
         id: tag
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            ref="${{ github.event.workflow_run.ref }}"
-            tag="${ref#refs/tags/}"
+            tag=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           else
             tag="${{ github.ref_name }}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "Failed to resolve release tag."
+            exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Resolve release id
