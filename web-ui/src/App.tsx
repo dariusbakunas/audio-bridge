@@ -13,8 +13,6 @@ import {
 import {
   AlbumListResponse,
   AlbumSummary,
-  LibraryEntry,
-  LibraryResponse,
   LogEvent,
   MetadataEvent,
   OutputInfo,
@@ -27,7 +25,6 @@ import {
 import AlbumDetailView from "./components/AlbumDetailView";
 import AlbumMetadataDialog from "./components/AlbumMetadataDialog";
 import AlbumsView from "./components/AlbumsView";
-import FoldersView from "./components/FoldersView";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
 import TrackMetadataModal from "./components/TrackMetadataModal";
 import OutputsModal from "./components/OutputsModal";
@@ -141,25 +138,7 @@ function normalizeMatch(value?: string | null): string {
   return value?.trim().toLowerCase() ?? "";
 }
 
-function parentDir(path: string): string | null {
-  const trimmed = path.replace(/\/+$/, "");
-  if (!trimmed) return null;
-  if (trimmed === "/") return null;
-  const idx = trimmed.lastIndexOf("/");
-  if (idx <= 0) return "/";
-  return trimmed.slice(0, idx);
-}
-
-function sortLibraryEntries(entries: LibraryEntry[]): LibraryEntry[] {
-  return [...entries].sort((a, b) => {
-    if (a.kind !== b.kind) {
-      return a.kind === "dir" ? -1 : 1;
-    }
-    const aName = a.kind === "dir" ? a.name : a.file_name;
-    const bName = b.kind === "dir" ? b.name : b.file_name;
-    return aName.localeCompare(bName);
-  });
-}
+// Folders view removed.
 
 function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
   switch (event.kind) {
@@ -242,11 +221,7 @@ export default function App() {
   const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [libraryDir, setLibraryDir] = useState<string | null>(null);
-  const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState<boolean>(false);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
-  const [selectedTrackPath, setSelectedTrackPath] = useState<string | null>(null);
   const [trackMenuPath, setTrackMenuPath] = useState<string | null>(null);
   const [trackMenuPosition, setTrackMenuPosition] = useState<{
     top: number;
@@ -267,7 +242,6 @@ export default function App() {
   const [albumTracks, setAlbumTracks] = useState<TrackSummary[]>([]);
   const [albumTracksLoading, setAlbumTracksLoading] = useState<boolean>(false);
   const [albumTracksError, setAlbumTracksError] = useState<string | null>(null);
-  const [browserView, setBrowserView] = useState<"library" | "albums">("albums");
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
@@ -330,22 +304,11 @@ export default function App() {
       setLogsError((err as Error).message);
     }
   }, []);
-  const handleNavigateUp = useCallback(() => {
-    if (!libraryDir) return;
-    const parent = parentDir(libraryDir);
-    if (parent) setLibraryDir(parent);
-  }, [libraryDir]);
-  const handleBackToRoot = useCallback(() => {
-    setLibraryDir(null);
-  }, []);
-
   const activeOutput = useMemo(
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
   );
-  const canTogglePlayback = Boolean(
-    activeOutputId && (status?.now_playing || selectedTrackPath)
-  );
+  const canTogglePlayback = Boolean(activeOutputId && status?.now_playing);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const isPaused = Boolean(status?.now_playing && status?.paused);
   const uiBuildId = useMemo(() => {
@@ -355,17 +318,15 @@ export default function App() {
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
   type ViewState = {
-    view: "albums" | "folders" | "album" | "settings";
+    view: "albums" | "album" | "settings";
     albumId?: number | null;
     settingsSection?: "metadata" | "logs" | "connection";
-    browserView?: "library" | "albums";
   };
 
   const initialViewState: ViewState = {
     view: "albums",
     albumId: null,
-    settingsSection: "metadata",
-    browserView: "albums"
+    settingsSection: "metadata"
   };
   const [navState, setNavState] = useState<{ stack: ViewState[]; index: number }>(() => ({
     stack: [initialViewState],
@@ -373,18 +334,12 @@ export default function App() {
   }));
   const applyingHistoryRef = useRef(false);
 
-  const viewTitle = settingsOpen
-    ? "Settings"
-    : albumViewId !== null
-      ? ""
-      : browserView === "albums"
-        ? "Albums"
-        : "Folders";
+  const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
   const playButtonTitle = !activeOutputId
-      ? "Select an output to control playback."
-      : !status?.now_playing && !selectedTrackPath
-          ? "Select a track to play."
-          : undefined;
+    ? "Select an output to control playback."
+    : !status?.now_playing
+      ? "Select an album track to play."
+      : undefined;
   const selectedAlbum = useMemo(
       () => albums.find((album) => album.id === albumViewId) ?? null,
       [albums, albumViewId]
@@ -550,25 +505,6 @@ export default function App() {
     }
   }, [notificationsOpen]);
 
-  const openTrackMatchForLibrary = useCallback(
-    (path: string) => {
-      const entry = libraryEntries.find(
-        (item) => item.kind === "track" && item.path === path
-      );
-      const title = entry && entry.kind === "track" ? entry.file_name : path;
-      const artist =
-        entry && entry.kind === "track" ? entry.artist ?? "Unknown artist" : "Unknown artist";
-      const album = entry && entry.kind === "track" ? entry.album ?? "" : "";
-      setMatchTarget({
-        path,
-        title,
-        artist,
-        album
-      });
-    },
-    [libraryEntries]
-  );
-
   const openTrackMatchForAlbum = useCallback(
     (path: string) => {
       const track = albumTracks.find((item) => item.path === path);
@@ -601,28 +537,6 @@ export default function App() {
       }
     });
   }, [selectedAlbum]);
-
-  const openTrackEditorForLibrary = useCallback(
-    (path: string) => {
-      const entry = libraryEntries.find(
-        (item) => item.kind === "track" && item.path === path
-      );
-      const title = entry && entry.kind === "track" ? entry.file_name : path;
-      const artist = entry && entry.kind === "track" ? entry.artist ?? "" : "";
-      const album = entry && entry.kind === "track" ? entry.album ?? "" : "";
-      const label = artist ? `${title} — ${artist}` : title;
-      setEditTarget({
-        path,
-        label,
-        defaults: {
-          title,
-          artist,
-          album
-        }
-      });
-    },
-    [libraryEntries]
-  );
 
   const openTrackEditorForAlbum = useCallback(
     (path: string) => {
@@ -668,22 +582,14 @@ export default function App() {
     if (state.view === "settings") {
       setSettingsSection(state.settingsSection ?? "metadata");
       setSettingsOpen(true);
-      if (state.browserView) setBrowserView(state.browserView);
       setAlbumViewId(null);
       return;
     }
     setSettingsOpen(false);
     if (state.view === "album") {
       setAlbumViewId(state.albumId ?? null);
-      if (state.browserView) setBrowserView(state.browserView);
       return;
     }
-    if (state.view === "folders") {
-      setBrowserView("library");
-      setAlbumViewId(null);
-      return;
-    }
-    setBrowserView("albums");
     setAlbumViewId(null);
   }, []);
 
@@ -700,8 +606,7 @@ export default function App() {
       const isSame =
         last.view === next.view &&
         (last.albumId ?? null) === (next.albumId ?? null) &&
-        (last.settingsSection ?? null) === (next.settingsSection ?? null) &&
-        (last.browserView ?? null) === (next.browserView ?? null);
+        (last.settingsSection ?? null) === (next.settingsSection ?? null);
       if (isSame) return prev;
       const stack = [...base, next];
       return { stack, index: stack.length - 1 };
@@ -789,7 +694,6 @@ export default function App() {
     handleRescanTrack,
     handlePause,
     handleNext,
-    handleRescan,
     handleSelectOutput,
     handlePlay,
     handlePlayAlbumTrack,
@@ -1084,33 +988,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [outputsOpen]);
 
-  const loadLibrary = useCallback(
-    async (dir?: string | null, keepSelection = false) => {
-      setLibraryLoading(true);
-      try {
-        const query = dir ? `?dir=${encodeURIComponent(dir)}` : "";
-        const response = await fetchJson<LibraryResponse>(`/library${query}`);
-        setLibraryDir(response.dir);
-        setLibraryEntries(sortLibraryEntries(response.entries));
-        if (!keepSelection) {
-          setSelectedTrackPath(null);
-          closeTrackMenu();
-        }
-        markServerConnected();
-      } catch (err) {
-        const message = (err as Error).message;
-        reportError(message);
-      } finally {
-        setLibraryLoading(false);
-      }
-    },
-    [closeTrackMenu, markServerConnected, reportError]
-  );
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    loadLibrary(libraryDir);
-  }, [libraryDir, loadLibrary, serverConnected]);
+  // Library list view removed; no directory loading needed.
 
   const loadAlbums = useCallback(async () => {
     if (!albumsLoadingRef.current) {
@@ -1206,10 +1084,7 @@ export default function App() {
       }
       return;
     }
-    if (selectedTrackPath) {
-      await handlePlay(selectedTrackPath);
-    }
-  }, [handlePause, handlePlay, selectedTrackPath, status?.now_playing, status?.paused]);
+  }, [handlePause, status?.now_playing, status?.paused]);
 
   const handlePauseMedia = useCallback(async () => {
     if (status?.now_playing && !status?.paused) {
@@ -1310,9 +1185,6 @@ export default function App() {
       await handlePause();
       return;
     }
-    if (selectedTrackPath) {
-      await handlePlay(selectedTrackPath);
-    }
   }
 
   const showGate = !serverConnected;
@@ -1340,11 +1212,10 @@ export default function App() {
           <div className="nav-section">
             <div className="nav-label">Library</div>
             <button
-              className={`nav-button ${browserView === "albums" && !settingsOpen ? "active" : ""}`}
+              className={`nav-button ${!settingsOpen ? "active" : ""}`}
               onClick={() =>
                 navigateTo({
-                  view: "albums",
-                  browserView: "albums"
+                  view: "albums"
                 })
               }
             >
@@ -1358,25 +1229,6 @@ export default function App() {
               </span>
               <span>Albums</span>
             </button>
-            <button
-              className={`nav-button ${browserView === "library" && !settingsOpen ? "active" : ""}`}
-              onClick={() =>
-                navigateTo({
-                  view: "folders",
-                  browserView: "library"
-                })
-              }
-            >
-              <span className="nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path
-                    d="M3 7.5h7l2 2H21a1 1 0 0 1 1 1v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 4 17.5V8.5a1 1 0 0 1 1-1Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-              <span>Folders</span>
-            </button>
           </div>
           <div className="nav-section">
             <div className="nav-label">System</div>
@@ -1385,8 +1237,7 @@ export default function App() {
               onClick={() =>
                 navigateTo({
                   view: "settings",
-                  settingsSection: "metadata",
-                  browserView
+                  settingsSection: "metadata"
                 })
               }
             >
@@ -1489,52 +1340,24 @@ export default function App() {
 
           {!settingsOpen && albumViewId === null ? (
             <section className="grid">
-              {browserView === "albums" ? (
-                <AlbumsView
-                  albums={albums}
-                  loading={albumsLoading}
-                  error={albumsError}
-                  placeholder={albumPlaceholder}
-                  canPlay={Boolean(activeOutputId)}
-                  activeAlbumId={activeAlbumId}
-                  isPlaying={isPlaying}
-                  isPaused={isPaused}
-                  onSelectAlbum={(id) =>
-                    navigateTo({
-                      view: "album",
-                      albumId: id,
-                      browserView
-                    })
-                  }
-                  onPlayAlbum={handlePlayAlbumById}
-                  onPause={handlePause}
-                />
-              ) : null}
-
-              {browserView === "library" ? (
-                <FoldersView
-                  entries={libraryEntries}
-                  dir={libraryDir}
-                  loading={libraryLoading}
-                  selectedTrackPath={selectedTrackPath}
-                  trackMenuPath={trackMenuPath}
-                  trackMenuPosition={trackMenuPosition}
-                  canPlay={Boolean(activeOutputId)}
-                  formatMs={formatMs}
-                  onRescan={handleRescan}
-                  onNavigateUp={handleNavigateUp}
-                  onBackToRoot={handleBackToRoot}
-                  onSelectDir={setLibraryDir}
-                  onSelectTrack={setSelectedTrackPath}
-                  onToggleMenu={toggleTrackMenu}
-                  onPlay={(path) => runTrackMenuAction(handlePlay, path)}
-                  onQueue={(path) => runTrackMenuAction(handleQueue, path)}
-                  onPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
-                  onRescanTrack={(path) => runTrackMenuAction(handleRescanTrack, path)}
-                  onFixMatch={(path) => runTrackMenuAction(openTrackMatchForLibrary, path)}
-                  onEditMetadata={(path) => runTrackMenuAction(openTrackEditorForLibrary, path)}
-                />
-              ) : null}
+              <AlbumsView
+                albums={albums}
+                loading={albumsLoading}
+                error={albumsError}
+                placeholder={albumPlaceholder}
+                canPlay={Boolean(activeOutputId)}
+                activeAlbumId={activeAlbumId}
+                isPlaying={isPlaying}
+                isPaused={isPaused}
+                onSelectAlbum={(id) =>
+                  navigateTo({
+                    view: "album",
+                    albumId: id
+                  })
+                }
+                onPlayAlbum={handlePlayAlbumById}
+                onPause={handlePause}
+              />
             </section>
           ) : null}
 
@@ -1577,8 +1400,7 @@ export default function App() {
             onSectionChange={(section) =>
               navigateTo({
                 view: "settings",
-                settingsSection: section,
-                browserView
+                settingsSection: section
               })
             }
             apiBase={apiBaseOverride}
@@ -1630,8 +1452,7 @@ export default function App() {
           onAlbumNavigate={(albumId) =>
             navigateTo({
               view: "album",
-              albumId,
-              browserView
+              albumId
             })
           }
           onPrimaryAction={handlePrimaryAction}
@@ -1685,9 +1506,6 @@ export default function App() {
         defaults={editDefaults}
         onClose={() => setEditTarget(null)}
         onSaved={() => {
-          if (browserView === "library") {
-            loadLibrary(libraryDir, true);
-          }
           if (albumViewId !== null) {
             loadAlbumTracks(albumViewId);
           }
