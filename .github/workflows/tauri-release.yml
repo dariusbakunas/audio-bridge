@@ -81,5 +81,6 @@ jobs:
           projectPath: "web-ui"
           tauriScript: "npm run tauri"
           releaseId: ${{ steps.release.outputs.release_id }}
+          tagName: ${{ steps.tag.outputs.tag }}
           releaseDraft: false
           args: ${{ matrix.args }}
