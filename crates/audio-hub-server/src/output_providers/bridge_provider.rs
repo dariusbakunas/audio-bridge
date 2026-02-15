@@ -52,7 +52,7 @@ impl BridgeProvider {
             };
             (bridge.id.clone(), bridge.http_addr)
         };
-        if let Ok(status) = BridgeTransportClient::new(addr, String::new()).status() {
+        if let Ok(status) = BridgeTransportClient::new(addr, String::new(), Some(state.metadata.db.clone())).status() {
             if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                 cache.insert(bridge_id.clone(), status);
             }
@@ -108,6 +108,7 @@ impl BridgeProvider {
             state.providers.bridge.status_cache.clone(),
             state.providers.bridge.worker_running.clone(),
             state.providers.bridge.public_base_url.clone(),
+            Some(state.metadata.db.clone()),
             state.events.clone(),
         );
 
@@ -352,7 +353,7 @@ impl OutputProvider for BridgeProvider {
             );
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
-        if let Err(e) = BridgeTransportClient::new(http_addr, String::new()).set_device(&device_name) {
+        if let Err(e) = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone())).set_device(&device_name) {
             state.providers.bridge
                 .output_switch_in_flight
                 .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -510,7 +511,7 @@ impl OutputProvider for BridgeProvider {
             };
             bridge.http_addr
         };
-        BridgeTransportClient::new(http_addr, String::new())
+        BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()))
             .stop()
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))
     }
@@ -699,7 +700,7 @@ fn list_devices_with_retry(
     attempts: usize,
 ) -> Result<Vec<HttpDeviceInfo>, anyhow::Error> {
     list_devices_with_retry_fn(bridge, attempts, || {
-        BridgeTransportClient::new(bridge.http_addr, String::new()).list_devices()
+        BridgeTransportClient::new(bridge.http_addr, String::new(), None).list_devices()
     })
 }
 

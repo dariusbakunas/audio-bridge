@@ -577,6 +577,30 @@ impl MetadataDb {
             .context("fetch track record")
     }
 
+    pub fn track_id_for_path(&self, path: &str) -> Result<Option<i64>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                "SELECT id FROM tracks WHERE path = ?1",
+                params![path],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch track id for path")
+    }
+
+    pub fn track_path_for_id(&self, track_id: i64) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn
+            .query_row(
+                "SELECT path FROM tracks WHERE id = ?1",
+                params![track_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("fetch track path for id")
+    }
+
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn

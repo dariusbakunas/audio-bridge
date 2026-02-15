@@ -39,6 +39,7 @@ export interface OutputsResponse {
 
 export interface QueueItemTrack {
   kind: "track";
+  id?: number | null;
   path: string;
   file_name: string;
   duration_ms?: number | null;

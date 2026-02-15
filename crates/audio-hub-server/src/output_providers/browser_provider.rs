@@ -232,6 +232,7 @@ impl OutputProvider for BrowserProvider {
                 .base_url
                 .clone()
                 .unwrap_or_else(|| state.providers.bridge.public_base_url.clone()),
+            Some(state.metadata.db.clone()),
         );
 
         if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {

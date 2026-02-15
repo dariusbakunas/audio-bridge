@@ -6,7 +6,7 @@ interface QueueListProps {
   formatMs: (ms?: number | null) => string;
   placeholder: (title?: string | null, artist?: string | null) => string;
   canPlay: boolean;
-  onPlayFrom: (path: string) => void;
+  onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
 }
 
 export default function QueueList({
@@ -21,7 +21,9 @@ export default function QueueList({
       {items.map((item, index) => {
         const fallback = item.kind === "track" ? placeholder(item.album, item.artist) : "";
         const coverUrl = item.kind === "track"
-          ? apiUrl(`/art?path=${encodeURIComponent(item.path)}`)
+          ? item.id
+            ? apiUrl(`/tracks/${item.id}/cover`)
+            : apiUrl(`/art?path=${encodeURIComponent(item.path)}`)
           : "";
         return (
           <div key={`${item.kind}-${index}`} className="queue-row">
@@ -48,7 +50,12 @@ export default function QueueList({
                       aria-label={`Play ${item.file_name}`}
                       title="Play from queue"
                       disabled={!canPlay}
-                      onClick={() => onPlayFrom(item.path)}
+                      onClick={() =>
+                        onPlayFrom({
+                          trackId: item.id ?? undefined,
+                          path: item.id ? undefined : item.path
+                        })
+                      }
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M8 5.5v13l11-6.5-11-6.5Z" fill="currentColor" />

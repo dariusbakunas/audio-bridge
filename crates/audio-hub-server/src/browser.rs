@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::bridge::BridgeCommand;
 use crate::events::EventBus;
+use crate::metadata_db::MetadataDb;
 use crate::status_store::StatusStore;
 
 /// Outbound messages to a browser websocket session.
@@ -129,6 +130,7 @@ pub fn spawn_browser_worker(
     queue: Arc<Mutex<crate::state::QueueState>>,
     events: EventBus,
     public_base_url: String,
+    metadata: Option<MetadataDb>,
 ) {
     std::thread::spawn(move || {
     let _ = (queue, events);
@@ -148,7 +150,7 @@ pub fn spawn_browser_worker(
                     status.mark_seek_in_flight();
                 }
                 BridgeCommand::Play { path, seek_ms, start_paused, .. } => {
-                    let url = build_stream_url_for(&path, &public_base_url);
+                    let url = build_stream_url_for(&path, &public_base_url, metadata.as_ref());
                     let _ = send_json(
                         &sender,
                         BrowserServerMessage::Play {
@@ -172,7 +174,19 @@ fn send_json(sender: &Recipient<BrowserOutbound>, msg: BrowserServerMessage) -> 
     Ok(())
 }
 
-fn build_stream_url_for(path: &PathBuf, public_base_url: &str) -> String {
+fn build_stream_url_for(
+    path: &PathBuf,
+    public_base_url: &str,
+    metadata: Option<&MetadataDb>,
+) -> String {
+    if let Some(track_id) = metadata
+        .and_then(|db| db.track_id_for_path(&path.to_string_lossy()).ok().flatten())
+    {
+        return format!(
+            "{}/stream/track/{track_id}",
+            public_base_url.trim_end_matches('/')
+        );
+    }
     let path_str = path.to_string_lossy();
     let encoded = urlencoding::encode(&path_str);
     format!(

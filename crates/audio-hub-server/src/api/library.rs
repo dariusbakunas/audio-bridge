@@ -97,7 +97,44 @@ pub async fn stream_track(
     query: web::Query<StreamQuery>,
 ) -> impl Responder {
     let path = PathBuf::from(&query.path);
-    let path = match state.output.controller.canonicalize_under_root(&state, &path) {
+    stream_file(&state, req, path).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/stream/track/{id}",
+    params(
+        ("id" = i64, Path, description = "Track id")
+    ),
+    responses(
+        (status = 200, description = "Full file stream"),
+        (status = 206, description = "Partial content"),
+        (status = 404, description = "Not found"),
+        (status = 416, description = "Invalid range")
+    )
+)]
+#[get("/stream/track/{id}")]
+/// Stream a track by id with HTTP range support.
+pub async fn stream_track_id(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    id: web::Path<i64>,
+) -> impl Responder {
+    let track_id = id.into_inner();
+    let path = match state.metadata.db.track_path_for_id(track_id) {
+        Ok(Some(path)) => PathBuf::from(path),
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    stream_file(&state, req, path).await
+}
+
+async fn stream_file(
+    state: &web::Data<AppState>,
+    req: HttpRequest,
+    path: PathBuf,
+) -> HttpResponse {
+    let path = match state.output.controller.canonicalize_under_root(state, &path) {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };

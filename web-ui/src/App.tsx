@@ -865,7 +865,14 @@ export default function App() {
       setNowPlayingAlbumId(null);
       return;
     }
-    setNowPlayingCover(apiUrl(`/art?path=${encodeURIComponent(path)}`));
+    const queueMatch = queue.find(
+      (item) => item.kind === "track" && item.path === path && item.id
+    ) as { id?: number } | undefined;
+    if (queueMatch?.id) {
+      setNowPlayingCover(apiUrl(`/tracks/${queueMatch.id}/cover`));
+    } else {
+      setNowPlayingCover(apiUrl(`/art?path=${encodeURIComponent(path)}`));
+    }
     setNowPlayingCoverFailed(false);
     let active = true;
     fetchJson<TrackResolveResponse>(`/tracks/resolve?path=${encodeURIComponent(path)}`)
@@ -880,7 +887,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [status?.now_playing]);
+  }, [queue, status?.now_playing]);
 
   useQueueStream({
     onEvent: (items) => {
@@ -1099,9 +1106,15 @@ export default function App() {
     status?.title
   ]);
 
-  const handleQueuePlayFrom = useCallback(async (path: string) => {
+  const handleQueuePlayFrom = useCallback(async (payload: { trackId?: number; path?: string }) => {
     try {
-      await postJson("/queue/play_from", { path });
+      if (payload.trackId) {
+        await postJson("/queue/play_from", { track_id: payload.trackId });
+      } else if (payload.path) {
+        await postJson("/queue/play_from", { path: payload.path });
+      } else {
+        throw new Error("Missing track id or path for queue playback.");
+      }
       setError(null);
     } catch (err) {
       setError((err as Error).message);

@@ -144,6 +144,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::stop)
             .service(api::seek)
             .service(api::stream_track)
+            .service(api::stream_track_id)
             .service(api::transcode_track)
             .service(api::queue_list)
             .service(api::queue_add)
@@ -326,6 +327,7 @@ fn should_log_path(path: &str) -> bool {
         || path == "/logs/stream"
         || path == "/logs/clear"
         || path.ends_with("/status/stream")
+        || path.starts_with("/stream/track/")
     {
         return false;
     }
@@ -544,7 +546,7 @@ fn apply_active_bridge_device(
     public_base_url: &str,
 ) {
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = BridgeTransportClient::new(http_addr, public_base_url.to_string())
+        let _ = BridgeTransportClient::new(http_addr, public_base_url.to_string(), None)
             .set_device(&device_name);
     }
 }
@@ -645,7 +647,7 @@ fn resolve_active_output(
                     .find(|b| b.id == bridge_id)
                     .map(|b| b.http_addr);
                 if let Some(http_addr) = http_addr {
-                    if let Ok(devices) = BridgeTransportClient::new(http_addr, String::new())
+                    if let Ok(devices) = BridgeTransportClient::new(http_addr, String::new(), None)
                         .list_devices()
                     {
                         if let Some(device) = devices.iter().find(|d| d.id == device_id) {
@@ -676,7 +678,7 @@ fn resolve_active_output(
                     if first_bridge.is_none() {
                         first_bridge = Some(bridge.clone());
                     }
-                    match BridgeTransportClient::new(bridge.http_addr, String::new())
+                    match BridgeTransportClient::new(bridge.http_addr, String::new(), None)
                         .list_devices()
                     {
                         Ok(devices) if !devices.is_empty() => {
@@ -753,6 +755,7 @@ mod tests {
         assert!(!should_log_path("/logs/stream"));
         assert!(!should_log_path("/outputs/bridge:test/status/stream"));
         assert!(!should_log_path("/outputs/bridge:test"));
+        assert!(!should_log_path("/stream/track/31"));
         assert!(should_log_path("/artists"));
         assert!(should_log_path("/outputs/select"));
     }

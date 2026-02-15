@@ -68,8 +68,12 @@ impl PlaybackManager {
     }
 
     /// Build an API response for the current queue.
-    pub fn queue_list(&self, library: &LibraryIndex) -> QueueResponse {
-        self.queue_service.list(library)
+    pub fn queue_list(
+        &self,
+        library: &LibraryIndex,
+        metadata_db: Option<&crate::metadata_db::MetadataDb>,
+    ) -> QueueResponse {
+        self.queue_service.list(library, metadata_db)
     }
 
     /// Add paths to the queue and return how many were inserted.

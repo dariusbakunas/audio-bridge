@@ -6,6 +6,7 @@ import "../styles.css";
 const items: QueueItem[] = [
   {
     kind: "track",
+    id: 101,
     path: "/music/Radiohead/In Rainbows/01 - 15 Step.flac",
     file_name: "01 - 15 Step.flac",
     duration_ms: 224000,
@@ -16,6 +17,7 @@ const items: QueueItem[] = [
   },
   {
     kind: "track",
+    id: 102,
     path: "/music/Radiohead/In Rainbows/02 - Bodysnatchers.flac",
     file_name: "02 - Bodysnatchers.flac",
     duration_ms: 241000,
@@ -65,6 +67,8 @@ export function Default() {
       onClose={action("close")}
       formatMs={formatMs}
       placeholder={placeholder}
+      canPlay={true}
+      onPlayFrom={action("play-from")}
     />
   );
 }
@@ -77,6 +81,8 @@ export function Empty() {
       onClose={action("close")}
       formatMs={formatMs}
       placeholder={placeholder}
+      canPlay={false}
+      onPlayFrom={action("play-from")}
     />
   );
 }

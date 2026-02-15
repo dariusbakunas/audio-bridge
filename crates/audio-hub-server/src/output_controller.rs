@@ -168,7 +168,10 @@ impl OutputController {
 
     /// Return the current queue as API response items.
     pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        state.playback.manager.queue_list(&state.library.read().unwrap())
+        state
+            .playback
+            .manager
+            .queue_list(&state.library.read().unwrap(), Some(&state.metadata.db))
     }
 
     /// Add paths to the queue and return the number added.

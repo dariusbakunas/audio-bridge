@@ -50,12 +50,13 @@ pub fn spawn_bridge_worker(
     status_cache: Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
     worker_running: Arc<AtomicBool>,
     public_base_url: String,
+    metadata: Option<crate::metadata_db::MetadataDb>,
     events: EventBus,
 ) {
     std::thread::spawn(move || {
         worker_running.store(true, Ordering::Relaxed);
         tracing::info!(bridge_id = %bridge_id, http_addr = %http_addr, "bridge worker start");
-        let client = BridgeTransportClient::new(http_addr, public_base_url);
+        let client = BridgeTransportClient::new(http_addr, public_base_url, metadata);
 
         loop {
         if let Ok(cmd) = cmd_rx.recv_timeout(Duration::from_millis(250)) {

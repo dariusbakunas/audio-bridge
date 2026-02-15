@@ -105,6 +105,8 @@ pub type StatusResponse = PlaybackStatus;
 pub enum QueueItem {
     /// Queued track with metadata.
     Track {
+        /// Track id if known.
+        id: Option<i64>,
         /// Absolute path to the track.
         path: String,
         /// Filename for display.
@@ -319,7 +321,11 @@ pub struct QueueRemoveRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueuePlayFromRequest {
     /// Path of the queued item to play.
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Track id of the queued item to play.
+    #[serde(default)]
+    pub track_id: Option<i64>,
 }
 
 /// Response for listing outputs.

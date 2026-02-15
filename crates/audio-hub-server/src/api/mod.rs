@@ -16,6 +16,7 @@ pub use library::{
     rescan_library,
     rescan_track,
     stream_track,
+    stream_track_id,
     transcode_track,
 };
 pub use logs::{logs_clear, LogsClearResponse};

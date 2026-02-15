@@ -10,6 +10,7 @@ use std::time::Duration;
 use anyhow::Result;
 
 use audio_bridge_types::BridgeStatus;
+use crate::metadata_db::MetadataDb;
 
 /// HTTP response payload for the bridge device list.
 #[derive(Debug, serde::Deserialize)]
@@ -67,14 +68,16 @@ struct HttpSeekRequest {
 pub struct BridgeTransportClient {
     http_addr: SocketAddr,
     public_base_url: String,
+    metadata: Option<MetadataDb>,
 }
 
 impl BridgeTransportClient {
     /// Create a new client for a bridge HTTP address.
-    pub fn new(http_addr: SocketAddr, public_base_url: String) -> Self {
+    pub fn new(http_addr: SocketAddr, public_base_url: String, metadata: Option<MetadataDb>) -> Self {
         Self {
             http_addr,
             public_base_url,
+            metadata,
         }
     }
 
@@ -291,7 +294,18 @@ impl BridgeTransportClient {
 
     /// Build a fully-qualified stream URL for the given path.
     fn build_stream_url(&self, path: &PathBuf) -> String {
-        build_stream_url_for(path, &self.public_base_url)
+        if let Some(track_id) = self.track_id_for_path(path) {
+            build_stream_url_for_id(track_id, &self.public_base_url)
+        } else {
+            build_stream_url_for(path, &self.public_base_url)
+        }
+    }
+
+    fn track_id_for_path(&self, path: &PathBuf) -> Option<i64> {
+        self.metadata
+            .as_ref()
+            .and_then(|meta| meta.track_id_for_path(&path.to_string_lossy()).ok())
+            .flatten()
     }
 }
 
@@ -300,6 +314,13 @@ fn build_stream_url_for(path: &PathBuf, public_base_url: &str) -> String {
     let encoded = urlencoding::encode(&path_str);
     format!(
         "{}/stream?path={encoded}",
+        public_base_url.trim_end_matches('/')
+    )
+}
+
+fn build_stream_url_for_id(track_id: i64, public_base_url: &str) -> String {
+    format!(
+        "{}/stream/track/{track_id}",
         public_base_url.trim_end_matches('/')
     )
 }

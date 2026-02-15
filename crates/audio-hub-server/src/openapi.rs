@@ -19,6 +19,7 @@ use crate::models;
         api::playback::pause_toggle,
         api::playback::seek,
         api::library::stream_track,
+        api::library::stream_track_id,
         api::library::transcode_track,
         api::queue::queue_list,
         api::queue::queue_add,

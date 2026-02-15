@@ -62,7 +62,7 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
             };
             let is_configured = is_configured_bridge(&state, &bridge_id);
             let events = state.events.clone();
-            let client = BridgeTransportClient::new(http_addr, String::new());
+            let client = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()));
             let seen_event = AtomicBool::new(false);
             let result = client.listen_devices_stream(|snapshot| {
                 if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
@@ -139,7 +139,7 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
                 break;
             };
             let events = state.events.clone();
-            let client = BridgeTransportClient::new(http_addr, String::new());
+            let client = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()));
             let result = client.listen_status_stream(|snapshot| {
                 if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                     cache.insert(bridge_id.clone(), snapshot.clone());

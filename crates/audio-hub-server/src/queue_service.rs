@@ -111,7 +111,11 @@ impl QueueService {
     }
 
     /// Build an API response for the current queue.
-    pub(crate) fn list(&self, library: &crate::library::LibraryIndex) -> QueueResponse {
+    pub(crate) fn list(
+        &self,
+        library: &crate::library::LibraryIndex,
+        metadata_db: Option<&crate::metadata_db::MetadataDb>,
+    ) -> QueueResponse {
         let queue = self.queue.lock().unwrap();
         let items = queue
             .items
@@ -126,15 +130,20 @@ impl QueueService {
                     artist,
                     format,
                     ..
-                }) => QueueItem::Track {
-                    path,
-                    file_name,
-                    duration_ms,
-                    sample_rate,
-                    album,
-                    artist,
-                    format,
-                },
+                }) => {
+                    let id = metadata_db
+                        .and_then(|db| db.track_id_for_path(&path).ok().flatten());
+                    QueueItem::Track {
+                        id,
+                        path,
+                        file_name,
+                        duration_ms,
+                        sample_rate,
+                        album,
+                        artist,
+                        format,
+                    }
+                }
                 _ => QueueItem::Missing {
                     path: path.to_string_lossy().to_string(),
                 },

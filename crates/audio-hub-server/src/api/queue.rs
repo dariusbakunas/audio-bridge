@@ -89,8 +89,20 @@ pub async fn queue_play_from(
     state: web::Data<AppState>,
     body: web::Json<QueuePlayFromRequest>,
 ) -> impl Responder {
+    let path = if let Some(track_id) = body.track_id {
+        match state.metadata.db.track_path_for_id(track_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else if let Some(path) = body.path.as_ref() {
+        path.clone()
+    } else {
+        return HttpResponse::BadRequest().body("path or track_id is required");
+    };
+
     match state.output.controller
-        .queue_play_from(&state, &body.path)
+        .queue_play_from(&state, &path)
         .await
     {
         Ok(true) => HttpResponse::Ok().finish(),

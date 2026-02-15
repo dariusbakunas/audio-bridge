@@ -8,7 +8,7 @@ interface QueueModalProps {
   formatMs: (ms?: number | null) => string;
   placeholder: (title?: string | null, artist?: string | null) => string;
   canPlay: boolean;
-  onPlayFrom: (path: string) => void;
+  onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
 }
 
 export default function QueueModal({
