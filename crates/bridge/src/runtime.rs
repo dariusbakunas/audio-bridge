@@ -50,6 +50,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         device_selected.clone(),
         status.clone(),
         config.playback.clone(),
+        config.tls_insecure,
     );
     let _http = http_api::spawn_http_server(
         config.http_bind,

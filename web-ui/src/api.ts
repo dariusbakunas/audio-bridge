@@ -52,13 +52,24 @@ export function apiWsUrl(path: string): string {
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(apiUrl(path), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {})
-    }
-  });
+  const url = apiUrl(path);
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {})
+      }
+    });
+  } catch {
+    const base = getEffectiveApiBase();
+    const target = base ? base : "current origin";
+    const tlsHint = base.startsWith("https://")
+      ? " If using HTTPS with a self-signed cert, trust it in Keychain or use mkcert."
+      : "";
+    throw new Error(`Network error connecting to ${target} (${url}).${tlsHint}`);
+  }
 
   if (!resp.ok) {
     const text = await resp.text();

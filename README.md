@@ -108,6 +108,8 @@ cargo run --release -p bridge -- --list-devices
 cargo run --release -p bridge -- --device "USB" --http-bind 0.0.0.0:5556 listen
 ```
 
+If the hub server uses a self-signed TLS cert and the bridge host doesn’t trust it, add `--tls-insecure`.
+
 ### 2) Run the sender on your machine
 
 First start the server on the machine that hosts your media (config is required):
@@ -121,6 +123,8 @@ Then point the TUI at the server:
 ```bash
  cargo run --release -p hub-cli -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
 ```
+
+If the hub server uses a self-signed TLS cert and the CLI host doesn’t trust it, add `--tls-insecure`.
 
 ## Web UI (experimental)
 

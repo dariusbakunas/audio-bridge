@@ -42,6 +42,10 @@ pub struct Args {
     /// HTTP API bind address, e.g. 0.0.0.0:5556
     #[arg(long, default_value = "0.0.0.0:5556")]
     pub http_bind: SocketAddr,
+
+    /// Allow insecure TLS when streaming from the hub.
+    #[arg(long, default_value_t = false)]
+    pub tls_insecure: bool,
 }
 
 /// Bridge subcommands.

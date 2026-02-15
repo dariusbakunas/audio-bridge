@@ -42,9 +42,14 @@ export default defineConfig(({ mode }) => {
     }
   }
   const appVersion = pkg.version ?? "0.0.0";
-  const proxy = proxyPaths.reduce<Record<string, { target: string; changeOrigin: boolean }>>(
+  const isHttps = apiTarget.startsWith("https://");
+  const proxy = proxyPaths.reduce<Record<string, { target: string; changeOrigin: boolean; secure?: boolean }>>(
     (acc, path) => {
-      acc[path] = { target: apiTarget, changeOrigin: true };
+      acc[path] = {
+        target: apiTarget,
+        changeOrigin: true,
+        secure: !isHttps
+      };
       return acc;
     },
     {}

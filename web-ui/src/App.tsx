@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
-import {apiUrl, apiWsUrl, fetchJson, getDefaultApiBase, getStoredApiBase, postJson, setStoredApiBase} from "./api";
+import {
+  apiUrl,
+  apiWsUrl,
+  fetchJson,
+  getDefaultApiBase,
+  getEffectiveApiBase,
+  getStoredApiBase,
+  postJson,
+  setStoredApiBase
+} from "./api";
 import {
   AlbumListResponse,
   AlbumSummary,
@@ -390,6 +399,16 @@ export default function App() {
     setApiBaseOverride("");
     setStoredApiBase("");
   }, []);
+  const connectionError = useCallback((label: string, path?: string) => {
+    const base = getEffectiveApiBase();
+    const target = base ? base : "current origin";
+    const tlsHint = base.startsWith("https://")
+      ? " If using HTTPS with a self-signed cert, trust it in Keychain or use mkcert."
+      : "";
+    const url = path ? apiUrl(path) : null;
+    const detail = url ? `${target} (${url})` : target;
+    return `${label} (${detail}).${tlsHint}`;
+  }, []);
 
   const openTrackMatchForLibrary = useCallback(
     (path: string) => {
@@ -611,7 +630,7 @@ export default function App() {
       setActiveOutputId(activeId);
       setError(null);
     },
-    onError: () => setError("Live outputs disconnected.")
+    onError: () => setError(connectionError("Live outputs disconnected", "/outputs/stream"))
   });
 
   const {
@@ -644,7 +663,7 @@ export default function App() {
       };
       setMetadataEvents((prev) => [entry, ...prev].slice(0, MAX_METADATA_EVENTS));
     },
-    onError: () => setError("Live metadata updates disconnected.")
+    onError: () => setError(connectionError("Live metadata updates disconnected", "/metadata/stream"))
   });
 
   useLogsStream({
@@ -667,7 +686,7 @@ export default function App() {
       };
       setLogEvents((prev) => [row, ...prev].slice(0, MAX_LOG_EVENTS));
     },
-    onError: () => setLogsError("Live logs disconnected.")
+    onError: () => setLogsError(connectionError("Live logs disconnected", "/logs/stream"))
   });
 
   useStatusStream({
@@ -677,7 +696,7 @@ export default function App() {
       setUpdatedAt(new Date());
       setError(null);
     },
-    onError: () => setError("Live status disconnected.")
+    onError: () => setError(connectionError("Live status disconnected", activeOutputId ? `/outputs/${encodeURIComponent(activeOutputId)}/status/stream` : undefined))
   });
 
   const sendBrowserStatus = useCallback((force = false) => {
@@ -868,7 +887,7 @@ export default function App() {
       setQueue(items ?? []);
       setError(null);
     },
-    onError: () => setError("Live queue disconnected.")
+    onError: () => setError(connectionError("Live queue disconnected", "/queue/stream"))
   });
 
   useEffect(() => {

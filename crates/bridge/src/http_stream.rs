@@ -16,6 +16,8 @@ pub(crate) struct HttpRangeConfig {
     pub(crate) block_size: usize,
     /// Per-request timeout.
     pub(crate) timeout: Duration,
+    /// Allow insecure TLS (self-signed certs).
+    pub(crate) tls_insecure: bool,
 }
 
 impl Default for HttpRangeConfig {
@@ -23,6 +25,7 @@ impl Default for HttpRangeConfig {
         Self {
             block_size: 512 * 1024,
             timeout: Duration::from_secs(10),
+            tls_insecure: false,
         }
     }
 }
@@ -31,6 +34,7 @@ impl Default for HttpRangeConfig {
 pub(crate) struct HttpRangeSource {
     url: String,
     config: HttpRangeConfig,
+    agent: ureq::Agent,
     pos: u64,
     len: Option<u64>,
     buf: Vec<u8>,
@@ -45,9 +49,11 @@ impl HttpRangeSource {
         config: HttpRangeConfig,
         cancel: Option<Arc<AtomicBool>>,
     ) -> Self {
+        let agent = build_agent(config.tls_insecure);
         Self {
             url,
             config,
+            agent,
             pos: 0,
             len: None,
             buf: Vec::new(),
@@ -82,13 +88,24 @@ impl HttpRangeSource {
     fn fetch_range(&self, start: u64, end: u64) -> io::Result<(Vec<u8>, Option<u64>)> {
         let range = format!("bytes={start}-{end}");
         let start = std::time::Instant::now();
-        let resp = ureq::get(&self.url)
+        tracing::info!(url = %self.url, range = %range, "http range request");
+        let resp = self.agent.get(&self.url)
             .config()
             .timeout_per_call(Some(self.config.timeout))
             .build()
             .header("Range", &range)
-            .call()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("http range request failed: {e}")))?;
+            .call();
+        let mut resp = match resp {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::error!(
+                    url = %self.url,
+                    range = %range,
+                    "http range request failed: {e}"
+                );
+                return Err(io::Error::new(io::ErrorKind::Other, format!("http range request failed: {e}")));
+            }
+        };
         let elapsed = start.elapsed();
 
         let status = resp.status();
@@ -102,12 +119,63 @@ impl HttpRangeSource {
             .get("Content-Length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok());
+        let content_type = resp
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        tracing::info!(
+            status = ?status,
+            url = %self.url,
+            range = %range,
+            content_length = ?content_length,
+            content_range = ?content_range,
+            content_type = ?content_type,
+            "http range response headers"
+        );
 
         let mut buf = Vec::new();
         let (_, body) = resp.into_parts();
         body.into_reader()
             .read_to_end(&mut buf)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("http read failed: {e}")))?;
+        tracing::info!(
+            status = ?status,
+            url = %self.url,
+            range = %range,
+            bytes = buf.len(),
+            content_length = ?content_length,
+            content_range = ?content_range,
+            content_type = ?content_type,
+            "http range fetch"
+        );
+        if status != ureq::http::StatusCode::OK
+            && status != ureq::http::StatusCode::PARTIAL_CONTENT
+        {
+            let snippet = String::from_utf8_lossy(&buf);
+            let snippet = snippet.trim();
+            let detail = if snippet.is_empty() {
+                String::from("")
+            } else {
+                format!(" body=\"{}\"", snippet)
+            };
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "http range status={status} url={} range={} content_length={:?} content_range={:?} content_type={:?}{}",
+                    self.url, range, content_length, content_range, content_type, detail
+                ),
+            ));
+        }
+        if buf.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "http range empty body status={status} url={} range={} content_length={:?} content_range={:?} content_type={:?}",
+                    self.url, range, content_length, content_range, content_type
+                ),
+            ));
+        }
         if elapsed > Duration::from_millis(250) {
             let kbps = if elapsed.as_millis() > 0 {
                 (buf.len() as u128 * 1000 / elapsed.as_millis()) / 1024
@@ -150,6 +218,14 @@ impl HttpRangeSource {
         }
 
         let (buf, len) = self.fetch_range(start, end)?;
+        tracing::info!(
+            url = %self.url,
+            start = start,
+            end = end,
+            bytes = buf.len(),
+            total_len = ?len,
+            "http range refill"
+        );
         if let Some(total) = len {
             self.len = Some(total);
         }
@@ -157,6 +233,20 @@ impl HttpRangeSource {
         self.buf_start = start;
         Ok(())
     }
+}
+
+fn build_agent(tls_insecure: bool) -> ureq::Agent {
+    let mut tls_builder = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::Rustls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier);
+    if tls_insecure {
+        tls_builder = tls_builder.disable_verification(true);
+    }
+    let tls = tls_builder.build();
+    ureq::Agent::config_builder()
+        .tls_config(tls)
+        .build()
+        .new_agent()
 }
 
 impl Read for HttpRangeSource {
@@ -169,6 +259,12 @@ impl Read for HttpRangeSource {
         }
         if let Some(len) = self.len {
             if self.pos >= len {
+                tracing::info!(
+                    url = %self.url,
+                    pos = self.pos,
+                    len = len,
+                    "http read reached end"
+                );
                 return Ok(0);
             }
         }

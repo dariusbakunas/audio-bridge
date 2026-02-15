@@ -47,6 +47,7 @@ fn main() -> Result<()> {
                 path: path.clone(),
                 device: args.device.clone(),
                 playback,
+                tls_insecure: args.tls_insecure,
             };
             runtime::run_play(cfg)?;
         }
@@ -55,6 +56,7 @@ fn main() -> Result<()> {
                 http_bind: args.http_bind,
                 device: args.device.clone(),
                 playback,
+                tls_insecure: args.tls_insecure,
             };
             runtime::run_listen(cfg, true)?;
         }

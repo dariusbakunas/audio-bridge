@@ -55,9 +55,10 @@ pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
+    tls_insecure: bool,
 ) -> PlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
-    std::thread::spawn(move || player_thread_main(device_selected, status, playback, cmd_rx));
+    std::thread::spawn(move || player_thread_main(device_selected, status, playback, tls_insecure, cmd_rx));
     PlayerHandle { cmd_tx }
 }
 
@@ -66,6 +67,7 @@ fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
+    tls_insecure: bool,
     cmd_rx: Receiver<PlayerCommand>,
 ) {
     let session_id = Arc::new(AtomicU64::new(0));
@@ -106,6 +108,7 @@ fn player_thread_main(
                     &device_selected,
                     &status,
                     &playback,
+                    tls_insecure,
                     &session_id,
                     &mut session,
                     url,
@@ -139,6 +142,7 @@ fn player_thread_main(
                     &device_selected,
                     &status,
                     &playback,
+                    tls_insecure,
                     &session_id,
                     &mut session,
                     url,
@@ -187,6 +191,7 @@ fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
+    tls_insecure: bool,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
     url: String,
@@ -220,6 +225,7 @@ fn start_new_session(
             &device_selected,
             &status,
             &playback,
+            tls_insecure,
             url,
             ext_hint,
             title,
@@ -247,6 +253,7 @@ fn play_one_http(
     device_selected: &Arc<Mutex<Option<String>>>,
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
+    tls_insecure: bool,
     url: String,
     ext_hint: Option<String>,
     title: Option<String>,
@@ -265,7 +272,19 @@ fn play_one_http(
 
     let playback_eff = effective_playback_for_seek(playback, seek_ms);
 
-    let source = HttpRangeSource::new(url.clone(), HttpRangeConfig::default(), Some(cancel.clone()));
+    tracing::info!(
+        url = %url,
+        tls_insecure,
+        "bridge http stream start"
+    );
+    let source = HttpRangeSource::new(
+        url.clone(),
+        HttpRangeConfig {
+            tls_insecure,
+            ..HttpRangeConfig::default()
+        },
+        Some(cancel.clone()),
+    );
     let (src_spec, srcq, duration_ms, source_info) =
         decode::start_streaming_decode_from_media_source_at(
             Box::new(source),

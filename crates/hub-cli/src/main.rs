@@ -56,6 +56,10 @@ struct Args {
     #[arg(long)]
     bridge_device: Option<String>,
 
+    /// Allow insecure TLS connections (self-signed certs).
+    #[arg(long, default_value_t = false)]
+    tls_insecure: bool,
+
 }
 
 #[derive(Clone)]
@@ -136,11 +140,13 @@ fn main() -> Result<()> {
         bridge_http_bind = %args.bridge_http_bind,
         "hub-cli starting"
     );
+    server_api::init_agent(args.tls_insecure);
     if !args.no_bridge {
         let cfg = BridgeListenConfig {
             http_bind: args.bridge_http_bind,
             device: args.bridge_device.clone(),
             playback: PlaybackConfig::default(),
+            tls_insecure: args.tls_insecure,
         };
         std::thread::spawn(move || {
             if let Err(e) = runtime::run_listen(cfg, false) {

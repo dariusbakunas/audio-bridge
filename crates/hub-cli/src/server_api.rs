@@ -1,11 +1,33 @@
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use audio_bridge_types::PlaybackStatus;
 
 use crate::library::{LibraryItem, Track};
+
+static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+
+pub fn init_agent(tls_insecure: bool) {
+    let mut tls_builder = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::Rustls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier);
+    if tls_insecure {
+        tls_builder = tls_builder.disable_verification(true);
+    }
+    let tls = tls_builder.build();
+    let agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .build()
+        .new_agent();
+    let _ = AGENT.set(agent);
+}
+
+fn agent() -> &'static ureq::Agent {
+    AGENT.get_or_init(|| ureq::Agent::config_builder().build().new_agent())
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -111,7 +133,7 @@ pub(crate) fn list_entries(server: &str, dir: &Path) -> Result<Vec<LibraryItem>>
         urlencoding::encode(&dir_str)
     );
     let resp: LibraryResponse = read_json(
-        ureq::get(&url)
+        agent().get(&url)
             .call()
             .context("request /library")?,
         "library",
@@ -141,7 +163,7 @@ pub(crate) fn list_entries(server: &str, dir: &Path) -> Result<Vec<LibraryItem>>
 
 pub(crate) fn rescan(server: &str) -> Result<()> {
     let url = format!("{}/library/rescan", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_empty()
         .context("request /library/rescan")?;
     if !resp.status().is_success() {
@@ -152,7 +174,7 @@ pub(crate) fn rescan(server: &str) -> Result<()> {
 
 pub(crate) fn pause_toggle(server: &str) -> Result<()> {
     let url = format!("{}/pause", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_empty()
         .context("request /pause")?;
     if !resp.status().is_success() {
@@ -163,7 +185,7 @@ pub(crate) fn pause_toggle(server: &str) -> Result<()> {
 
 pub(crate) fn stop(server: &str) -> Result<()> {
     let url = format!("{}/stop", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_empty()
         .context("request /stop")?;
     if !resp.status().is_success() {
@@ -174,7 +196,7 @@ pub(crate) fn stop(server: &str) -> Result<()> {
 
 pub(crate) fn seek(server: &str, ms: u64) -> Result<()> {
     let url = format!("{}/seek", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(SeekRequest { ms })
         .context("request /seek")?;
     if !resp.status().is_success() {
@@ -227,7 +249,7 @@ pub(crate) fn status_for_output(server: &str, output_id: &str) -> Result<RemoteS
         urlencoding::encode(output_id)
     );
     let resp: StatusResponse = read_json(
-        ureq::get(&url)
+        agent().get(&url)
             .call()
             .context("request /outputs/{id}/status")?,
         "status",
@@ -238,7 +260,7 @@ pub(crate) fn status_for_output(server: &str, output_id: &str) -> Result<RemoteS
 pub(crate) fn outputs(server: &str) -> Result<RemoteOutputs> {
     let url = format!("{}/outputs", server.trim_end_matches('/'));
     let resp: OutputsResponse = read_json(
-        ureq::get(&url)
+        agent().get(&url)
             .call()
             .context("request /outputs")?,
         "outputs",
@@ -251,7 +273,7 @@ where
     F: FnMut(RemoteOutputs),
 {
     let url = format!("{}/outputs/stream", server.trim_end_matches('/'));
-    let resp = ureq::get(&url)
+    let resp = agent().get(&url)
         .call()
         .context("request /outputs/stream")?;
     if !resp.status().is_success() {
@@ -318,7 +340,7 @@ fn to_remote_outputs(resp: OutputsResponse) -> RemoteOutputs {
 pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
     let url = format!("{}/outputs/select", server.trim_end_matches('/'));
     let body = serde_json::json!({ "id": id });
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(body)
         .context("request /outputs/select")?;
     if !resp.status().is_success() {
@@ -330,7 +352,7 @@ pub(crate) fn outputs_select(server: &str, id: &str) -> Result<()> {
 pub(crate) fn queue_list(server: &str) -> Result<RemoteQueue> {
     let url = format!("{}/queue", server.trim_end_matches('/'));
     let resp: QueueResponse = read_json(
-        ureq::get(&url)
+        agent().get(&url)
             .call()
             .context("request /queue")?,
         "queue",
@@ -376,7 +398,7 @@ pub(crate) fn queue_add(server: &str, paths: &[PathBuf]) -> Result<()> {
             .map(|p| p.to_string_lossy().to_string())
             .collect(),
     };
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(body)
         .context("request /queue")?;
     if !resp.status().is_success() {
@@ -393,7 +415,7 @@ pub(crate) fn queue_add_next(server: &str, paths: &[PathBuf]) -> Result<()> {
             .map(|p| p.to_string_lossy().to_string())
             .collect(),
     };
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(body)
         .context("request /queue/next/add")?;
     if !resp.status().is_success() {
@@ -407,7 +429,7 @@ pub(crate) fn queue_remove(server: &str, path: &Path) -> Result<()> {
     let body = QueueRemoveRequest {
         path: path.to_string_lossy().to_string(),
     };
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(body)
         .context("request /queue/remove")?;
     if !resp.status().is_success() {
@@ -418,7 +440,7 @@ pub(crate) fn queue_remove(server: &str, path: &Path) -> Result<()> {
 
 pub(crate) fn queue_next(server: &str) -> Result<bool> {
     let url = format!("{}/queue/next", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_empty()
         .context("request /queue/next")?;
     Ok(resp.status().is_success())
@@ -426,7 +448,7 @@ pub(crate) fn queue_next(server: &str) -> Result<bool> {
 
 pub(crate) fn queue_clear(server: &str) -> Result<()> {
     let url = format!("{}/queue/clear", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_empty()
         .context("request /queue/clear")?;
     if !resp.status().is_success() {
@@ -437,7 +459,7 @@ pub(crate) fn queue_clear(server: &str) -> Result<()> {
 
 pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
     let url = format!("{}/play", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(PlayRequest {
             path: path.to_string_lossy().to_string(),
             queue_mode: Some(QueueMode::Replace),
@@ -451,7 +473,7 @@ pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
 
 pub(crate) fn play_keep(server: &str, path: &Path) -> Result<()> {
     let url = format!("{}/play", server.trim_end_matches('/'));
-    let resp = ureq::post(&url)
+    let resp = agent().post(&url)
         .send_json(PlayRequest {
             path: path.to_string_lossy().to_string(),
             queue_mode: Some(QueueMode::Keep),
