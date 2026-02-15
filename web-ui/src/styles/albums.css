@@ -27,14 +27,36 @@
 
 .album-cover-frame {
   position: relative;
-  background: var(--bg-panel);
+  background: transparent;
   border: none;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
   overflow: hidden;
 }
 
 .album-cover-frame::before {
-  content: none;
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.5) 1px,
+      rgba(255, 255, 255, 0.5) 2px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.5) 1px,
+      rgba(255, 255, 255, 0.5) 2px
+    );
+  background-size: 2px 2px;
+  mix-blend-mode: overlay;
+  z-index: 1;
 }
 
 .album-cover-frame::after {
@@ -147,6 +169,7 @@
 
 .album-card-info {
   min-height: 44px;
+  margin-top: 8px;
 }
 
 .album-cover {
@@ -157,7 +180,7 @@
   border: none;
   background: var(--bg-panel);
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .album-cover.large {
@@ -265,7 +288,7 @@
 }
 
 .album-cover-frame.large::before {
-  opacity: 0.1;
+  content: none;
 }
 
 .album-cover-frame.large::after {
