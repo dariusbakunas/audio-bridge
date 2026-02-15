@@ -152,8 +152,8 @@ export default function PlayerBar({
             <Activity className="icon" aria-hidden="true" />
             <span className="player-action-label">
               {status?.sample_rate && status?.source_bit_depth
-                ? `${Math.round(status.sample_rate / 1000)}k/${status.source_bit_depth}`
-                : "Signal"}
+                ? `${Math.round(status.sample_rate / 1000)}/${status.source_bit_depth}`
+                : "--/--"}
             </span>
           </button>
           <button className="player-action player-action-output" onClick={onSelectOutput}>
