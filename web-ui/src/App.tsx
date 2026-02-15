@@ -267,7 +267,6 @@ export default function App() {
   const lastBrowserStatusSentRef = useRef<number>(0);
   const notificationIdRef = useRef(0);
   const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
-  const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const closeTrackMenu = useCallback(() => {
     setTrackMenuPath(null);
@@ -485,24 +484,18 @@ export default function App() {
   }, [apiBaseOverride, connectionError, markServerConnected, markServerDisconnected]);
 
   useEffect(() => {
-    if (!notificationsOpen) return;
-    function handleDocumentClick(event: MouseEvent) {
-      const target = event.target as Node | null;
-      if (notificationsRef.current?.contains(target)) {
-        return;
-      }
-      setNotificationsOpen(false);
-    }
-    document.addEventListener("click", handleDocumentClick);
-    return () => {
-      document.removeEventListener("click", handleDocumentClick);
-    };
-  }, [notificationsOpen]);
-
-  useEffect(() => {
     if (notificationsOpen) {
       setUnreadCount(0);
     }
+  }, [notificationsOpen]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
   }, [notificationsOpen]);
 
   const openTrackMatchForAlbum = useCallback(
@@ -1291,7 +1284,7 @@ export default function App() {
                 ) : null}
               </div>
               {viewTitle ? <h1>{viewTitle}</h1> : <span />}
-              <div className="view-header-actions" ref={notificationsRef}>
+              <div className="view-header-actions">
                 <button
                   className={`icon-btn notification-btn ${notificationsOpen ? "active" : ""}`}
                   onClick={toggleNotifications}
@@ -1311,29 +1304,6 @@ export default function App() {
                     </span>
                   ) : null}
                 </button>
-                {notificationsOpen ? (
-                  <div className="notification-panel">
-                    <div className="notification-header">
-                      <span>Notifications</span>
-                      <button className="btn ghost small" onClick={clearNotifications}>
-                        Clear
-                      </button>
-                    </div>
-                    <div className="notification-list">
-                      {notifications.length === 0 ? (
-                        <div className="muted small">No notifications yet.</div>
-                      ) : null}
-                      {notifications.map((entry) => (
-                        <div key={entry.id} className={`notification-item level-${entry.level}`}>
-                          <div className="notification-message">{entry.message}</div>
-                          <div className="notification-time">
-                            {entry.createdAt.toLocaleTimeString()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
               </div>
             </div>
           </header>
@@ -1431,6 +1401,40 @@ export default function App() {
           pauseOnHover
           theme="light"
         />
+      ) : null}
+
+      {notificationsOpen && !showGate ? (
+        <div className="side-panel-backdrop" onClick={() => setNotificationsOpen(false)}>
+          <aside
+            className="side-panel notification-panel"
+            aria-label="Notifications"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="card-header">
+              <span>Notifications</span>
+              <div className="card-actions">
+                <span className="pill">{notifications.length} items</span>
+                <button className="btn ghost small" onClick={clearNotifications}>
+                  Clear
+                </button>
+                <button className="btn ghost small" onClick={() => setNotificationsOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="notification-list">
+              {notifications.length === 0 ? (
+                <div className="muted small">No notifications yet.</div>
+              ) : null}
+              {notifications.map((entry) => (
+                <div key={entry.id} className={`notification-item level-${entry.level}`}>
+                  <div className="notification-message">{entry.message}</div>
+                  <div className="notification-time">{entry.createdAt.toLocaleTimeString()}</div>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
       ) : null}
 
       {!showGate ? (
