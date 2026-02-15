@@ -88,7 +88,7 @@ impl HttpRangeSource {
     fn fetch_range(&self, start: u64, end: u64) -> io::Result<(Vec<u8>, Option<u64>)> {
         let range = format!("bytes={start}-{end}");
         let start = std::time::Instant::now();
-        tracing::info!(url = %self.url, range = %range, "http range request");
+        tracing::debug!(url = %self.url, range = %range, "http range request");
         let resp = self.agent.get(&self.url)
             .config()
             .timeout_per_call(Some(self.config.timeout))
@@ -124,7 +124,7 @@ impl HttpRangeSource {
             .get("Content-Type")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
-        tracing::info!(
+        tracing::debug!(
             status = ?status,
             url = %self.url,
             range = %range,
@@ -139,7 +139,7 @@ impl HttpRangeSource {
         body.into_reader()
             .read_to_end(&mut buf)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("http read failed: {e}")))?;
-        tracing::info!(
+        tracing::debug!(
             status = ?status,
             url = %self.url,
             range = %range,
@@ -218,7 +218,7 @@ impl HttpRangeSource {
         }
 
         let (buf, len) = self.fetch_range(start, end)?;
-        tracing::info!(
+        tracing::debug!(
             url = %self.url,
             start = start,
             end = end,
@@ -259,7 +259,7 @@ impl Read for HttpRangeSource {
         }
         if let Some(len) = self.len {
             if self.pos >= len {
-                tracing::info!(
+                tracing::debug!(
                     url = %self.url,
                     pos = self.pos,
                     len = len,

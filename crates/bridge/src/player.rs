@@ -272,7 +272,7 @@ fn play_one_http(
 
     let playback_eff = effective_playback_for_seek(playback, seek_ms);
 
-    tracing::info!(
+    tracing::debug!(
         url = %url,
         tls_insecure,
         "bridge http stream start"
