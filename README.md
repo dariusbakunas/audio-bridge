@@ -22,10 +22,11 @@ Each binary supports `--version`, which includes the crate version, git SHA, and
 
 ### Playback flow
 
-1. `hub-cli` sends play/seek/queue commands to `audio-hub-server`.
-2. `audio-hub-server` resolves the selected output and exposes `/stream` for the current track.
+1. `hub-cli` or `web-ui` sends play/seek/queue commands to `audio-hub-server` using track/album ids.
+2. `audio-hub-server` resolves the selected output and exposes `/stream/track/{id}` for the current track.
 3. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
 4. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
+5. Status and queue updates stream from the hub over server-sent events (no polling).
 
 ```mermaid
 sequenceDiagram
@@ -34,14 +35,14 @@ sequenceDiagram
     participant BR as bridge
     participant AP as audio-player
 
-    CLI->>HUB: POST /play (path)
+    CLI->>HUB: POST /play/album (album_id)
     HUB-->>CLI: 200 OK
-    BR->>HUB: GET /stream?path=...
+    BR->>HUB: GET /stream/track/{id}
     HUB-->>BR: 206 Partial Content (audio)
     BR->>AP: decode + resample + playback
     AP-->>BR: status/metrics
-    BR->>HUB: GET /status (poll)
-    HUB-->>CLI: GET /outputs/{id}/status
+    BR->>HUB: GET /status/stream (SSE)
+    HUB-->>CLI: SSE /status/stream + /queue/stream
 ```
 
 ### audio-player pipeline (conceptual)
@@ -69,7 +70,7 @@ Notes:
 ### Outputs + providers
 
 - Providers expose outputs (devices). The hub keeps one active output at a time.
-- `bridge` outputs are discovered via mDNS and polled over HTTP.
+- `bridge` outputs are discovered via mDNS and status streams over HTTP (SSE).
 - Local outputs (optional) reuse the same control path as bridge outputs.
 - Browser outputs are registered by the web UI and controlled via WebSocket (`/browser/ws`).
 
