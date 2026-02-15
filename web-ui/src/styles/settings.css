@@ -67,22 +67,44 @@
 .log-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 280px;
+  gap: 0;
+  max-height: calc(100vh - 360px);
   overflow: auto;
-  padding: 14px;
+  padding: 0;
   border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
   font-family: "JetBrains Mono", monospace;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
 }
 
 .log-row {
   display: grid;
-  grid-template-columns: 80px 60px 1fr;
-  gap: 12px;
-  align-items: baseline;
+  grid-template-columns: 190px 70px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.log-row:last-child {
+  border-bottom: none;
+}
+
+.logs-panel {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.logs-panel .card-header {
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+.log-time {
+  color: var(--muted-2);
+  letter-spacing: 0.08em;
 }
 
 .log-level {
@@ -115,10 +137,11 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  color: var(--muted);
 }
 
 .log-target {
-  color: var(--muted);
+  color: var(--muted-2);
   font-size: 0.72rem;
 }
 

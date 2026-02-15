@@ -133,7 +133,7 @@ export default function SettingsView({
         ) : null}
 
         {isLogs ? (
-          <div className="card">
+          <div className="logs-panel">
             <div className="card-header">
               <span>Server logs</span>
               <div className="card-actions">
@@ -150,9 +150,12 @@ export default function SettingsView({
                 {logEvents.map((entry) => {
                   const timestamp = new Date(entry.event.timestamp_ms);
                   const level = entry.event.level.toLowerCase();
+                  const date = new Date(entry.event.timestamp_ms);
+                  const dateLabel = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+                  const timeLabel = date.toLocaleTimeString([], { hour12: false });
                   return (
                     <div key={entry.id} className="log-row">
-                      <span className="log-time">{timestamp.toLocaleTimeString()}</span>
+                      <span className="log-time">{dateLabel} {timeLabel}</span>
                       <span className={`log-level log-${level}`}>{entry.event.level}</span>
                       <span className="log-message">
                         {entry.event.message}
