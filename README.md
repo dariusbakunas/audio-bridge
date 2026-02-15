@@ -133,6 +133,8 @@ The hub server can serve a lightweight web dashboard if `web-ui/dist` is present
 
 ![web-ui screenshot](docs/screenshots/web-ui.png)
 
+![web-ui detail screenshot](docs/screenshots/web-ui-detail.png)
+
 Build the UI:
 
 ```bash
