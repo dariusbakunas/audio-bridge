@@ -10,6 +10,7 @@ pub mod playback;
 pub mod queue;
 pub mod streams;
 pub mod browser;
+pub mod health;
 
 pub use library::{
     list_library,
@@ -68,6 +69,7 @@ pub use streams::{
     status_stream,
 };
 pub use browser::browser_ws;
+pub use health::HealthResponse;
 
 #[cfg(test)]
 mod tests {

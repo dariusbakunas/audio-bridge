@@ -44,6 +44,7 @@ use crate::models;
         api::metadata::track_cover,
         api::metadata::album_cover,
         api::logs::logs_clear,
+        api::health::health,
         api::playback::status_for_output,
         api::streams::status_stream,
         api::outputs::providers_list,
@@ -96,6 +97,7 @@ use crate::models;
             crate::events::MetadataEvent,
             crate::events::LogEvent,
             api::LogsClearResponse,
+            api::HealthResponse,
         )
     ),
     tags(

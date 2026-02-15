@@ -3,6 +3,8 @@ import { apiUrl } from "../api";
 import { LogEvent, MetadataEvent, OutputsResponse, QueueResponse, StatusResponse } from "../types";
 
 interface OutputsStreamOptions {
+  enabled?: boolean;
+  sourceKey?: string;
   onEvent: (data: OutputsResponse) => void;
   onError: () => void;
 }
@@ -21,17 +23,21 @@ interface LogsStreamOptions {
 }
 
 interface QueueStreamOptions {
+  enabled?: boolean;
+  sourceKey?: string;
   onEvent: (items: QueueResponse["items"]) => void;
   onError: () => void;
 }
 
 interface StatusStreamOptions {
+  enabled?: boolean;
+  sourceKey?: string;
   activeOutputId: string | null;
   onEvent: (data: StatusResponse) => void;
   onError: () => void;
 }
 
-export function useOutputsStream({ onEvent, onError }: OutputsStreamOptions) {
+export function useOutputsStream({ enabled = true, sourceKey, onEvent, onError }: OutputsStreamOptions) {
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -40,6 +46,7 @@ export function useOutputsStream({ onEvent, onError }: OutputsStreamOptions) {
   }, [onEvent, onError]);
 
   useEffect(() => {
+    if (!enabled) return;
     let mounted = true;
     const stream = new EventSource(apiUrl("/outputs/stream"));
     stream.addEventListener("outputs", (event) => {
@@ -55,7 +62,7 @@ export function useOutputsStream({ onEvent, onError }: OutputsStreamOptions) {
       mounted = false;
       stream.close();
     };
-  }, []);
+  }, [enabled, sourceKey]);
 }
 
 export function useMetadataStream({ enabled, onEvent, onError }: MetadataStreamOptions) {
@@ -121,7 +128,7 @@ export function useLogsStream({ enabled, onSnapshot, onEvent, onError }: LogsStr
   }, [enabled]);
 }
 
-export function useQueueStream({ onEvent, onError }: QueueStreamOptions) {
+export function useQueueStream({ enabled = true, sourceKey, onEvent, onError }: QueueStreamOptions) {
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -130,6 +137,7 @@ export function useQueueStream({ onEvent, onError }: QueueStreamOptions) {
   }, [onEvent, onError]);
 
   useEffect(() => {
+    if (!enabled) return;
     let mounted = true;
     const stream = new EventSource(apiUrl("/queue/stream"));
     stream.addEventListener("queue", (event) => {
@@ -145,10 +153,10 @@ export function useQueueStream({ onEvent, onError }: QueueStreamOptions) {
       mounted = false;
       stream.close();
     };
-  }, []);
+  }, [enabled, sourceKey]);
 }
 
-export function useStatusStream({ activeOutputId, onEvent, onError }: StatusStreamOptions) {
+export function useStatusStream({ enabled = true, sourceKey, activeOutputId, onEvent, onError }: StatusStreamOptions) {
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -157,7 +165,7 @@ export function useStatusStream({ activeOutputId, onEvent, onError }: StatusStre
   }, [onEvent, onError]);
 
   useEffect(() => {
-    if (!activeOutputId) return;
+    if (!enabled || !activeOutputId) return;
     let mounted = true;
     const streamUrl = apiUrl(`/outputs/${encodeURIComponent(activeOutputId)}/status/stream`);
     const stream = new EventSource(streamUrl);
@@ -174,5 +182,5 @@ export function useStatusStream({ activeOutputId, onEvent, onError }: StatusStre
       mounted = false;
       stream.close();
     };
-  }, [activeOutputId]);
+  }, [activeOutputId, enabled, sourceKey]);
 }

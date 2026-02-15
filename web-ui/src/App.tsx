@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
+import { toast, ToastContainer } from "react-toastify";
 import {
   apiUrl,
   apiWsUrl,
@@ -34,6 +35,7 @@ import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
 import SettingsView from "./components/SettingsView";
 import SignalModal from "./components/SignalModal";
+import ConnectionGate from "./components/ConnectionGate";
 import {
   useLogsStream,
   useMetadataStream,
@@ -85,6 +87,15 @@ type AlbumEditTarget = {
     albumArtist?: string | null;
     year?: number | null;
   };
+};
+
+type ToastLevel = "error" | "warn" | "info" | "success";
+
+type ToastNotification = {
+  id: number;
+  level: ToastLevel;
+  message: string;
+  createdAt: Date;
 };
 
 const MAX_METADATA_EVENTS = 200;
@@ -260,7 +271,12 @@ export default function App() {
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<ToastNotification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [serverConnected, setServerConnected] = useState<boolean>(false);
+  const [serverConnecting, setServerConnecting] = useState<boolean>(true);
+  const [serverError, setServerError] = useState<string | null>(null);
   const albumsReloadTimerRef = useRef<number | null>(null);
   const albumsReloadQueuedRef = useRef(false);
   const albumsLoadingRef = useRef(false);
@@ -275,6 +291,9 @@ export default function App() {
   const browserSessionIdRef = useRef<string | null>(null);
   const browserPathRef = useRef<string | null>(null);
   const lastBrowserStatusSentRef = useRef<number>(0);
+  const notificationIdRef = useRef(0);
+  const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const closeTrackMenu = useCallback(() => {
     setTrackMenuPath(null);
@@ -395,10 +414,12 @@ export default function App() {
   const handleApiBaseChange = useCallback((value: string) => {
     setApiBaseOverride(value);
     setStoredApiBase(value);
+    setServerConnecting(true);
   }, []);
   const handleApiBaseReset = useCallback(() => {
     setApiBaseOverride("");
     setStoredApiBase("");
+    setServerConnecting(true);
   }, []);
   const connectionError = useCallback((label: string, path?: string) => {
     const base = getEffectiveApiBase();
@@ -410,6 +431,124 @@ export default function App() {
     const detail = url ? `${target} (${url})` : target;
     return `${label} (${detail}).${tlsHint}`;
   }, []);
+
+  const markServerConnected = useCallback(() => {
+    setServerConnected(true);
+    setServerConnecting(false);
+    setServerError(null);
+  }, []);
+
+  const markServerDisconnected = useCallback((message: string) => {
+    setServerConnected(false);
+    setServerConnecting(false);
+    setServerError(message);
+  }, []);
+
+  const pushToast = useCallback((message: string, level: ToastLevel = "error") => {
+    const now = Date.now();
+    const last = toastLastRef.current;
+    if (last && last.message === message && last.level === level && now - last.at < 2500) {
+      return;
+    }
+    toastLastRef.current = { message, level, at: now };
+    const id = (notificationIdRef.current += 1);
+    const entry: ToastNotification = {
+      id,
+      level,
+      message,
+      createdAt: new Date()
+    };
+    setNotifications((prev) => [entry, ...prev].slice(0, 200));
+    setUnreadCount((prev) => prev + 1);
+    const toastId = `${level}:${message}`;
+    switch (level) {
+      case "success":
+        toast.success(message, { toastId });
+        break;
+      case "info":
+        toast.info(message, { toastId });
+        break;
+      case "warn":
+        toast.warn(message, { toastId });
+        break;
+      default:
+        toast.error(message, { toastId });
+        break;
+    }
+  }, []);
+
+  const reportError = useCallback(
+    (message: string | null, level: ToastLevel = "error") => {
+      if (!message) return;
+      pushToast(message, level);
+    },
+    [pushToast]
+  );
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+    setUnreadCount(0);
+  }, []);
+
+  const toggleNotifications = useCallback(() => {
+    setNotificationsOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setUnreadCount(0);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let timer: number | null = null;
+
+    const checkHealth = async () => {
+      try {
+        await fetchJson<{ status: string }>("/health");
+        if (!active) return;
+        markServerConnected();
+        setAlbumsError(null);
+        setAlbumTracksError(null);
+      } catch (err) {
+        if (!active) return;
+        const message = connectionError("Hub server not reachable", "/health");
+        markServerDisconnected(message);
+      }
+    };
+
+    checkHealth();
+    timer = window.setInterval(checkHealth, 5000);
+
+    return () => {
+      active = false;
+      if (timer !== null) {
+        window.clearInterval(timer);
+      }
+    };
+  }, [apiBaseOverride, connectionError, markServerConnected, markServerDisconnected]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (notificationsRef.current?.contains(target)) {
+        return;
+      }
+      setNotificationsOpen(false);
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, [notificationsOpen]);
+
+  useEffect(() => {
+    if (notificationsOpen) {
+      setUnreadCount(0);
+    }
+  }, [notificationsOpen]);
 
   const openTrackMatchForLibrary = useCallback(
     (path: string) => {
@@ -623,16 +762,26 @@ export default function App() {
     }
   }, [isPlaying, signalOpen]);
 
+  const streamKey = useMemo(
+    () => `${apiBaseOverride}:${serverConnected ? "up" : "down"}`,
+    [apiBaseOverride, serverConnected]
+  );
+
   useOutputsStream({
+    enabled: serverConnected,
+    sourceKey: streamKey,
     onEvent: (data) => {
       const activeId = data.outputs.some((output) => output.id === data.active_id)
           ? data.active_id
           : null;
       setOutputs(data.outputs);
       setActiveOutputId(activeId);
-      setError(null);
+      markServerConnected();
     },
-    onError: () => setError(connectionError("Live outputs disconnected", "/outputs/stream"))
+    onError: () => {
+      const message = connectionError("Live outputs disconnected", "/outputs/stream");
+      reportError(message, "warn");
+    }
   });
 
   const {
@@ -650,13 +799,13 @@ export default function App() {
   } = usePlaybackActions({
     activeOutputId,
     rescanBusy,
-    setError,
+    setError: reportError,
     setActiveOutputId,
     setRescanBusy
   });
 
   useMetadataStream({
-    enabled: settingsOpen,
+    enabled: settingsOpen && serverConnected,
     onEvent: (event) => {
       const entry: MetadataEventEntry = {
         id: (metadataIdRef.current += 1),
@@ -665,11 +814,12 @@ export default function App() {
       };
       setMetadataEvents((prev) => [entry, ...prev].slice(0, MAX_METADATA_EVENTS));
     },
-    onError: () => setError(connectionError("Live metadata updates disconnected", "/metadata/stream"))
+    onError: () =>
+      reportError(connectionError("Live metadata updates disconnected", "/metadata/stream"), "warn")
   });
 
   useLogsStream({
-    enabled: settingsOpen,
+    enabled: settingsOpen && serverConnected,
     onSnapshot: (items) => {
       const entries = items
           .map((entry) => ({
@@ -688,17 +838,29 @@ export default function App() {
       };
       setLogEvents((prev) => [row, ...prev].slice(0, MAX_LOG_EVENTS));
     },
-    onError: () => setLogsError(connectionError("Live logs disconnected", "/logs/stream"))
+    onError: () => {
+      const message = connectionError("Live logs disconnected", "/logs/stream");
+      setLogsError(message);
+      reportError(message, "warn");
+    }
   });
 
   useStatusStream({
+    enabled: serverConnected,
+    sourceKey: streamKey,
     activeOutputId,
     onEvent: (data: SetStateAction<StatusResponse | null>) => {
       setStatus(data);
       setUpdatedAt(new Date());
-      setError(null);
+      markServerConnected();
     },
-    onError: () => setError(connectionError("Live status disconnected", activeOutputId ? `/outputs/${encodeURIComponent(activeOutputId)}/status/stream` : undefined))
+    onError: () => {
+      const message = connectionError(
+        "Live status disconnected",
+        activeOutputId ? `/outputs/${encodeURIComponent(activeOutputId)}/status/stream` : undefined
+      );
+      reportError(message, "warn");
+    }
   });
 
   const sendBrowserStatus = useCallback((force = false) => {
@@ -757,6 +919,13 @@ export default function App() {
       audio.removeEventListener("ended", handleEnded);
     };
   }, [sendBrowserStatus, sendBrowserEnded]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      sendBrowserStatus();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [sendBrowserStatus]);
 
   useEffect(() => {
     let mounted = true;
@@ -892,11 +1061,16 @@ export default function App() {
   }, [queue, status?.now_playing]);
 
   useQueueStream({
+    enabled: serverConnected,
+    sourceKey: streamKey,
     onEvent: (items) => {
       setQueue(items ?? []);
-      setError(null);
+      markServerConnected();
     },
-    onError: () => setError(connectionError("Live queue disconnected", "/queue/stream"))
+    onError: () => {
+      const message = connectionError("Live queue disconnected", "/queue/stream");
+      reportError(message, "warn");
+    }
   });
 
   useEffect(() => {
@@ -922,19 +1096,21 @@ export default function App() {
           setSelectedTrackPath(null);
           closeTrackMenu();
         }
-        setError(null);
+        markServerConnected();
       } catch (err) {
-        setError((err as Error).message);
+        const message = (err as Error).message;
+        reportError(message);
       } finally {
         setLibraryLoading(false);
       }
     },
-    [closeTrackMenu]
+    [closeTrackMenu, markServerConnected, reportError]
   );
 
   useEffect(() => {
+    if (!serverConnected) return;
     loadLibrary(libraryDir);
-  }, [libraryDir, loadLibrary]);
+  }, [libraryDir, loadLibrary, serverConnected]);
 
   const loadAlbums = useCallback(async () => {
     if (!albumsLoadingRef.current) {
@@ -945,8 +1121,10 @@ export default function App() {
       const response = await fetchJson<AlbumListResponse>("/albums?limit=200");
       setAlbums(response.items ?? []);
       setAlbumsError(null);
+      markServerConnected();
     } catch (err) {
-      setAlbumsError((err as Error).message);
+      const message = (err as Error).message;
+      setAlbumsError(message);
     } finally {
       albumsLoadingRef.current = false;
       setAlbumsLoading(false);
@@ -975,10 +1153,12 @@ export default function App() {
   }, [loadAlbums]);
 
   useEffect(() => {
+    if (!serverConnected) return;
     loadAlbums();
-  }, [requestAlbumsReload]);
+  }, [requestAlbumsReload, loadAlbums, serverConnected]);
 
   useEffect(() => {
+    if (!serverConnected) return;
     let mounted = true;
     const stream = new EventSource(apiUrl("/albums/stream"));
     stream.addEventListener("albums", () => {
@@ -987,13 +1167,14 @@ export default function App() {
     });
     stream.onerror = () => {
       if (!mounted) return;
-      setAlbumsError("Live albums disconnected.");
+      const message = connectionError("Live albums disconnected", "/albums/stream");
+      setAlbumsError(message);
     };
     return () => {
       mounted = false;
       stream.close();
     };
-  }, [loadAlbums]);
+  }, [connectionError, requestAlbumsReload, serverConnected, streamKey]);
 
   const loadAlbumTracks = useCallback(async (albumId: number | null) => {
     if (albumId === null) return;
@@ -1004,16 +1185,19 @@ export default function App() {
       );
       setAlbumTracks(response.items ?? []);
       setAlbumTracksError(null);
+      markServerConnected();
     } catch (err) {
-      setAlbumTracksError((err as Error).message);
+      const message = (err as Error).message;
+      setAlbumTracksError(message);
     } finally {
       setAlbumTracksLoading(false);
     }
-  }, []);
+  }, [markServerConnected]);
 
   useEffect(() => {
+    if (!serverConnected) return;
     loadAlbumTracks(albumViewId);
-  }, [albumViewId, loadAlbumTracks]);
+  }, [albumViewId, loadAlbumTracks, serverConnected]);
 
   const handlePlayMedia = useCallback(async () => {
     if (status?.now_playing) {
@@ -1036,11 +1220,10 @@ export default function App() {
   const handlePreviousMedia = useCallback(async () => {
     try {
       await postJson("/queue/previous");
-      setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      reportError((err as Error).message);
     }
-  }, [setError]);
+  }, [reportError]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -1117,11 +1300,10 @@ export default function App() {
       } else {
         throw new Error("Missing track id or path for queue playback.");
       }
-      setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      reportError((err as Error).message);
     }
-  }, []);
+  }, [reportError]);
 
   async function handlePrimaryAction() {
     if (status?.now_playing) {
@@ -1133,8 +1315,20 @@ export default function App() {
     }
   }
 
+  const showGate = !serverConnected;
   return (
-    <div className={`app ${settingsOpen ? "settings-mode" : ""}`}>
+    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""}`}>
+      {showGate ? (
+        <ConnectionGate
+          status={serverConnecting ? "connecting" : "disconnected"}
+          message={serverError}
+          apiBase={apiBaseOverride}
+          apiBaseDefault={apiBaseDefault}
+          onApiBaseChange={handleApiBaseChange}
+          onApiBaseReset={handleApiBaseReset}
+          onReconnect={() => window.location.reload()}
+        />
+      ) : null}
       <div className="layout">
         <aside className="side-nav">
           <div className="nav-brand">
@@ -1209,7 +1403,7 @@ export default function App() {
           </div>
         </aside>
 
-        <main className="main">
+        <main className={`main ${showGate ? "disabled" : ""}`}>
           <header className="view-header">
             <div className="view-header-row">
               <div className="view-nav">
@@ -1246,8 +1440,51 @@ export default function App() {
                 ) : null}
               </div>
               {viewTitle ? <h1>{viewTitle}</h1> : <span />}
+              <div className="view-header-actions" ref={notificationsRef}>
+                <button
+                  className={`icon-btn notification-btn ${notificationsOpen ? "active" : ""}`}
+                  onClick={toggleNotifications}
+                  aria-label="Notifications"
+                  title="Notifications"
+                  type="button"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 3a5.5 5.5 0 0 0-5.5 5.5v2.42l-1.34 2.68A1 1 0 0 0 6.04 16h11.92a1 1 0 0 0 .88-2.4L17.5 10.92V8.5A5.5 5.5 0 0 0 12 3Zm0 18a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 21Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                  {unreadCount > 0 ? (
+                    <span className="notification-badge">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  ) : null}
+                </button>
+                {notificationsOpen ? (
+                  <div className="notification-panel">
+                    <div className="notification-header">
+                      <span>Notifications</span>
+                      <button className="btn ghost small" onClick={clearNotifications}>
+                        Clear
+                      </button>
+                    </div>
+                    <div className="notification-list">
+                      {notifications.length === 0 ? (
+                        <div className="muted small">No notifications yet.</div>
+                      ) : null}
+                      {notifications.map((entry) => (
+                        <div key={entry.id} className={`notification-item level-${entry.level}`}>
+                          <div className="notification-message">{entry.message}</div>
+                          <div className="notification-time">
+                            {entry.createdAt.toLocaleTimeString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
-            {error ? <div className="alert">{error}</div> : null}
           </header>
 
           {!settingsOpen && albumViewId === null ? (
@@ -1362,6 +1599,19 @@ export default function App() {
         </main>
       </div>
 
+      {!showGate ? (
+        <ToastContainer
+          position="top-right"
+          autoClose={6000}
+          newestOnTop
+          closeOnClick
+          pauseOnFocusLoss
+          pauseOnHover
+          theme="light"
+        />
+      ) : null}
+
+      {!showGate ? (
         <PlayerBar
           status={status}
           nowPlayingCover={nowPlayingCover}
@@ -1390,36 +1640,44 @@ export default function App() {
           onSignalOpen={() => setSignalOpen(true)}
           onQueueOpen={() => setQueueOpen(true)}
           onSelectOutput={() => setOutputsOpen(true)}
-      />
+        />
+      ) : null}
 
-      <OutputsModal
+      {!showGate ? (
+        <OutputsModal
         open={outputsOpen}
         outputs={outputs}
         activeOutputId={activeOutputId}
         onClose={() => setOutputsOpen(false)}
         onSelectOutput={handleSelectOutput}
         formatRateRange={formatRateRange}
-      />
+        />
+      ) : null}
 
-      <SignalModal
+      {!showGate ? (
+        <SignalModal
         open={signalOpen}
         status={status}
         activeOutput={activeOutput}
         updatedAt={updatedAt}
         formatHz={formatHz}
         onClose={() => setSignalOpen(false)}
-      />
+        />
+      ) : null}
 
-      <MusicBrainzMatchModal
+      {!showGate ? (
+        <MusicBrainzMatchModal
         open={Boolean(matchTarget)}
         kind="track"
         targetLabel={matchLabel}
         defaults={matchDefaults}
         trackPath={matchTarget?.path ?? null}
         onClose={() => setMatchTarget(null)}
-      />
+        />
+      ) : null}
 
-      <TrackMetadataModal
+      {!showGate ? (
+        <TrackMetadataModal
         open={Boolean(editTarget)}
         trackId={editTarget?.trackId ?? null}
         trackPath={editTarget?.path ?? null}
@@ -1435,9 +1693,11 @@ export default function App() {
           }
           loadAlbums();
         }}
-      />
+        />
+      ) : null}
 
-      <AlbumMetadataDialog
+      {!showGate ? (
+        <AlbumMetadataDialog
         open={Boolean(albumEditTarget)}
         albumId={albumEditTarget?.albumId ?? null}
         targetLabel={albumEditLabel}
@@ -1457,9 +1717,11 @@ export default function App() {
           }
           loadAlbums();
         }}
-      />
+        />
+      ) : null}
 
-      <QueueModal
+      {!showGate ? (
+        <QueueModal
         open={queueOpen}
         items={queue}
         onClose={() => setQueueOpen(false)}
@@ -1467,9 +1729,10 @@ export default function App() {
         placeholder={albumPlaceholder}
         canPlay={Boolean(activeOutputId)}
         onPlayFrom={handleQueuePlayFrom}
-      />
+        />
+      ) : null}
 
-      <audio ref={audioRef} preload="auto" style={{ display: "none" }} />
+      {!showGate ? <audio ref={audioRef} preload="auto" style={{ display: "none" }} /> : null}
 
     </div>
   );
