@@ -259,11 +259,12 @@
   left: 0;
   right: 0;
   bottom: var(--player-height);
-  background: rgba(0, 0, 0, 0.8);
+  background: transparent;
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
   z-index: 5;
+  pointer-events: none;
 }
 
 .side-panel {
@@ -275,6 +276,7 @@
   box-shadow: var(--shadow);
   overflow: auto;
   animation: slide-in 180ms ease;
+  pointer-events: auto;
 }
 
 .side-panel .card-header {

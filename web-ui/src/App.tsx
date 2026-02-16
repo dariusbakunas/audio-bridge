@@ -1211,7 +1211,7 @@ export default function App() {
     item.kind === "track" ? !item.now_playing : true
   );
   return (
-    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""}`}>
+    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""} ${queueOpen ? "queue-open" : ""}`}>
       {showGate ? (
         <ConnectionGate
           status={serverConnecting ? "connecting" : "disconnected"}
