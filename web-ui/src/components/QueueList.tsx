@@ -89,7 +89,6 @@ export default function QueueList({
                   <div>
                     <div className="queue-title">
                       {item.file_name}
-                      {isNowPlaying ? " • Now playing" : ""}
                     </div>
                     <div className="muted small">
                       {item.artist ?? "Unknown artist"}
