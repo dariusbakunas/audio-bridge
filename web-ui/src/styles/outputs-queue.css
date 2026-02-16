@@ -151,8 +151,8 @@
 
 .queue-cover-frame {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   flex-shrink: 0;
 }
 
@@ -164,6 +164,19 @@
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
+  z-index: 2;
+}
+
+.queue-playing-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 3;
+  pointer-events: none;
+  transition: opacity 120ms ease;
 }
 
 .queue-cover-frame:hover::after,
@@ -171,15 +184,48 @@
   opacity: 1;
 }
 
+.queue-playing-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.equalizer-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: equalizer1 0.8s ease-in-out infinite;
+  filter: drop-shadow(0 0 3px rgba(212, 150, 95, 0.45));
+}
+
+.queue-playing-indicator.is-paused .equalizer-bar {
+  background: #ffffff;
+  filter: none;
+}
+
+.equalizer-bar:nth-child(2) {
+  animation: equalizer2 0.9s ease-in-out infinite;
+}
+
+.equalizer-bar:nth-child(3) {
+  animation: equalizer3 0.7s ease-in-out infinite;
+}
+
 .queue-cover {
   display: block;
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   border-radius: 0;
   object-fit: cover;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
+  z-index: 1;
 }
 
 .queue-play {
@@ -198,7 +244,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  z-index: 4;
   cursor: pointer;
+  opacity: 0;
+  transform: translate(-50%, -50%);
 }
 
 .queue-play:hover:not(:disabled) {
@@ -225,6 +274,15 @@
   transform: translate(-50%, -50%) scale(1.05);
 }
 
+.queue-row:not(:hover) .queue-play {
+  opacity: 0;
+  transform: translate(-50%, -50%);
+}
+
+.queue-row:hover .queue-playing-overlay {
+  opacity: 0;
+}
+
 .queue-play:disabled {
   opacity: 0;
   pointer-events: none;
@@ -242,4 +300,31 @@
   font-size: 0.8rem;
   gap: 4px;
   color: var(--muted-2);
+}
+
+@keyframes equalizer1 {
+  0%, 100% {
+    height: 6px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+
+@keyframes equalizer2 {
+  0%, 100% {
+    height: 10px;
+  }
+  50% {
+    height: 6px;
+  }
+}
+
+@keyframes equalizer3 {
+  0%, 100% {
+    height: 8px;
+  }
+  50% {
+    height: 16px;
+  }
 }

@@ -460,6 +460,8 @@
   color: inherit;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .track-play-btn:disabled {
@@ -493,12 +495,49 @@
   opacity: 0;
 }
 
+.album-track-row.is-playing .track-index {
+  opacity: 0;
+}
+
 .track-play-btn:hover {
   background: transparent;
 }
 
 .track-play-btn:hover .track-play-icon {
   color: var(--accent);
+}
+
+.track-playing-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.track-playing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.album-track-row:hover .track-playing-overlay {
+  opacity: 0;
+}
+
+.track-playing-indicator .equalizer-bar {
+  background: var(--accent-strong);
+  box-shadow: none;
+  filter: none;
+}
+
+.track-playing-indicator.is-paused .equalizer-bar {
+  background: #ffffff;
 }
 
 .album-track-title {

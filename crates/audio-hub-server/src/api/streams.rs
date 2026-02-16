@@ -245,7 +245,15 @@ pub async fn queue_stream(state: web::Data<AppState>) -> impl Responder {
                                 ctx.pending.push_back(sse_event("queue", &json));
                             }
                         }
-                        Ok(HubEvent::StatusChanged) => {}
+                        Ok(HubEvent::StatusChanged) => {
+                            let queue = ctx.state.output.controller.queue_list(&ctx.state);
+                            let json = serde_json::to_string(&queue)
+                                .unwrap_or_else(|_| "null".to_string());
+                            if ctx.last_queue.as_deref() != Some(json.as_str()) {
+                                ctx.last_queue = Some(json.clone());
+                                ctx.pending.push_back(sse_event("queue", &json));
+                            }
+                        }
                         Ok(HubEvent::OutputsChanged) => {}
                         Ok(HubEvent::Metadata(_)) => {}
                         Ok(HubEvent::LibraryChanged) => {}

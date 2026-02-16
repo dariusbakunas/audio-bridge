@@ -9,6 +9,8 @@ interface QueueModalProps {
   formatMs: (ms?: number | null) => string;
   placeholder: (title?: string | null, artist?: string | null) => string;
   canPlay: boolean;
+  isPaused: boolean;
+  onPause: () => void;
   onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
 }
 
@@ -19,6 +21,8 @@ export default function QueueModal({
   formatMs,
   placeholder,
   canPlay,
+  isPaused,
+  onPause,
   onPlayFrom
 }: QueueModalProps) {
   if (!open) return null;
@@ -44,6 +48,8 @@ export default function QueueModal({
           formatMs={formatMs}
           placeholder={placeholder}
           canPlay={canPlay}
+          isPaused={isPaused}
+          onPause={onPause}
           onPlayFrom={onPlayFrom}
         />
       </aside>

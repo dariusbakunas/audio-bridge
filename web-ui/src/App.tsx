@@ -1204,6 +1204,9 @@ export default function App() {
   }
 
   const showGate = !serverConnected;
+  const queueHasNext = Boolean(activeOutputId) && queue.some((item) =>
+    item.kind === "track" ? !item.now_playing : true
+  );
   return (
     <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""}`}>
       {showGate ? (
@@ -1377,6 +1380,7 @@ export default function App() {
               isPaused={isPaused}
               onPause={handlePause}
               formatMs={formatMs}
+              nowPlayingPath={status?.now_playing ?? null}
               onPlayAlbum={() => {
                 if (!selectedAlbum) return;
                 handlePlayAlbumById(selectedAlbum.id);
@@ -1479,7 +1483,7 @@ export default function App() {
           canTogglePlayback={canTogglePlayback}
           canGoPrevious={Boolean(status?.has_previous)}
           playButtonTitle={playButtonTitle}
-          queueHasItems={Boolean(activeOutputId) && queue.length > 0}
+          queueHasItems={queueHasNext}
           queueOpen={queueOpen}
           activeOutput={activeOutput}
           activeAlbumId={activeAlbumId}
@@ -1584,6 +1588,8 @@ export default function App() {
         formatMs={formatMs}
         placeholder={albumPlaceholder}
         canPlay={Boolean(activeOutputId)}
+        isPaused={Boolean(status?.paused)}
+        onPause={handlePause}
         onPlayFrom={handleQueuePlayFrom}
         />
       ) : null}

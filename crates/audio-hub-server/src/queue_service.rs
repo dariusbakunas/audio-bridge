@@ -111,25 +111,25 @@ impl QueueService {
         library: &crate::library::LibraryIndex,
         metadata_db: Option<&crate::metadata_db::MetadataDb>,
     ) -> QueueResponse {
-        let queue = self.queue.lock().unwrap();
-        let items = queue
+        let now_playing = self
+            .status
+            .inner()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.now_playing.clone());
+        let now_playing_str = now_playing.as_ref().map(|p| p.to_string_lossy().to_string());
+
+        let mut queue = self.queue.lock().unwrap();
+        let mut items: Vec<QueueItem> = queue
             .items
             .iter()
-            .map(|path| match library.find_track_by_path(path) {
-                Some(crate::models::LibraryEntry::Track {
-                    path,
-                    file_name,
-                    duration_ms,
-                    sample_rate,
-                    album,
-                    artist,
-                    format,
-                    ..
-                }) => {
-                    let id = metadata_db
-                        .and_then(|db| db.track_id_for_path(&path).ok().flatten());
-                    QueueItem::Track {
-                        id,
+            .map(|path| {
+                let is_now_playing = now_playing_str
+                    .as_deref()
+                    .map(|current| current == path.to_string_lossy().as_ref())
+                    .unwrap_or(false);
+                match library.find_track_by_path(path) {
+                    Some(crate::models::LibraryEntry::Track {
                         path,
                         file_name,
                         duration_ms,
@@ -137,13 +137,74 @@ impl QueueService {
                         album,
                         artist,
                         format,
+                        ..
+                    }) => {
+                        let id = metadata_db
+                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
+                        QueueItem::Track {
+                            id,
+                            path,
+                            file_name,
+                            duration_ms,
+                            sample_rate,
+                            album,
+                            artist,
+                            format,
+                            now_playing: is_now_playing,
+                        }
                     }
+                    _ => QueueItem::Missing {
+                        path: path.to_string_lossy().to_string(),
+                    },
                 }
-                _ => QueueItem::Missing {
-                    path: path.to_string_lossy().to_string(),
-                },
             })
             .collect();
+
+        if let Some(current_path) = now_playing {
+            let current_str = current_path.to_string_lossy();
+            let index = items.iter().position(|item| match item {
+                QueueItem::Track { path, .. } => path == current_str.as_ref(),
+                QueueItem::Missing { path } => path == current_str.as_ref(),
+            });
+            if let Some(index) = index {
+                if index != 0 {
+                    let current = items.remove(index);
+                    items.insert(0, current);
+                }
+            } else {
+                let entry = match library.find_track_by_path(&current_path) {
+                    Some(crate::models::LibraryEntry::Track {
+                        path,
+                        file_name,
+                        duration_ms,
+                        sample_rate,
+                        album,
+                        artist,
+                        format,
+                        ..
+                    }) => {
+                        let id = metadata_db
+                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
+                        QueueItem::Track {
+                            id,
+                            path,
+                            file_name,
+                            duration_ms,
+                            sample_rate,
+                            album,
+                            artist,
+                            format,
+                            now_playing: true,
+                        }
+                    }
+                    _ => QueueItem::Missing {
+                        path: current_path.to_string_lossy().to_string(),
+                    },
+                };
+                items.insert(0, entry);
+            }
+        }
+
         QueueResponse { items }
     }
 

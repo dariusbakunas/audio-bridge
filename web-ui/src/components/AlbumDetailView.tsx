@@ -27,6 +27,7 @@ interface AlbumDetailViewProps {
   onFixTrackMatch: (path: string) => void;
   onEditTrackMetadata: (path: string) => void;
   onEditAlbumMetadata: () => void;
+  nowPlayingPath?: string | null;
 }
 
 export default function AlbumDetailView({
@@ -52,7 +53,8 @@ export default function AlbumDetailView({
   onMenuRescan,
   onFixTrackMatch,
   onEditTrackMetadata,
-  onEditAlbumMetadata
+  onEditAlbumMetadata,
+  nowPlayingPath
 }: AlbumDetailViewProps) {
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
@@ -167,6 +169,10 @@ export default function AlbumDetailView({
                 const disc = track.disc_number ?? null;
                 const showDiscHeader = disc !== null && disc !== prevDisc;
                 const menuOpen = trackMenuPath === track.path;
+                const isNowPlaying = nowPlayingPath ? track.path === nowPlayingPath : false;
+                const PlaybackIcon = isNowPlaying
+                  ? (isPaused ? Play : Pause)
+                  : Play;
                 const menuStyle = menuOpen && trackMenuPosition
                   ? { top: trackMenuPosition.top, right: trackMenuPosition.right }
                   : undefined;
@@ -177,18 +183,33 @@ export default function AlbumDetailView({
                         <span className="pill small">Disc {disc}</span>
                       </div>
                     ) : null}
-                    <div className="album-track-row">
+                    <div className={`album-track-row${isNowPlaying ? " is-playing" : ""}`}>
                       <div className="track-cell-index">
                         <button
                           className="track-play-btn"
                           type="button"
-                          onClick={() => onPlayTrack(track)}
+                          onClick={() => {
+                            if (isNowPlaying) {
+                              onPause();
+                              return;
+                            }
+                            onPlayTrack(track);
+                          }}
                           disabled={!canPlay}
                           aria-label={`Play ${track.title ?? track.file_name}`}
-                          title="Play track"
+                          title={isNowPlaying ? (isPaused ? "Resume" : "Pause") : "Play track"}
                         >
                           <span className="track-index">{track.track_number ?? ""}</span>
-                          <Play className="track-play-icon" aria-hidden="true" />
+                          <PlaybackIcon className="track-play-icon" aria-hidden="true" />
+                          {isNowPlaying ? (
+                            <div className="track-playing-overlay" aria-hidden="true">
+                              <div className={`track-playing-indicator${isPaused ? " is-paused" : ""}`}>
+                                <div className="equalizer-bar" />
+                                <div className="equalizer-bar" />
+                                <div className="equalizer-bar" />
+                              </div>
+                            </div>
+                          ) : null}
                         </button>
                       </div>
                       <div className="track-cell-title">

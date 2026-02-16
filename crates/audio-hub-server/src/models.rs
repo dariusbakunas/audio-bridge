@@ -121,6 +121,9 @@ pub enum QueueItem {
         artist: Option<String>,
         /// Format label for the UI.
         format: String,
+        /// True when this is the currently playing track.
+        #[serde(default)]
+        now_playing: bool,
     },
     /// Queue entry that no longer exists on disk.
     Missing { path: String },
