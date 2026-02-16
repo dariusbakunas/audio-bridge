@@ -65,9 +65,12 @@ export function useQueueActions({ setError }: QueueActionsOptions) {
   );
 
   const handleQueueClear = useCallback(
-    async (clearHistory: boolean) => {
+    async (clearQueue: boolean, clearHistory: boolean) => {
       try {
-        await postJson("/queue/clear", { clear_history: clearHistory });
+        await postJson("/queue/clear", {
+          clear_queue: clearQueue,
+          clear_history: clearHistory
+        });
       } catch (err) {
         setError((err as Error).message);
       }

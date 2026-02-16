@@ -14,7 +14,7 @@ interface QueueModalProps {
   isPaused: boolean;
   onPause: () => void;
   onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
-  onClear: (clearHistory: boolean) => void;
+  onClear: (clearQueue: boolean, clearHistory: boolean) => void;
 }
 
 export default function QueueModal({
@@ -31,6 +31,7 @@ export default function QueueModal({
 }: QueueModalProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearQueue, setClearQueue] = useState(true);
   const [clearHistory, setClearHistory] = useState(false);
 
   useEffect(() => {
@@ -88,6 +89,7 @@ export default function QueueModal({
         title="Clear queue?"
         onClose={() => {
           setConfirmOpen(false);
+          setClearQueue(true);
           setClearHistory(false);
         }}
       >
@@ -95,12 +97,29 @@ export default function QueueModal({
           <div className="muted small">
             This will clear the upcoming queue.
           </div>
+          <label className="modal-checkbox">
+            <input
+              type="checkbox"
+              checked={clearQueue}
+              onChange={(event) => setClearQueue(event.target.checked)}
+            />
+            <span>Clear queue</span>
+          </label>
+          <label className="modal-checkbox">
+            <input
+              type="checkbox"
+              checked={clearHistory}
+              onChange={(event) => setClearHistory(event.target.checked)}
+            />
+            <span>Clear history</span>
+          </label>
           <div className="modal-actions">
             <button
               className="btn ghost small"
               type="button"
               onClick={() => {
                 setConfirmOpen(false);
+                setClearQueue(true);
                 setClearHistory(false);
               }}
             >
@@ -111,21 +130,15 @@ export default function QueueModal({
               type="button"
               onClick={() => {
                 setConfirmOpen(false);
-                onClear(clearHistory);
+                onClear(clearQueue, clearHistory);
+                setClearQueue(true);
                 setClearHistory(false);
               }}
+              disabled={!clearQueue && !clearHistory}
             >
-              Clear queue
+              Clear
             </button>
           </div>
-          <label className="modal-checkbox">
-            <input
-              type="checkbox"
-              checked={clearHistory}
-              onChange={(event) => setClearHistory(event.target.checked)}
-            />
-            <span>Also clear history</span>
-          </label>
         </div>
       </Modal>
     </div>

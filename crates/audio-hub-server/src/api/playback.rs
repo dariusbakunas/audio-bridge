@@ -87,7 +87,7 @@ pub async fn play_album(state: web::Data<AppState>, body: web::Json<PlayAlbumReq
 
     let mode = body.queue_mode.clone().unwrap_or(AlbumQueueMode::Replace);
     if matches!(mode, AlbumQueueMode::Replace) {
-        state.playback.manager.queue_clear(false);
+        state.playback.manager.queue_clear(true, false);
     }
 
     let mut iter = resolved.into_iter();

@@ -129,7 +129,11 @@ pub async fn queue_clear(
         .as_ref()
         .map(|req| req.clear_history)
         .unwrap_or(false);
-    state.output.controller.queue_clear(&state, clear_history);
+    let clear_queue = body
+        .as_ref()
+        .map(|req| req.clear_queue)
+        .unwrap_or(true);
+    state.output.controller.queue_clear(&state, clear_queue, clear_history);
     HttpResponse::Ok().finish()
 }
 

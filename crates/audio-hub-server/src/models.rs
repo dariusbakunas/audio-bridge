@@ -347,6 +347,13 @@ pub struct QueueClearRequest {
     /// True to also clear the recently played history.
     #[serde(default)]
     pub clear_history: bool,
+    /// True to clear the queued items.
+    #[serde(default = "default_queue_clear")]
+    pub clear_queue: bool,
+}
+
+fn default_queue_clear() -> bool {
+    true
 }
 
 /// Response for listing outputs.

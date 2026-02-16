@@ -240,8 +240,8 @@ impl OutputController {
     }
 
     /// Clear the queue.
-    pub(crate) fn queue_clear(&self, state: &AppState, clear_history: bool) {
-        state.playback.manager.queue_clear(clear_history);
+    pub(crate) fn queue_clear(&self, state: &AppState, clear_queue: bool, clear_history: bool) {
+        state.playback.manager.queue_clear(clear_queue, clear_history);
     }
 
     /// Dispatch the next queued track if available.

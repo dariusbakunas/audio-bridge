@@ -351,10 +351,10 @@ impl QueueService {
     }
 
     /// Clear the queue.
-    pub(crate) fn clear(&self, clear_history: bool) -> bool {
+    pub(crate) fn clear(&self, clear_queue: bool, clear_history: bool) -> bool {
         let mut queue = self.queue.lock().unwrap();
         let mut changed = false;
-        if !queue.items.is_empty() {
+        if clear_queue && !queue.items.is_empty() {
             tracing::debug!(count = queue.items.len(), "queue cleared");
             queue.items.clear();
             changed = true;
@@ -692,9 +692,9 @@ mod tests {
     #[test]
     fn clear_returns_true_only_when_items_exist() {
         let service = make_service();
-        assert!(!service.clear(false));
+        assert!(!service.clear(true, false));
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
-        assert!(service.clear(false));
+        assert!(service.clear(true, false));
         let queue = service.queue.lock().unwrap();
         assert!(queue.items.is_empty());
     }
@@ -868,7 +868,7 @@ mod tests {
         service.record_played_path(&a);
         status.set_has_previous(true);
 
-        assert!(service.clear(true));
+        assert!(service.clear(true, true));
         let status = status.inner().lock().unwrap();
         assert_eq!(status.has_previous, Some(false));
         let history = service.queue.lock().unwrap().history.clone();
