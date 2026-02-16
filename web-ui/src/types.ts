@@ -42,6 +42,7 @@ export interface QueueItemTrack {
   id?: number | null;
   path: string;
   file_name: string;
+  title?: string | null;
   duration_ms?: number | null;
   sample_rate?: number | null;
   album?: string | null;

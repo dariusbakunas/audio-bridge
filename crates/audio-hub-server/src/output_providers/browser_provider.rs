@@ -282,7 +282,17 @@ impl OutputProvider for BrowserProvider {
                             album,
                             format,
                             ..
-                        }) => (Some(file_name), artist, album, Some(format), sample_rate),
+                        }) => {
+                            let title = state
+                                .metadata
+                                .db
+                                .track_record_by_path(&path.to_string_lossy())
+                                .ok()
+                                .flatten()
+                                .and_then(|record| record.title)
+                                .or_else(|| Some(file_name));
+                            (title, artist, album, Some(format), sample_rate)
+                        }
                         _ => (None, None, None, None, None),
                     }
                 }

@@ -255,7 +255,15 @@ impl OutputProvider for LocalProvider {
                             }) => {
                                 let bitrate_kbps =
                                     estimate_bitrate_kbps(path, status.duration_ms);
-                                (Some(file_name), artist, album, Some(format), sample_rate, bitrate_kbps)
+                                let title = state
+                                    .metadata
+                                    .db
+                                    .track_record_by_path(&path.to_string_lossy())
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|record| record.title)
+                                    .or_else(|| Some(file_name));
+                                (title, artist, album, Some(format), sample_rate, bitrate_kbps)
                             }
                             _ => (None, None, None, None, None, None),
                         }

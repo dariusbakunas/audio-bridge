@@ -36,6 +36,7 @@ export default function QueueList({
             ? apiUrl(`/tracks/${item.id}/cover`)
             : apiUrl(`/art?path=${encodeURIComponent(item.path)}`)
           : "";
+        const title = item.kind === "track" ? item.title ?? item.file_name : "";
         return (
           <div
             key={`${item.kind}-${index}`}
@@ -70,7 +71,7 @@ export default function QueueList({
                     <button
                       className="queue-play"
                       type="button"
-                      aria-label={`Play ${item.file_name}`}
+                      aria-label={`Play ${title}`}
                       title={
                         isNowPlaying
                           ? isPaused
@@ -95,7 +96,7 @@ export default function QueueList({
                   </div>
                   <div>
                     <div className="queue-title">
-                      {item.file_name}
+                      {title}
                     </div>
                     <div className="muted small">
                       {item.artist ?? "Unknown artist"}

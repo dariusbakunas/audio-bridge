@@ -138,12 +138,20 @@ impl QueueService {
                         format,
                         ..
                     }) => {
+                        let title = metadata_db
+                            .and_then(|db| {
+                                db.track_record_by_path(path.as_str())
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|record| record.title)
+                            });
                         let id = metadata_db
                             .and_then(|db| db.track_id_for_path(&path).ok().flatten());
                         QueueItem::Track {
                             id,
                             path,
                             file_name,
+                            title,
                             duration_ms,
                             sample_rate,
                             album,
@@ -183,12 +191,20 @@ impl QueueService {
                         format,
                         ..
                     }) => {
+                        let title = metadata_db
+                            .and_then(|db| {
+                                db.track_record_by_path(path.as_str())
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|record| record.title)
+                            });
                         let id = metadata_db
                             .and_then(|db| db.track_id_for_path(&path).ok().flatten());
                         QueueItem::Track {
                             id,
                             path,
                             file_name,
+                            title,
                             duration_ms,
                             sample_rate,
                             album,
@@ -250,12 +266,20 @@ impl QueueService {
                         format,
                         ..
                     }) => {
+                        let title = metadata_db
+                            .and_then(|db| {
+                                db.track_record_by_path(path.as_str())
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|record| record.title)
+                            });
                         let id = metadata_db
                             .and_then(|db| db.track_id_for_path(&path).ok().flatten());
                         QueueItem::Track {
                             id,
                             path,
                             file_name,
+                            title,
                             duration_ms,
                             sample_rate,
                             album,

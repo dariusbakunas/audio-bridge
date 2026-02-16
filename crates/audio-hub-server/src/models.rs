@@ -111,6 +111,9 @@ pub enum QueueItem {
         path: String,
         /// Filename for display.
         file_name: String,
+        /// Track title if available.
+        #[serde(default)]
+        title: Option<String>,
         /// Duration in milliseconds.
         duration_ms: Option<u64>,
         /// Sample rate reported for the track.
