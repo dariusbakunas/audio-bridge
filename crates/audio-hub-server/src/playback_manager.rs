@@ -62,7 +62,7 @@ impl PlaybackManager {
     pub fn apply_queue_mode(&self, path: &Path, mode: QueueMode) -> bool {
         match mode {
             QueueMode::Keep => false,
-            QueueMode::Replace => self.queue_service.clear(),
+            QueueMode::Replace => self.queue_service.clear(false),
             QueueMode::Append => self.queue_service.add_paths(vec![path.to_path_buf()]) > 0,
         }
     }
@@ -92,8 +92,8 @@ impl PlaybackManager {
     }
 
     /// Clear the queue.
-    pub fn queue_clear(&self) {
-        let _ = self.queue_service.clear();
+    pub fn queue_clear(&self, clear_history: bool) {
+        let _ = self.queue_service.clear(clear_history);
     }
 
     /// Drop queued items up to and including the given path.

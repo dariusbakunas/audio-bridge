@@ -1,7 +1,8 @@
 import { QueueItem } from "../types";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import QueueList from "./QueueList";
-import { X } from "lucide-react";
+import Modal from "./Modal";
+import { Trash2, X } from "lucide-react";
 
 interface QueueModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface QueueModalProps {
   isPaused: boolean;
   onPause: () => void;
   onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
+  onClear: (clearHistory: boolean) => void;
 }
 
 export default function QueueModal({
@@ -24,9 +26,12 @@ export default function QueueModal({
   canPlay,
   isPaused,
   onPause,
-  onPlayFrom
+  onPlayFrom,
+  onClear
 }: QueueModalProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearHistory, setClearHistory] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -37,7 +42,10 @@ export default function QueueModal({
   if (!open) return null;
 
   return (
-    <div className="side-panel-backdrop" onClick={onClose}>
+    <div
+      className={`side-panel-backdrop${confirmOpen ? " confirm-open" : ""}`}
+      onClick={onClose}
+    >
       <aside
         className="side-panel"
         aria-label="Queue"
@@ -47,6 +55,18 @@ export default function QueueModal({
           <span>Queue</span>
           <div className="card-actions">
             <span className="pill">{items.length} items</span>
+            <button
+              className="icon-btn small"
+              onClick={() => {
+                if (items.length === 0) return;
+                setConfirmOpen(true);
+              }}
+              aria-label="Clear queue"
+              title="Clear queue"
+              disabled={items.length === 0}
+            >
+              <Trash2 className="icon" aria-hidden="true" />
+            </button>
             <button className="icon-btn small" onClick={onClose} aria-label="Close">
               <X className="icon" aria-hidden="true" />
             </button>
@@ -63,6 +83,51 @@ export default function QueueModal({
           onPlayFrom={onPlayFrom}
         />
       </aside>
+      <Modal
+        open={confirmOpen}
+        title="Clear queue?"
+        onClose={() => {
+          setConfirmOpen(false);
+          setClearHistory(false);
+        }}
+      >
+        <div className="modal-body">
+          <div className="muted small">
+            This will clear the upcoming queue.
+          </div>
+          <div className="modal-actions">
+            <button
+              className="btn ghost small"
+              type="button"
+              onClick={() => {
+                setConfirmOpen(false);
+                setClearHistory(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn small"
+              type="button"
+              onClick={() => {
+                setConfirmOpen(false);
+                onClear(clearHistory);
+                setClearHistory(false);
+              }}
+            >
+              Clear queue
+            </button>
+          </div>
+          <label className="modal-checkbox">
+            <input
+              type="checkbox"
+              checked={clearHistory}
+              onChange={(event) => setClearHistory(event.target.checked)}
+            />
+            <span>Also clear history</span>
+          </label>
+        </div>
+      </Modal>
     </div>
   );
 }

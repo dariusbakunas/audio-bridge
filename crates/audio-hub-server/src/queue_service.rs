@@ -327,15 +327,24 @@ impl QueueService {
     }
 
     /// Clear the queue.
-    pub(crate) fn clear(&self) -> bool {
+    pub(crate) fn clear(&self, clear_history: bool) -> bool {
         let mut queue = self.queue.lock().unwrap();
+        let mut changed = false;
         if !queue.items.is_empty() {
             tracing::debug!(count = queue.items.len(), "queue cleared");
             queue.items.clear();
-            self.events.queue_changed();
-            return true;
+            changed = true;
         }
-        false
+        if clear_history && !queue.history.is_empty() {
+            tracing::debug!(count = queue.history.len(), "queue history cleared");
+            queue.history.clear();
+            changed = true;
+            self.status.set_has_previous(false);
+        }
+        if changed {
+            self.events.queue_changed();
+        }
+        changed
     }
 
     /// Drop all items up to and including the matching path.
@@ -826,5 +835,19 @@ mod tests {
             .unwrap()
             .has_previous;
         assert_eq!(has_previous, Some(true));
+    }
+
+    #[test]
+    fn clear_history_resets_previous_flag() {
+        let (service, status) = make_service_with_status();
+        let a = PathBuf::from("/music/a.flac");
+        service.record_played_path(&a);
+        status.set_has_previous(true);
+
+        assert!(service.clear(true));
+        let status = status.inner().lock().unwrap();
+        assert_eq!(status.has_previous, Some(false));
+        let history = service.queue.lock().unwrap().history.clone();
+        assert!(history.is_empty());
     }
 }

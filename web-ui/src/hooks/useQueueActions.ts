@@ -64,13 +64,16 @@ export function useQueueActions({ setError }: QueueActionsOptions) {
     [setError]
   );
 
-  const handleQueueClear = useCallback(async () => {
-    try {
-      await postJson("/queue/clear");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [setError]);
+  const handleQueueClear = useCallback(
+    async (clearHistory: boolean) => {
+      try {
+        await postJson("/queue/clear", { clear_history: clearHistory });
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [setError]
+  );
 
   const handleQueuePlayFrom = useCallback(
     async (payload: { trackId?: number; path?: string }) => {

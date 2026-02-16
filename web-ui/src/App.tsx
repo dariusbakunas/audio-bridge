@@ -728,6 +728,7 @@ export default function App() {
     handlePrevious,
     handleQueue,
     handlePlayNext,
+    handleQueueClear,
     handleQueuePlayFrom
   } = useQueueActions({ setError: reportError });
 
@@ -1436,7 +1437,10 @@ export default function App() {
       ) : null}
 
       {notificationsOpen && !showGate ? (
-        <div className="side-panel-backdrop" onClick={() => setNotificationsOpen(false)}>
+        <div
+          className="side-panel-backdrop notifications-backdrop"
+          onClick={() => setNotificationsOpen(false)}
+        >
           <aside
             className="side-panel notification-panel"
             aria-label="Notifications"
@@ -1586,6 +1590,7 @@ export default function App() {
         isPaused={Boolean(status?.paused)}
         onPause={handlePause}
         onPlayFrom={handleQueuePlayFrom}
+        onClear={handleQueueClear}
         />
       ) : null}
 

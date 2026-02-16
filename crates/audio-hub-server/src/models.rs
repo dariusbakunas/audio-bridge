@@ -338,6 +338,14 @@ pub struct QueuePlayFromRequest {
     pub track_id: Option<i64>,
 }
 
+/// Payload to clear the queue, with an optional history reset.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct QueueClearRequest {
+    /// True to also clear the recently played history.
+    #[serde(default)]
+    pub clear_history: bool,
+}
+
 /// Response for listing outputs.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct OutputsResponse {

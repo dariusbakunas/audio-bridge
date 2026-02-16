@@ -2,7 +2,7 @@
 
 use actix_web::{get, post, web, HttpResponse, Responder};
 
-use crate::models::{QueueAddRequest, QueuePlayFromRequest, QueueRemoveRequest, QueueResponse};
+use crate::models::{QueueAddRequest, QueueClearRequest, QueuePlayFromRequest, QueueRemoveRequest, QueueResponse};
 use crate::state::AppState;
 
 #[utoipa::path(
@@ -114,14 +114,22 @@ pub async fn queue_play_from(
 #[utoipa::path(
     post,
     path = "/queue/clear",
+    request_body = QueueClearRequest,
     responses(
         (status = 200, description = "Queue cleared")
     )
 )]
 #[post("/queue/clear")]
 /// Clear the queue.
-pub async fn queue_clear(state: web::Data<AppState>) -> impl Responder {
-    state.output.controller.queue_clear(&state);
+pub async fn queue_clear(
+    state: web::Data<AppState>,
+    body: Option<web::Json<QueueClearRequest>>,
+) -> impl Responder {
+    let clear_history = body
+        .as_ref()
+        .map(|req| req.clear_history)
+        .unwrap_or(false);
+    state.output.controller.queue_clear(&state, clear_history);
     HttpResponse::Ok().finish()
 }
 
