@@ -68,21 +68,17 @@ struct HttpSeekRequest {
 #[derive(Clone)]
 pub struct BridgeTransportClient {
     http_addr: SocketAddr,
-    public_base_url: String,
-    metadata: Option<MetadataDb>,
     client: Client,
 }
 
 impl BridgeTransportClient {
     /// Create a new async client for a bridge HTTP address.
-    pub fn new(http_addr: SocketAddr, public_base_url: String, metadata: Option<MetadataDb>) -> Self {
+    pub fn new(http_addr: SocketAddr) -> Self {
         let client = Client::builder()
             .build()
             .expect("build reqwest client");
         Self {
             http_addr,
-            public_base_url,
-            metadata,
             client,
         }
     }
@@ -141,52 +137,6 @@ impl BridgeTransportClient {
         Ok(payload)
     }
 
-    /// Ask the bridge to play the specified path via the hub stream URL.
-    pub async fn play_path(
-        &self,
-        path: &PathBuf,
-        ext_hint: Option<&str>,
-        title: Option<&str>,
-        seek_ms: Option<u64>,
-        start_paused: bool,
-    ) -> Result<()> {
-        let url = self.build_stream_url(path);
-        let endpoint = format!("http://{}/play", self.http_addr);
-        let payload = HttpPlayRequest {
-            url: &url,
-            ext_hint,
-            title,
-            seek_ms,
-        };
-        self.client
-            .post(&endpoint)
-            .timeout(Duration::from_secs(3))
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("http play failed: {e}"))?
-            .error_for_status()
-            .map_err(|e| anyhow::anyhow!("http play failed: {e}"))?;
-        if start_paused {
-            self.pause_toggle().await?;
-        }
-        Ok(())
-    }
-
-    /// Toggle pause/resume on the bridge.
-    pub async fn pause_toggle(&self) -> Result<()> {
-        let endpoint = format!("http://{}/pause", self.http_addr);
-        self.client
-            .post(&endpoint)
-            .timeout(Duration::from_secs(2))
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("http pause failed: {e}"))?
-            .error_for_status()
-            .map_err(|e| anyhow::anyhow!("http pause failed: {e}"))?;
-        Ok(())
-    }
-
     /// Stop playback on the bridge.
     pub async fn stop(&self) -> Result<()> {
         let endpoint = format!("http://{}/stop", self.http_addr);
@@ -199,38 +149,6 @@ impl BridgeTransportClient {
             .error_for_status()
             .map_err(|e| anyhow::anyhow!("http stop failed: {e}"))?;
         Ok(())
-    }
-
-    /// Seek to the specified position in milliseconds.
-    pub async fn seek(&self, ms: u64) -> Result<()> {
-        let endpoint = format!("http://{}/seek", self.http_addr);
-        let payload = HttpSeekRequest { ms };
-        self.client
-            .post(&endpoint)
-            .timeout(Duration::from_secs(2))
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("http seek failed: {e}"))?
-            .error_for_status()
-            .map_err(|e| anyhow::anyhow!("http seek failed: {e}"))?;
-        Ok(())
-    }
-
-    /// Build a fully-qualified stream URL for the given path.
-    fn build_stream_url(&self, path: &PathBuf) -> String {
-        if let Some(track_id) = self.track_id_for_path(path) {
-            build_stream_url_for_id(track_id, &self.public_base_url)
-        } else {
-            build_stream_url_for(path, &self.public_base_url)
-        }
-    }
-
-    fn track_id_for_path(&self, path: &PathBuf) -> Option<i64> {
-        self.metadata
-            .as_ref()
-            .and_then(|meta| meta.track_id_for_path(&path.to_string_lossy()).ok())
-            .flatten()
     }
 }
 
@@ -279,22 +197,6 @@ impl BridgeTransportClientBlocking {
             .send_json(payload)
             .map_err(|e| anyhow::anyhow!("http set device failed: {e}"))?;
         Ok(())
-    }
-
-    /// Fetch the current bridge status snapshot.
-    pub fn status(&self) -> Result<HttpStatusResponse> {
-        let url = format!("http://{}/status", self.http_addr);
-        let mut resp = ureq::get(&url)
-            .config()
-            .timeout_per_call(Some(Duration::from_secs(2)))
-            .build()
-            .call()
-            .map_err(|e| anyhow::anyhow!("http status request failed: {e}"))?;
-        let resp: HttpStatusResponse = resp
-            .body_mut()
-            .read_json()
-            .map_err(|e| anyhow::anyhow!("http status decode failed: {e}"))?;
-        Ok(resp)
     }
 
     /// Listen for bridge device updates via server-sent events.

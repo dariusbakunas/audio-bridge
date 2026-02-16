@@ -118,7 +118,7 @@ impl HttpRangeSource {
                 .build()
                 .header("Range", &range)
                 .call();
-            let mut resp = match resp {
+            let resp = match resp {
                 Ok(resp) => resp,
                 Err(e) => {
                     let err = io::Error::new(

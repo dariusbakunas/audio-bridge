@@ -4,13 +4,12 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::bridge_transport::BridgeTransportClientBlocking;
-use crate::events::EventBus;
 
 #[derive(Debug, Clone)]
 pub enum BridgeCommand {
@@ -42,16 +41,10 @@ pub fn spawn_bridge_worker(
     bridge_id: String,
     http_addr: SocketAddr,
     cmd_rx: Receiver<BridgeCommand>,
-    cmd_tx: Sender<BridgeCommand>,
     status: crate::status_store::StatusStore,
-    queue: Arc<Mutex<crate::state::QueueState>>,
-    bridge_online: Arc<AtomicBool>,
-    bridges_state: Arc<Mutex<crate::state::BridgeState>>,
-    status_cache: Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
     worker_running: Arc<AtomicBool>,
     public_base_url: String,
     metadata: Option<crate::metadata_db::MetadataDb>,
-    events: EventBus,
 ) {
     std::thread::spawn(move || {
         worker_running.store(true, Ordering::Relaxed);
@@ -107,16 +100,6 @@ fn ext_hint_option(ext_hint: &str) -> Option<&str> {
     }
 }
 
-fn is_active_bridge(
-    bridges_state: &Arc<Mutex<crate::state::BridgeState>>,
-    bridge_id: &str,
-) -> bool {
-    bridges_state
-        .lock()
-        .map(|s| s.active_bridge_id.as_deref() == Some(bridge_id))
-        .unwrap_or(false)
-}
-
 pub(crate) fn update_online_and_should_emit(bridge_online: &AtomicBool, new_status: bool) -> bool {
     let was_online = bridge_online.swap(new_status, Ordering::Relaxed);
     was_online != new_status
@@ -124,6 +107,7 @@ pub(crate) fn update_online_and_should_emit(bridge_online: &AtomicBool, new_stat
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use super::*;
 
     #[test]
@@ -143,17 +127,6 @@ mod tests {
         assert!(ext_hint_option("").is_none());
         assert!(ext_hint_option("   ").is_none());
         assert_eq!(ext_hint_option("flac"), Some("flac"));
-    }
-
-    #[test]
-    fn is_active_bridge_matches_state() {
-        let bridges = Arc::new(Mutex::new(crate::state::BridgeState {
-            bridges: Vec::new(),
-            active_bridge_id: Some("bridge-1".to_string()),
-            active_output_id: None,
-        }));
-        assert!(is_active_bridge(&bridges, "bridge-1"));
-        assert!(!is_active_bridge(&bridges, "bridge-2"));
     }
 
     #[test]

@@ -232,15 +232,6 @@ pub(crate) struct RemoteQueue {
     pub(crate) items: Vec<RemoteQueueItem>,
 }
 
-pub(crate) fn status(server: &str) -> Result<RemoteStatus> {
-    let base = server.trim_end_matches('/');
-    let outputs = outputs(base)?;
-    let Some(active_id) = outputs.active_id else {
-        return Err(anyhow::anyhow!("no active output selected"));
-    };
-    status_for_output(base, &active_id)
-}
-
 pub(crate) fn status_for_output(server: &str, output_id: &str) -> Result<RemoteStatus> {
     let base = server.trim_end_matches('/');
     let url = format!(
@@ -453,20 +444,6 @@ pub(crate) fn queue_clear(server: &str) -> Result<()> {
         .context("request /queue/clear")?;
     if !resp.status().is_success() {
         return Err(anyhow::anyhow!("queue clear failed with {}", resp.status()));
-    }
-    Ok(())
-}
-
-pub(crate) fn play_replace(server: &str, path: &Path) -> Result<()> {
-    let url = format!("{}/play", server.trim_end_matches('/'));
-    let resp = agent().post(&url)
-        .send_json(PlayRequest {
-            path: path.to_string_lossy().to_string(),
-            queue_mode: Some(QueueMode::Replace),
-        })
-        .context("request /play (replace)")?;
-    if !resp.status().is_success() {
-        return Err(anyhow::anyhow!("play replace failed with {}", resp.status()));
     }
     Ok(())
 }

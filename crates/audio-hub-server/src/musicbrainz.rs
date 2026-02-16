@@ -19,10 +19,8 @@ const MIN_MATCH_SCORE: i32 = 90;
 pub struct MusicBrainzMatch {
     pub recording_mbid: Option<String>,
     pub artist_mbid: Option<String>,
-    pub artist_name: Option<String>,
     pub artist_sort_name: Option<String>,
     pub album_mbid: Option<String>,
-    pub album_title: Option<String>,
     pub release_year: Option<i32>,
     pub release_candidates: Vec<String>,
 }
@@ -135,7 +133,7 @@ impl MusicBrainzClient {
             });
         }
 
-        let (artist_mbid, artist_name, artist_sort_name) = best
+        let (artist_mbid, _artist_name, artist_sort_name) = best
             .artist_credit
             .as_ref()
             .and_then(|credits| credits.first())
@@ -148,7 +146,7 @@ impl MusicBrainzClient {
             })
             .unwrap_or((None, None, None));
 
-        let (mut album_mbid, mut album_title, mut release_year, mut release_candidates) = best
+        let (mut album_mbid, _album_title, mut release_year, mut release_candidates) = best
             .releases
             .as_ref()
             .map(|releases| {
@@ -171,7 +169,6 @@ impl MusicBrainzClient {
                 if let Ok(releases) = self.search_releases(album_name, artist, 5) {
                     if let Some(first) = releases.first() {
                         album_mbid = Some(first.release_mbid.clone());
-                        album_title = Some(first.title.clone());
                         if release_year.is_none() {
                             release_year = first.year;
                         }
@@ -188,10 +185,8 @@ impl MusicBrainzClient {
         Ok(MusicBrainzLookup::Match(MusicBrainzMatch {
             recording_mbid: Some(best.id),
             artist_mbid,
-            artist_name,
             artist_sort_name,
             album_mbid,
-            album_title,
             release_year,
             release_candidates,
         }))

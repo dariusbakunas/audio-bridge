@@ -7,7 +7,7 @@ use actix_web::HttpResponse;
 use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
 use crate::queue_service::NextDispatchResult;
-use crate::state::{AppState, QueueState};
+use crate::state::{AppState};
 
 /// Errors returned by the output controller facade.
 #[derive(Debug)]
@@ -393,6 +393,7 @@ mod tests {
     use async_trait::async_trait;
     use crate::models::OutputInfo;
     use crate::output_providers::registry::{OutputProvider, ProviderError};
+    use crate::state::QueueState;
     use crate::status_store::StatusStore;
 
     struct MockProvider {

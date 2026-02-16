@@ -109,7 +109,6 @@ impl BrowserProviderState {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum BrowserServerMessage {
-    Hello { session_id: String },
     Play {
         url: String,
         path: String,

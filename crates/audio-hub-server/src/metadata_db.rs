@@ -89,8 +89,6 @@ pub struct MusicBrainzCandidate {
 pub struct CoverArtCandidate {
     pub album_id: i64,
     pub mbid: String,
-    pub fail_count: i64,
-    pub release_candidates: Vec<String>,
 }
 
 fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
@@ -128,10 +126,6 @@ impl MetadataDb {
         }
 
         Ok(Self { pool })
-    }
-
-    pub fn pool(&self) -> &Pool<SqliteConnectionManager> {
-        &self.pool
     }
 
     pub fn upsert_track(&self, record: &TrackRecord) -> Result<()> {
@@ -188,18 +182,18 @@ impl MetadataDb {
             .optional()
             .context("lookup existing track")?;
         let (existing_artist_id, existing_album_id, keep_album_link) = if let Some((
-            mtime_ms,
-            size_bytes,
-            artist_id,
-            album_id,
-            track_mbid,
-            artist_mbid,
-            album_mbid,
-            album_title,
-            album_artist,
-            disc_number,
-            bit_depth,
-        )) = existing
+                                                                                       mtime_ms,
+                                                                                       size_bytes,
+                                                                                       artist_id,
+                                                                                       album_id,
+                                                                                       track_mbid,
+                                                                                       _artist_mbid,
+                                                                                       album_mbid,
+                                                                                       album_title,
+                                                                                       album_artist,
+                                                                                       disc_number,
+                                                                                       bit_depth,
+                                                                                   )) = existing
         {
             let album_title_same = match (record.album.as_deref(), album_title.as_deref()) {
                 (Some(a), Some(b)) => a == b,
@@ -292,32 +286,10 @@ impl MetadataDb {
                 Option::<String>::None
             ],
         )
-        .context("upsert track")?;
+            .context("upsert track")?;
 
         tx.commit().context("commit metadata tx")?;
         Ok(())
-    }
-
-    pub fn needs_musicbrainz(&self, path: &str) -> Result<bool> {
-        let conn = self.pool.get().context("open metadata db")?;
-        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
-            .query_row(
-                r#"
-                SELECT t.mbid, ar.mbid, al.mbid
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.path = ?1
-                "#,
-                params![path],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .context("check musicbrainz metadata")?;
-        let Some((track_mbid, artist_mbid, album_mbid)) = row else {
-            return Ok(true);
-        };
-        Ok(is_blank(&track_mbid) || is_blank(&artist_mbid) || is_blank(&album_mbid))
     }
 
     pub fn apply_musicbrainz(
@@ -829,15 +801,9 @@ impl MetadataDb {
             "#,
         )?;
         let rows = stmt.query_map(params![limit], |row| {
-            let raw_candidates: Option<String> = row.get(3)?;
-            let release_candidates = raw_candidates
-                .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-                .unwrap_or_default();
             Ok(CoverArtCandidate {
                 album_id: row.get(0)?,
                 mbid: row.get(1)?,
-                fail_count: row.get(2)?,
-                release_candidates,
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -910,24 +876,6 @@ impl MetadataDb {
             params![path],
         )
         .context("clear musicbrainz no match")?;
-        Ok(())
-    }
-
-    pub fn clear_musicbrainz_no_match_all(&self) -> Result<()> {
-        let conn = self.pool.get().context("open metadata db")?;
-        conn.execute("UPDATE tracks SET mb_no_match_key = NULL", [])
-            .context("clear musicbrainz no match all")?;
-        Ok(())
-    }
-
-    pub fn clear_library(&self) -> Result<()> {
-        let mut conn = self.pool.get().context("open metadata db")?;
-        let tx = conn.transaction().context("begin metadata clear")?;
-        tx.execute("DELETE FROM tracks", []).context("clear tracks")?;
-        tx.execute("DELETE FROM albums", []).context("clear albums")?;
-        tx.execute("DELETE FROM artists", []).context("clear artists")?;
-        tx.execute("DELETE FROM sqlite_sequence", []).ok();
-        tx.commit().context("commit metadata clear")?;
         Ok(())
     }
 

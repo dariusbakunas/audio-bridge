@@ -155,10 +155,6 @@ impl MetadataService {
         Ok(())
     }
 
-    pub fn clear_library(&self) -> Result<()> {
-        self.db.clear_library()
-    }
-
     pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>, String> {
         self.db
             .track_record_by_path(path)
@@ -400,7 +396,7 @@ fn split_wrapped_suffix(raw: &str) -> Option<(&str, &str)> {
     if bytes.is_empty() {
         return None;
     }
-    let (open, close) = match bytes[bytes.len() - 1] {
+    let (open, _close) = match bytes[bytes.len() - 1] {
         b')' => (b'(', b')'),
         b']' => (b'[', b']'),
         b'}' => (b'{', b'}'),

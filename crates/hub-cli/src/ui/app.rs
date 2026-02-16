@@ -195,7 +195,6 @@ pub(crate) struct App {
     pending_preview_scan: Option<PathBuf>,
 
     pub(crate) status: String,
-    pub(crate) last_progress: Option<(u64, Option<u64>)>, // sent, total
 
     pub(crate) remote_duration_ms: Option<u64>,
     pub(crate) remote_paused: Option<bool>,
@@ -282,7 +281,6 @@ impl App {
             preview_entries: Vec::new(),
             pending_preview_scan: None,
             status: "Ready".into(),
-            last_progress: None,
             remote_duration_ms: None,
             remote_paused: None,
             remote_bridge_online: false,
@@ -774,25 +772,6 @@ impl App {
             return;
         };
         if server_api::queue_add_next(&self.server, &[track.path.clone()]).is_ok() {
-            self.status = "Queued next".into();
-            self.mark_queue_dirty();
-        } else {
-            self.status = "Queue next failed".into();
-        }
-    }
-
-    fn queue_next_selected_with(
-        &mut self,
-        queue_add_next: impl FnOnce(&str, &[PathBuf]) -> Result<()>,
-    ) {
-        let Some(index) = self.selected_index() else {
-            return;
-        };
-        let Some(LibraryItem::Track(track)) = self.entries.get(index) else {
-            self.status = "Cannot queue a folder".into();
-            return;
-        };
-        if queue_add_next(&self.server, &[track.path.clone()]).is_ok() {
             self.status = "Queued next".into();
             self.mark_queue_dirty();
         } else {
@@ -1421,29 +1400,6 @@ mod tests {
         assert!(!app.now_playing_open);
         app.toggle_now_playing();
         assert!(app.now_playing_open);
-    }
-
-    #[test]
-    fn queue_next_selected_updates_status_on_success() {
-        let entries = vec![track_item("/music/a.flac", "A")];
-        let mut app = app_with_entries(entries);
-        app.select_index(0);
-
-        app.queue_next_selected_with(|_, _| Ok(()));
-
-        assert_eq!(app.status, "Queued next");
-        assert!(app.auto_preview_dirty);
-    }
-
-    #[test]
-    fn queue_next_selected_sets_error_on_failure() {
-        let entries = vec![track_item("/music/a.flac", "A")];
-        let mut app = app_with_entries(entries);
-        app.select_index(0);
-
-        app.queue_next_selected_with(|_, _| Err(anyhow::anyhow!("fail")));
-
-        assert_eq!(app.status, "Queue next failed");
     }
 
     // auto-advance moved to server; client no longer manipulates queue on playback end.

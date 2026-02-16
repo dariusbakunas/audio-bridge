@@ -675,10 +675,8 @@ pub async fn musicbrainz_match_apply(
             let mb = MusicBrainzMatch {
                 recording_mbid: Some(recording_mbid),
                 artist_mbid,
-                artist_name: None,
                 artist_sort_name: None,
                 album_mbid,
-                album_title: None,
                 release_year,
                 release_candidates: Vec::new(),
             };
@@ -719,10 +717,8 @@ pub async fn musicbrainz_match_apply(
             let mb = MusicBrainzMatch {
                 recording_mbid: None,
                 artist_mbid,
-                artist_name: None,
                 artist_sort_name: None,
                 album_mbid: Some(album_mbid),
-                album_title: None,
                 release_year,
                 release_candidates: Vec::new(),
             };

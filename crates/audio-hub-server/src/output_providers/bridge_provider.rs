@@ -52,7 +52,7 @@ impl BridgeProvider {
             };
             (bridge.id.clone(), bridge.http_addr)
         };
-        if let Ok(status) = BridgeTransportClient::new(addr, String::new(), Some(state.metadata.db.clone()))
+        if let Ok(status) = BridgeTransportClient::new(addr)
             .status()
             .await
         {
@@ -103,16 +103,10 @@ impl BridgeProvider {
             bridge_id,
             addr,
             cmd_rx,
-            cmd_tx,
             state.playback.manager.status().clone(),
-            state.playback.manager.queue_service().queue().clone(),
-            state.providers.bridge.bridge_online.clone(),
-            state.providers.bridge.bridges.clone(),
-            state.providers.bridge.status_cache.clone(),
             state.providers.bridge.worker_running.clone(),
             state.providers.bridge.public_base_url.clone(),
             Some(state.metadata.db.clone()),
-            state.events.clone(),
         );
 
         let mut waited = 0u64;
@@ -359,7 +353,7 @@ impl OutputProvider for BridgeProvider {
             );
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
-        if let Err(e) = BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()))
+        if let Err(e) = BridgeTransportClient::new(http_addr)
             .set_device(&device_name)
             .await
         {
@@ -520,7 +514,7 @@ impl OutputProvider for BridgeProvider {
             };
             bridge.http_addr
         };
-        BridgeTransportClient::new(http_addr, String::new(), Some(state.metadata.db.clone()))
+        BridgeTransportClient::new(http_addr)
             .stop()
             .await
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))
@@ -712,7 +706,7 @@ async fn list_devices_with_retry(
     attempts: usize,
 ) -> Result<Vec<HttpDeviceInfo>, anyhow::Error> {
     list_devices_with_retry_fn(bridge, attempts, || async {
-        BridgeTransportClient::new(bridge.http_addr, String::new(), None)
+        BridgeTransportClient::new(bridge.http_addr)
             .list_devices()
             .await
     })
