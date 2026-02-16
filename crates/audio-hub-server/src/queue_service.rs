@@ -352,6 +352,59 @@ impl QueueService {
         false
     }
 
+    /// Rebuild the queue starting after the supplied path, checking queue and history.
+    pub(crate) fn play_from_any(&self, path: &Path) -> bool {
+        if self.drain_through_path(path) {
+            return true;
+        }
+
+        let history_tail = {
+            let mut history = self.history.lock().unwrap();
+            let pos = match history.iter().position(|p| p == path) {
+                Some(pos) => pos,
+                None => return false,
+            };
+            let tail = history.iter().skip(pos + 1).cloned().collect::<Vec<PathBuf>>();
+            if pos + 1 < history.len() {
+                history.drain((pos + 1)..);
+            }
+            tail
+        };
+
+        let current = self
+            .status
+            .inner()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.now_playing.clone());
+
+        let mut queue = self.queue.lock().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let mut rebuilt = Vec::new();
+
+        for item in history_tail {
+            if seen.insert(item.clone()) {
+                rebuilt.push(item);
+            }
+        }
+
+        if let Some(current) = current {
+            if seen.insert(current.clone()) {
+                rebuilt.push(current);
+            }
+        }
+
+        for item in queue.items.iter() {
+            if seen.insert(item.clone()) {
+                rebuilt.push(item.clone());
+            }
+        }
+
+        queue.items = rebuilt;
+        self.events.queue_changed();
+        true
+    }
+
     /// Dispatch the next track (if any) via the provided transport.
     pub(crate) fn dispatch_next(
         &self,
@@ -485,12 +538,17 @@ mod tests {
     }
 
     fn make_service() -> QueueService {
+        make_service_with_status().0
+    }
+
+    fn make_service_with_status() -> (QueueService, StatusStore) {
         let status = StatusStore::new(
             Arc::new(Mutex::new(crate::state::PlayerStatus::default())),
             crate::events::EventBus::new(),
         );
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        QueueService::new(queue, status, crate::events::EventBus::new())
+        let service = QueueService::new(queue, status.clone(), crate::events::EventBus::new());
+        (service, status)
     }
 
     fn make_inputs() -> AutoAdvanceInputs {
@@ -699,5 +757,38 @@ mod tests {
         service.record_played_path(&a);
         service.record_played_path(&a);
         assert!(!service.has_previous(Some(&a)));
+    }
+
+    #[test]
+    fn play_from_any_rebuilds_queue_from_history_and_trims() {
+        let (service, status) = make_service_with_status();
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        let c = PathBuf::from("/music/c.flac");
+        let d = PathBuf::from("/music/d.flac");
+        let e = PathBuf::from("/music/e.flac");
+        let f = PathBuf::from("/music/f.flac");
+
+        service.record_played_path(&a);
+        service.record_played_path(&b);
+        service.record_played_path(&c);
+        status.on_play(d.clone(), false);
+        service.add_paths(vec![e.clone(), f.clone()]);
+
+        assert!(service.play_from_any(&b));
+
+        let queue_items = service.queue.lock().unwrap().items.clone();
+        assert_eq!(queue_items, vec![c, d, e, f]);
+
+        let history = service.history.lock().unwrap().clone();
+        assert_eq!(history.into_iter().collect::<Vec<_>>(), vec![a, b]);
+    }
+
+    #[test]
+    fn play_from_any_returns_false_when_missing() {
+        let service = make_service();
+        let missing = PathBuf::from("/music/missing.flac");
+        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
+        assert!(!service.play_from_any(&missing));
     }
 }

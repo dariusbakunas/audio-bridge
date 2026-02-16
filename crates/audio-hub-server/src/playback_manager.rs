@@ -98,7 +98,7 @@ impl PlaybackManager {
 
     /// Drop queued items up to and including the given path.
     pub fn queue_play_from(&self, path: &Path) -> bool {
-        self.queue_service.drain_through_path(path)
+        self.queue_service.play_from_any(path)
     }
 
     /// Pop the previous history item, skipping the current path.
