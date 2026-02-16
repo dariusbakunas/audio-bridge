@@ -7,6 +7,8 @@ import {
   Grid3x3,
   Library,
   List,
+  PanelLeftClose,
+  PanelLeftOpen,
   Radio,
   Search,
   Settings
@@ -242,6 +244,7 @@ export default function App() {
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(false);
   const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection">("metadata");
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
@@ -1220,16 +1223,26 @@ export default function App() {
           onReconnect={() => window.location.reload()}
         />
       ) : null}
-      <div className="layout">
+      <div className={`layout ${navCollapsed ? "nav-collapsed" : ""}`}>
         <aside className="side-nav">
           <div className="nav-brand">
-            <div className="nav-mark">
-              <Radio className="nav-mark-icon" aria-hidden="true" />
-            </div>
-            <div>
+            <div className="nav-brand-text">
               <div className="nav-title">Audio Hub</div>
               <div className="nav-subtitle">Lossless control with a live signal view.</div>
             </div>
+            <button
+              className="icon-btn nav-collapse"
+              onClick={() => setNavCollapsed((prev) => !prev)}
+              aria-label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              type="button"
+            >
+              {navCollapsed ? (
+                <PanelLeftOpen className="icon" aria-hidden="true" />
+              ) : (
+                <PanelLeftClose className="icon" aria-hidden="true" />
+              )}
+            </button>
           </div>
           <div className="nav-section">
             <div className="nav-label">Library</div>

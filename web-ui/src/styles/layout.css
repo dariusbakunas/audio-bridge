@@ -1,6 +1,7 @@
 :root {
   --header-height: 64px;
   --player-height: 104px;
+  --nav-collapsed-width: 72px;
 }
 
 .app {
@@ -19,6 +20,11 @@
 .layout {
   display: block;
   min-height: 100vh;
+  --nav-width: 240px;
+}
+
+.layout.nav-collapsed {
+  --nav-width: var(--nav-collapsed-width);
 }
 
 .side-nav {
@@ -30,7 +36,7 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 240px;
+  width: var(--nav-width);
   height: 100vh;
   overflow: hidden;
   background: var(--bg-accent);
@@ -42,6 +48,35 @@
   align-items: center;
   justify-content: flex-start;
   gap: 16px;
+}
+
+.nav-brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-collapse {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.nav-collapse .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-collapse:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
 }
 
 .nav-mark {
@@ -130,8 +165,8 @@
 
 .main {
   padding: calc(var(--header-height) + 24px) clamp(20px, 5vw, 56px) 32px;
-  margin-left: 240px;
-  width: calc(100% - 240px);
+  margin-left: var(--nav-width);
+  width: calc(100% - var(--nav-width));
 }
 
 .main.disabled {
@@ -264,6 +299,41 @@
   color: #0a0c0f;
 }
 
+.layout.nav-collapsed .side-nav {
+  padding: 20px 12px;
+}
+
+.layout.nav-collapsed .nav-brand {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.layout.nav-collapsed .nav-brand-text {
+  display: none;
+}
+
+.layout.nav-collapsed .nav-collapse {
+  margin-left: 0;
+}
+
+.layout.nav-collapsed .nav-label {
+  display: none;
+}
+
+.layout.nav-collapsed .nav-section {
+  width: 100%;
+}
+
+.layout.nav-collapsed .nav-button {
+  justify-content: center;
+  gap: 0;
+  padding: 12px;
+}
+
+.layout.nav-collapsed .nav-button span {
+  display: none;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -290,7 +360,7 @@ h1 {
   position: fixed;
   top: 0;
   z-index: 3;
-  left: 240px;
+  left: var(--nav-width);
   right: 0;
   height: var(--header-height);
   padding: 0 clamp(20px, 5vw, 56px);
