@@ -447,6 +447,7 @@ impl QueueService {
                 self.status.set_auto_advance_in_flight(true);
             }
             self.record_played_path(&path);
+            self.status.set_has_previous(self.has_previous(Some(&path)));
             NextDispatchResult::Dispatched
         } else {
             NextDispatchResult::Failed
@@ -790,5 +791,36 @@ mod tests {
         let missing = PathBuf::from("/music/missing.flac");
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
         assert!(!service.play_from_any(&missing));
+    }
+
+    #[test]
+    fn dispatch_next_updates_has_previous() {
+        let (service, status) = make_service_with_status();
+        let transport = TestTransport::new(true);
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        service.add_paths(vec![a.clone(), b.clone()]);
+
+        assert!(matches!(
+            service.dispatch_next(&transport, false),
+            NextDispatchResult::Dispatched
+        ));
+        let has_previous = status
+            .inner()
+            .lock()
+            .unwrap()
+            .has_previous;
+        assert_eq!(has_previous, Some(false));
+
+        assert!(matches!(
+            service.dispatch_next(&transport, false),
+            NextDispatchResult::Dispatched
+        ));
+        let has_previous = status
+            .inner()
+            .lock()
+            .unwrap()
+            .has_previous;
+        assert_eq!(has_previous, Some(true));
     }
 }

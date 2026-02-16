@@ -70,6 +70,7 @@ impl BrowserWs {
         if now_playing.is_none() && elapsed_ms.is_none() && duration_ms.is_none() {
             self.state.playback.manager.status().on_stop();
             self.state.providers.browser.update_last_duration(session_id, None);
+            self.state.playback.manager.update_has_previous();
             return;
         }
 
@@ -92,6 +93,7 @@ impl BrowserWs {
             .manager
             .queue_service()
             .maybe_auto_advance(&transport, inputs);
+        self.state.playback.manager.update_has_previous();
     }
 
     fn handle_ended(&self) {
@@ -119,6 +121,7 @@ impl BrowserWs {
             .manager
             .queue_service()
             .maybe_auto_advance(&transport, inputs);
+        self.state.playback.manager.update_has_previous();
     }
 }
 

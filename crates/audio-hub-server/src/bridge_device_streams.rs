@@ -231,6 +231,7 @@ fn apply_remote_status(
         .manager
         .status()
         .apply_remote_and_inputs(remote, *last_duration_ms);
+    state.playback.manager.update_has_previous();
     let transport = ChannelTransport::new(
         state.providers.bridge.player.lock().unwrap().cmd_tx.clone(),
     );
