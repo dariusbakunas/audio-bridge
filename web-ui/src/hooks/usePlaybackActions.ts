@@ -54,14 +54,6 @@ export function usePlaybackActions({
     }
   }, [setError]);
 
-  const handleNext = useCallback(async () => {
-    try {
-      await postJson("/queue/next");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [setError]);
-
   const handleRescan = useCallback(async () => {
     try {
       await postJson("/library/rescan");
@@ -117,48 +109,14 @@ export function usePlaybackActions({
     [activeOutputId, setError]
   );
 
-  const handleQueue = useCallback(
-    async (path: string) => {
-      try {
-        await postJson("/queue", { paths: [path] });
-      } catch (err) {
-        setError((err as Error).message);
-      }
-    },
-    [setError]
-  );
-
-  const handleQueueAlbumTrack = useCallback(
-    async (track: TrackSummary) => {
-      if (!track.path) return;
-      await handleQueue(track.path);
-    },
-    [handleQueue]
-  );
-
-  const handlePlayNext = useCallback(
-    async (path: string) => {
-      try {
-        await postJson("/queue/next/add", { paths: [path] });
-      } catch (err) {
-        setError((err as Error).message);
-      }
-    },
-    [setError]
-  );
-
   return {
     handleRescanLibrary,
     handleRescanTrack,
     handlePause,
-    handleNext,
     handleRescan,
     handleSelectOutput,
     handlePlay,
     handlePlayAlbumTrack,
-    handlePlayAlbumById,
-    handleQueueAlbumTrack,
-    handleQueue,
-    handlePlayNext
+    handlePlayAlbumById
   };
 }

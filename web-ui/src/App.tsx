@@ -20,7 +20,6 @@ import {
   getDefaultApiBase,
   getEffectiveApiBase,
   getStoredApiBase,
-  postJson,
   setStoredApiBase
 } from "./api";
 import {
@@ -53,7 +52,8 @@ import {
   useQueueStream,
   useStatusStream
 } from "./hooks/streams";
-import {usePlaybackActions} from "./hooks/usePlaybackActions";
+import { usePlaybackActions } from "./hooks/usePlaybackActions";
+import { useQueueActions } from "./hooks/useQueueActions";
 
 interface MetadataEventEntry {
   id: number;
@@ -712,13 +712,10 @@ export default function App() {
     handleRescanLibrary,
     handleRescanTrack,
     handlePause,
-    handleNext,
     handleSelectOutput,
     handlePlay,
     handlePlayAlbumTrack,
-    handlePlayAlbumById,
-    handleQueue,
-    handlePlayNext
+    handlePlayAlbumById
   } = usePlaybackActions({
     activeOutputId,
     rescanBusy,
@@ -726,6 +723,13 @@ export default function App() {
     setActiveOutputId,
     setRescanBusy
   });
+  const {
+    handleNext,
+    handlePrevious,
+    handleQueue,
+    handlePlayNext,
+    handleQueuePlayFrom
+  } = useQueueActions({ setError: reportError });
 
   useMetadataStream({
     enabled: settingsOpen && serverConnected,
@@ -1111,14 +1115,6 @@ export default function App() {
     }
   }, [handlePause, status?.now_playing, status?.paused]);
 
-  const handlePreviousMedia = useCallback(async () => {
-    try {
-      await postJson("/queue/previous");
-    } catch (err) {
-      reportError((err as Error).message);
-    }
-  }, [reportError]);
-
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       if (event.code !== "Space") return;
@@ -1155,7 +1151,7 @@ export default function App() {
         handlePauseMedia();
       });
       session.setActionHandler("previoustrack", () => {
-        handlePreviousMedia();
+        handlePrevious();
       });
       session.setActionHandler("nexttrack", () => {
         handleNext();
@@ -1178,26 +1174,12 @@ export default function App() {
     handleNext,
     handlePauseMedia,
     handlePlayMedia,
-    handlePreviousMedia,
+    handlePrevious,
     nowPlayingCover,
     status?.album,
     status?.artist,
     status?.title
   ]);
-
-  const handleQueuePlayFrom = useCallback(async (payload: { trackId?: number; path?: string }) => {
-    try {
-      if (payload.trackId) {
-        await postJson("/queue/play_from", { track_id: payload.trackId });
-      } else if (payload.path) {
-        await postJson("/queue/play_from", { path: payload.path });
-      } else {
-        throw new Error("Missing track id or path for queue playback.");
-      }
-    } catch (err) {
-      reportError((err as Error).message);
-    }
-  }, [reportError]);
 
   async function handlePrimaryAction() {
     if (status?.now_playing) {
@@ -1511,7 +1493,7 @@ export default function App() {
             })
           }
           onPrimaryAction={handlePrimaryAction}
-          onPrevious={handlePreviousMedia}
+          onPrevious={handlePrevious}
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}
           onQueueOpen={() => setQueueOpen((value) => !value)}
