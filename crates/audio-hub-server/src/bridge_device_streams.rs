@@ -236,12 +236,12 @@ fn apply_remote_status(
         state.providers.bridge.player.lock().unwrap().cmd_tx.clone(),
     );
     if !suppress_auto_advance {
-        let dispatched = QueueService::new(
-            state.playback.manager.queue_service().queue().clone(),
-            state.playback.manager.status().clone(),
-            state.events.clone(),
-        )
-        .maybe_auto_advance(&transport, inputs);
+        let dispatched = state
+            .playback
+            .manager
+            .queue_service()
+            .clone()
+            .maybe_auto_advance(&transport, inputs);
         if dispatched {
             *last_duration_ms = remote.duration_ms;
             return;
