@@ -2,7 +2,6 @@
 //!
 //! Owns queue mutations and decides when to dispatch the next track.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -50,7 +49,6 @@ fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
 #[derive(Clone)]
 pub(crate) struct QueueService {
     queue: Arc<Mutex<QueueState>>,
-    history: Arc<Mutex<VecDeque<PathBuf>>>,
     status: StatusStore,
     events: EventBus,
 }
@@ -60,7 +58,6 @@ impl QueueService {
     pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore, events: EventBus) -> Self {
         Self {
             queue,
-            history: Arc::new(Mutex::new(VecDeque::new())),
             status,
             events,
         }
@@ -73,19 +70,19 @@ impl QueueService {
 
     pub(crate) fn record_played_path(&self, path: &Path) {
         const MAX_HISTORY: usize = 100;
-        let mut history = self.history.lock().unwrap();
-        if history.back().map(|last| last == path).unwrap_or(false) {
+        let mut queue = self.queue.lock().unwrap();
+        if queue.history.back().map(|last| last == path).unwrap_or(false) {
             return;
         }
-        history.push_back(path.to_path_buf());
-        if history.len() > MAX_HISTORY {
-            history.pop_front();
+        queue.history.push_back(path.to_path_buf());
+        if queue.history.len() > MAX_HISTORY {
+            queue.history.pop_front();
         }
     }
 
     pub(crate) fn take_previous(&self, current: Option<&Path>) -> Option<PathBuf> {
-        let mut history = self.history.lock().unwrap();
-        while let Some(last) = history.pop_back() {
+        let mut queue = self.queue.lock().unwrap();
+        while let Some(last) = queue.history.pop_back() {
             if current.map(|c| c == last).unwrap_or(false) {
                 continue;
             }
@@ -95,8 +92,8 @@ impl QueueService {
     }
 
     pub(crate) fn has_previous(&self, current: Option<&Path>) -> bool {
-        let history = self.history.lock().unwrap();
-        for path in history.iter().rev() {
+        let queue = self.queue.lock().unwrap();
+        for path in queue.history.iter().rev() {
             if current.map(|c| c == path).unwrap_or(false) {
                 continue;
             }
@@ -118,10 +115,12 @@ impl QueueService {
             .ok()
             .and_then(|guard| guard.now_playing.clone());
         let now_playing_str = now_playing.as_ref().map(|p| p.to_string_lossy().to_string());
+        let (queued_items, history_items) = {
+            let queue = self.queue.lock().unwrap();
+            (queue.items.clone(), queue.history.clone())
+        };
 
-        let queue = self.queue.lock().unwrap();
-        let mut items: Vec<QueueItem> = queue
-            .items
+        let mut items: Vec<QueueItem> = queued_items
             .iter()
             .map(|path| {
                 let is_now_playing = now_playing_str
@@ -208,17 +207,15 @@ impl QueueService {
         }
 
         let mut played_paths = Vec::new();
-        if let Ok(history) = self.history.lock() {
-            for path in history.iter().rev() {
-                if let Some(current) = now_playing_str.as_deref() {
-                    if current == path.to_string_lossy().as_ref() {
-                        continue;
-                    }
+        for path in history_items.iter().rev() {
+            if let Some(current) = now_playing_str.as_deref() {
+                if current == path.to_string_lossy().as_ref() {
+                    continue;
                 }
-                played_paths.push(path.clone());
-                if played_paths.len() >= 10 {
-                    break;
-                }
+            }
+            played_paths.push(path.clone());
+            if played_paths.len() >= 10 {
+                break;
             }
         }
 
@@ -358,17 +355,23 @@ impl QueueService {
             return true;
         }
 
-        let history_tail = {
-            let mut history = self.history.lock().unwrap();
-            let pos = match history.iter().position(|p| p == path) {
+        let (history_tail, queued_items) = {
+            let mut queue = self.queue.lock().unwrap();
+            let pos = match queue.history.iter().position(|p| p == path) {
                 Some(pos) => pos,
                 None => return false,
             };
-            let tail = history.iter().skip(pos + 1).cloned().collect::<Vec<PathBuf>>();
-            if pos + 1 < history.len() {
-                history.drain((pos + 1)..);
+            let tail = queue
+                .history
+                .iter()
+                .skip(pos + 1)
+                .cloned()
+                .collect::<Vec<PathBuf>>();
+            if pos + 1 < queue.history.len() {
+                queue.history.drain((pos + 1)..);
             }
-            tail
+            let queued_items = queue.items.clone();
+            (tail, queued_items)
         };
 
         let current = self
@@ -378,7 +381,6 @@ impl QueueService {
             .ok()
             .and_then(|guard| guard.now_playing.clone());
 
-        let mut queue = self.queue.lock().unwrap();
         let mut seen = std::collections::HashSet::new();
         let mut rebuilt = Vec::new();
 
@@ -394,13 +396,15 @@ impl QueueService {
             }
         }
 
-        for item in queue.items.iter() {
+        for item in queued_items.iter() {
             if seen.insert(item.clone()) {
                 rebuilt.push(item.clone());
             }
         }
 
-        queue.items = rebuilt;
+        if let Ok(mut queue) = self.queue.lock() {
+            queue.items = rebuilt;
+        }
         self.events.queue_changed();
         true
     }
@@ -781,7 +785,7 @@ mod tests {
         let queue_items = service.queue.lock().unwrap().items.clone();
         assert_eq!(queue_items, vec![c, d, e, f]);
 
-        let history = service.history.lock().unwrap().clone();
+        let history = service.queue.lock().unwrap().history.clone();
         assert_eq!(history.into_iter().collect::<Vec<_>>(), vec![a, b]);
     }
 

@@ -50,7 +50,7 @@ impl MetadataWake {
 }
 
 /// Snapshot of current playback state used for API responses and UI.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayerStatus {
     /// Currently playing path (absolute).
     pub now_playing: Option<PathBuf>,
@@ -209,6 +209,8 @@ pub struct DiscoveredBridge {
 pub struct QueueState {
     /// Ordered list of queued paths.
     pub items: Vec<PathBuf>,
+    /// Recently played paths (oldest -> newest).
+    pub history: std::collections::VecDeque<PathBuf>,
 }
 
 /// Bridge-specific runtime state.

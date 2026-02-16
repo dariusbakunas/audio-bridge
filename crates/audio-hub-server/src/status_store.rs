@@ -29,22 +29,48 @@ impl StatusStore {
         &self.inner
     }
 
-    pub fn set_has_previous(&self, value: bool) {
-        if let Ok(mut s) = self.inner.lock() {
-            s.has_previous = Some(value);
+    fn update_status<F>(&self, f: F) -> bool
+    where
+        F: FnOnce(&mut PlayerStatus),
+    {
+        let Ok(mut s) = self.inner.lock() else { return false };
+        let prev = s.clone();
+        f(&mut s);
+        *s != prev
+    }
+
+    fn update_status_with<F, R>(&self, f: F) -> Option<(R, bool)>
+    where
+        F: FnOnce(&mut PlayerStatus) -> R,
+    {
+        let Ok(mut s) = self.inner.lock() else { return None };
+        let prev = s.clone();
+        let result = f(&mut s);
+        Some((result, *s != prev))
+    }
+
+    pub fn emit_if_changed(&self, changed: bool) {
+        if changed {
+            self.events.status_changed();
         }
-        self.events.status_changed();
+    }
+
+    pub fn set_has_previous(&self, value: bool) {
+        let changed = self.update_status(|s| {
+            s.has_previous = Some(value);
+        });
+        self.emit_if_changed(changed);
     }
 
     /// Record a play request for the given media path.
     pub fn on_play(&self, path: PathBuf, start_paused: bool) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.now_playing = Some(path);
             s.has_previous = s.has_previous.or(Some(false));
             s.elapsed_ms = Some(0);
             s.user_paused = start_paused;
             apply_playback_fields(
-                &mut s,
+                s,
                 PlaybackFields {
                     output_device: None,
                     sample_rate: None,
@@ -66,21 +92,21 @@ impl StatusStore {
             );
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     pub fn on_pause_toggle(&self) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.paused = !s.paused;
             s.user_paused = s.paused;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     /// Clear status when playback stops.
     pub fn on_stop(&self) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.now_playing = None;
             s.has_previous = Some(false);
             s.paused = false;
@@ -102,15 +128,15 @@ impl StatusStore {
             s.auto_advance_in_flight = false;
             s.seek_in_flight = false;
             s.manual_advance_in_flight = false;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     pub fn mark_seek_in_flight(&self) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.seek_in_flight = true;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     /// Apply a local playback start snapshot.
@@ -131,12 +157,12 @@ impl StatusStore {
         elapsed_ms: Option<u64>,
         paused: bool,
     ) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.now_playing = Some(path);
             s.has_previous = s.has_previous.or(Some(false));
             s.manual_advance_in_flight = false;
             apply_playback_fields(
-                &mut s,
+                s,
                 PlaybackFields {
                     output_device,
                     sample_rate: Some(sample_rate),
@@ -156,34 +182,34 @@ impl StatusStore {
                     paused: Some(paused),
                 },
             );
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     pub fn on_local_playback_end(&self) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.now_playing = None;
             s.has_previous = Some(false);
             s.elapsed_ms = None;
             s.duration_ms = None;
             s.manual_advance_in_flight = false;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     pub fn set_manual_advance_in_flight(&self, value: bool) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.manual_advance_in_flight = value;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     /// Set whether auto-advance has been triggered and awaiting completion.
     pub fn set_auto_advance_in_flight(&self, value: bool) {
-        if let Ok(mut s) = self.inner.lock() {
+        let changed = self.update_status(|s| {
             s.auto_advance_in_flight = value;
-        }
-        self.events.status_changed();
+        });
+        self.emit_if_changed(changed);
     }
 
     /// Merge remote bridge status and return inputs for auto-advance checks.
@@ -192,67 +218,90 @@ impl StatusStore {
         remote: &BridgeStatus,
         last_duration_ms: Option<u64>,
     ) -> AutoAdvanceInputs {
-        if let Ok(mut s) = self.inner.lock() {
-            let prior_paused = s.paused;
-            if prior_paused != remote.paused {
-                tracing::debug!(
-                    prior_paused,
-                    paused = remote.paused,
-                    "bridge status update"
-                );
-            }
-            let was_playing = s.now_playing.is_some();
-            let should_clear = should_clear_now_playing(&s, remote);
-            if should_clear {
-                s.now_playing = None;
-                s.has_previous = Some(false);
-                s.paused = false;
-                s.user_paused = false;
-                s.auto_advance_in_flight = false;
-            }
-            apply_playback_fields(
-                &mut s,
-                PlaybackFields {
-                    output_device: remote.device.clone(),
-                    sample_rate: remote.sample_rate,
-                    channels: remote.channels,
-                    duration_ms: remote.duration_ms,
-                    source_codec: remote.source_codec.clone(),
-                    source_bit_depth: remote.source_bit_depth,
-                    container: remote.container.clone(),
-                    output_sample_format: remote.output_sample_format.clone(),
-                    resampling: remote.resampling,
-                    resample_from_hz: remote.resample_from_hz,
-                    resample_to_hz: remote.resample_to_hz,
-                    buffer_size_frames: remote.buffer_size_frames,
-                    buffered_frames: remote.buffered_frames,
-                    buffer_capacity_frames: remote.buffer_capacity_frames,
-                    elapsed_ms: remote.elapsed_ms,
-                    paused: Some(remote.paused),
+        let (inputs, changed) = self.reduce_remote_and_inputs(remote, last_duration_ms);
+        self.emit_if_changed(changed);
+        inputs
+    }
+
+    pub fn reduce_remote_and_inputs(
+        &self,
+        remote: &BridgeStatus,
+        last_duration_ms: Option<u64>,
+    ) -> (AutoAdvanceInputs, bool) {
+        let result = self.update_status_with(|s| {
+            reduce_remote_status(s, remote, last_duration_ms)
+        });
+        let Some((inputs, changed)) = result else {
+            return (
+                AutoAdvanceInputs {
+                    last_duration_ms,
+                    remote_duration_ms: remote.duration_ms,
+                    remote_elapsed_ms: remote.elapsed_ms,
+                    end_reason: remote.end_reason,
+                    elapsed_ms: None,
+                    duration_ms: None,
+                    user_paused: false,
+                    seek_in_flight: false,
+                    auto_advance_in_flight: false,
+                    manual_advance_in_flight: false,
+                    now_playing: false,
                 },
+                false,
             );
+        };
+        (inputs, changed)
+    }
 
-            if should_clear_seek_in_flight(&s) {
-                s.seek_in_flight = false;
-            }
-            if should_clear_manual_advance_in_flight(&s) {
-                s.manual_advance_in_flight = false;
-            }
 
-            self.events.status_changed();
-            return AutoAdvanceInputs {
-                last_duration_ms,
-                remote_duration_ms: remote.duration_ms,
-                remote_elapsed_ms: remote.elapsed_ms,
-                end_reason: remote.end_reason,
-                elapsed_ms: s.elapsed_ms,
-                duration_ms: s.duration_ms,
-                user_paused: s.user_paused,
-                seek_in_flight: s.seek_in_flight,
-                auto_advance_in_flight: s.auto_advance_in_flight,
-                manual_advance_in_flight: s.manual_advance_in_flight,
-                now_playing: if should_clear { was_playing } else { s.now_playing.is_some() },
-            };
+    fn apply_remote_status(
+        state: &mut PlayerStatus,
+        remote: &BridgeStatus,
+        last_duration_ms: Option<u64>,
+    ) -> AutoAdvanceInputs {
+        let prior_paused = state.paused;
+        if prior_paused != remote.paused {
+            tracing::debug!(
+                prior_paused,
+                paused = remote.paused,
+                "bridge status update"
+            );
+        }
+        let was_playing = state.now_playing.is_some();
+        let should_clear = should_clear_now_playing(state, remote);
+        if should_clear {
+            state.now_playing = None;
+            state.has_previous = Some(false);
+            state.paused = false;
+            state.user_paused = false;
+            state.auto_advance_in_flight = false;
+        }
+        apply_playback_fields(
+            state,
+            PlaybackFields {
+                output_device: remote.device.clone(),
+                sample_rate: remote.sample_rate,
+                channels: remote.channels,
+                duration_ms: remote.duration_ms,
+                source_codec: remote.source_codec.clone(),
+                source_bit_depth: remote.source_bit_depth,
+                container: remote.container.clone(),
+                output_sample_format: remote.output_sample_format.clone(),
+                resampling: remote.resampling,
+                resample_from_hz: remote.resample_from_hz,
+                resample_to_hz: remote.resample_to_hz,
+                buffer_size_frames: remote.buffer_size_frames,
+                buffered_frames: remote.buffered_frames,
+                buffer_capacity_frames: remote.buffer_capacity_frames,
+                elapsed_ms: remote.elapsed_ms,
+                paused: Some(remote.paused),
+            },
+        );
+
+        if should_clear_seek_in_flight(state) {
+            state.seek_in_flight = false;
+        }
+        if should_clear_manual_advance_in_flight(state) {
+            state.manual_advance_in_flight = false;
         }
 
         AutoAdvanceInputs {
@@ -260,15 +309,23 @@ impl StatusStore {
             remote_duration_ms: remote.duration_ms,
             remote_elapsed_ms: remote.elapsed_ms,
             end_reason: remote.end_reason,
-            elapsed_ms: None,
-            duration_ms: None,
-            user_paused: false,
-            seek_in_flight: false,
-            auto_advance_in_flight: false,
-            manual_advance_in_flight: false,
-            now_playing: false,
+            elapsed_ms: state.elapsed_ms,
+            duration_ms: state.duration_ms,
+            user_paused: state.user_paused,
+            seek_in_flight: state.seek_in_flight,
+            auto_advance_in_flight: state.auto_advance_in_flight,
+            manual_advance_in_flight: state.manual_advance_in_flight,
+            now_playing: if should_clear { was_playing } else { state.now_playing.is_some() },
         }
     }
+}
+
+pub(crate) fn reduce_remote_status(
+    state: &mut PlayerStatus,
+    remote: &BridgeStatus,
+    last_duration_ms: Option<u64>,
+) -> AutoAdvanceInputs {
+    StatusStore::apply_remote_status(state, remote, last_duration_ms)
 }
 
 struct PlaybackFields {
@@ -568,5 +625,26 @@ mod tests {
         store.apply_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(status.now_playing.is_some());
+    }
+
+    #[test]
+    fn reduce_remote_and_inputs_reports_change_without_emitting() {
+        let store = make_store();
+        let remote = BridgeStatus {
+            paused: true,
+            elapsed_ms: Some(1200),
+            duration_ms: Some(5000),
+            ..make_bridge_status()
+        };
+
+        let (inputs, changed) = store.reduce_remote_and_inputs(&remote, None);
+
+        assert!(changed);
+        assert_eq!(inputs.remote_elapsed_ms, Some(1200));
+        assert_eq!(inputs.remote_duration_ms, Some(5000));
+        let status = store.inner().lock().unwrap();
+        assert!(status.paused);
+        assert_eq!(status.elapsed_ms, Some(1200));
+        assert_eq!(status.duration_ms, Some(5000));
     }
 }

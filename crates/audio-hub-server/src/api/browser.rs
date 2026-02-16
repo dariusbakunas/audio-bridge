@@ -81,7 +81,13 @@ impl BrowserWs {
         status.duration_ms = duration_ms;
 
         let last_duration = self.state.providers.browser.get_last_duration(session_id);
-        let inputs = self.state.playback.manager.status().apply_remote_and_inputs(&status, last_duration);
+        let (inputs, changed) = self
+            .state
+            .playback
+            .manager
+            .status()
+            .reduce_remote_and_inputs(&status, last_duration);
+        self.state.playback.manager.status().emit_if_changed(changed);
         self.state.providers.browser.update_last_duration(session_id, status.duration_ms);
 
         let transport = crate::playback_transport::ChannelTransport::new(
@@ -109,7 +115,13 @@ impl BrowserWs {
         status.duration_ms = None;
 
         let last_duration = self.state.providers.browser.get_last_duration(session_id);
-        let inputs = self.state.playback.manager.status().apply_remote_and_inputs(&status, last_duration);
+        let (inputs, changed) = self
+            .state
+            .playback
+            .manager
+            .status()
+            .reduce_remote_and_inputs(&status, last_duration);
+        self.state.playback.manager.status().emit_if_changed(changed);
         self.state.providers.browser.update_last_duration(session_id, status.duration_ms);
 
         let transport = crate::playback_transport::ChannelTransport::new(
