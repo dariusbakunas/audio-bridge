@@ -38,3 +38,17 @@
 - Config file example: `crates/audio-hub-server/config.example.toml`.
 - API handlers live under `crates/audio-hub-server/src/api/*`; OpenAPI `paths(...)` should use module-qualified handlers (e.g. `api::outputs::outputs_select`).
 - `rg` is not available in this environment; use `grep` for searches.
+
+## UI queue semantics (2026-02)
+- `/queue/stream` now refreshes on `StatusChanged` events because queue order depends on `now_playing`.
+- Queue items include:
+  - `now_playing: bool` (current track)
+  - `played: bool` (recent history, currently last 10)
+- Queue list prepends last played tracks (oldest → newest) above the current track.
+- Previous reinserts the current track at the front of the queue before jumping back.
+
+## Bridge stream resilience (2026-02)
+- Bridge HTTP range reader retries transient range failures (default: 5 attempts, 200ms backoff).
+- Playback end reason exposed via `BridgeStatus.end_reason`:
+  - `eof`, `error`, `stopped`
+- Hub auto-advance only on `end_reason = eof`.

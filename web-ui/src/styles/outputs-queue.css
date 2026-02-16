@@ -136,6 +136,15 @@
   cursor: pointer;
 }
 
+.queue-row.is-played {
+  opacity: 0.6;
+}
+
+.queue-row.is-played .queue-title,
+.queue-row.is-played .queue-meta {
+  color: var(--muted);
+}
+
 .queue-row:hover {
   border-color: var(--accent);
   background: var(--bg-overlay);

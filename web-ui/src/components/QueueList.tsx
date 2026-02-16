@@ -1,4 +1,5 @@
 import { QueueItem } from "../types";
+import type { Ref } from "react";
 import { apiUrl } from "../api";
 import { Pause, Play } from "lucide-react";
 
@@ -9,6 +10,7 @@ interface QueueListProps {
   canPlay: boolean;
   isPaused: boolean;
   onPause: () => void;
+  listRef?: Ref<HTMLDivElement>;
   onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
 }
 
@@ -19,12 +21,14 @@ export default function QueueList({
   canPlay,
   isPaused,
   onPause,
+  listRef,
   onPlayFrom
 }: QueueListProps) {
   return (
-    <div className="queue-list">
+    <div className="queue-list" ref={listRef}>
       {items.map((item, index) => {
         const isNowPlaying = item.kind === "track" ? Boolean(item.now_playing) : false;
+        const isPlayed = item.kind === "track" ? Boolean(item.played) : false;
         const PlaybackIcon = isNowPlaying ? (isPaused ? Play : Pause) : Play;
         const fallback = item.kind === "track" ? placeholder(item.album, item.artist) : "";
         const coverUrl = item.kind === "track"
@@ -33,7 +37,10 @@ export default function QueueList({
             : apiUrl(`/art?path=${encodeURIComponent(item.path)}`)
           : "";
         return (
-          <div key={`${item.kind}-${index}`} className={`queue-row${isNowPlaying ? " is-playing" : ""}`}>
+          <div
+            key={`${item.kind}-${index}`}
+            className={`queue-row${isNowPlaying ? " is-playing" : ""}${isPlayed ? " is-played" : ""}`}
+          >
             {item.kind === "track" ? (
               <>
                 <div className="queue-main">

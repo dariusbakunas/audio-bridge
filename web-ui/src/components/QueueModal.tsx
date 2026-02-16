@@ -1,4 +1,5 @@
 import { QueueItem } from "../types";
+import { useEffect, useRef } from "react";
 import QueueList from "./QueueList";
 import { X } from "lucide-react";
 
@@ -25,6 +26,14 @@ export default function QueueModal({
   onPause,
   onPlayFrom
 }: QueueModalProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!listRef.current) return;
+    listRef.current.scrollTop = 0;
+  }, [open, items]);
+
   if (!open) return null;
 
   return (
@@ -50,6 +59,7 @@ export default function QueueModal({
           canPlay={canPlay}
           isPaused={isPaused}
           onPause={onPause}
+          listRef={listRef}
           onPlayFrom={onPlayFrom}
         />
       </aside>

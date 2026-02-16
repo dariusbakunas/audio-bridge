@@ -119,7 +119,7 @@ impl QueueService {
             .and_then(|guard| guard.now_playing.clone());
         let now_playing_str = now_playing.as_ref().map(|p| p.to_string_lossy().to_string());
 
-        let mut queue = self.queue.lock().unwrap();
+        let queue = self.queue.lock().unwrap();
         let mut items: Vec<QueueItem> = queue
             .items
             .iter()
@@ -151,6 +151,7 @@ impl QueueService {
                             artist,
                             format,
                             now_playing: is_now_playing,
+                            played: false,
                         }
                     }
                     _ => QueueItem::Missing {
@@ -195,6 +196,7 @@ impl QueueService {
                             artist,
                             format,
                             now_playing: true,
+                            played: false,
                         }
                     }
                     _ => QueueItem::Missing {
@@ -202,6 +204,78 @@ impl QueueService {
                     },
                 };
                 items.insert(0, entry);
+            }
+        }
+
+        let mut played_paths = Vec::new();
+        if let Ok(history) = self.history.lock() {
+            for path in history.iter().rev() {
+                if let Some(current) = now_playing_str.as_deref() {
+                    if current == path.to_string_lossy().as_ref() {
+                        continue;
+                    }
+                }
+                played_paths.push(path.clone());
+                if played_paths.len() >= 10 {
+                    break;
+                }
+            }
+        }
+
+        if !played_paths.is_empty() {
+            played_paths.reverse();
+            let mut seen = std::collections::HashSet::new();
+            for item in &items {
+                match item {
+                    QueueItem::Track { path, .. } => {
+                        seen.insert(path.clone());
+                    }
+                    QueueItem::Missing { path } => {
+                        seen.insert(path.clone());
+                    }
+                }
+            }
+
+            let mut played_items = Vec::new();
+            for path in played_paths {
+                let path_str = path.to_string_lossy().to_string();
+                if seen.contains(&path_str) {
+                    continue;
+                }
+                let entry = match library.find_track_by_path(&path) {
+                    Some(crate::models::LibraryEntry::Track {
+                        path,
+                        file_name,
+                        duration_ms,
+                        sample_rate,
+                        album,
+                        artist,
+                        format,
+                        ..
+                    }) => {
+                        let id = metadata_db
+                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
+                        QueueItem::Track {
+                            id,
+                            path,
+                            file_name,
+                            duration_ms,
+                            sample_rate,
+                            album,
+                            artist,
+                            format,
+                            now_playing: false,
+                            played: true,
+                        }
+                    }
+                    _ => QueueItem::Missing { path: path_str },
+                };
+                played_items.push(entry);
+            }
+
+            if !played_items.is_empty() {
+                played_items.append(&mut items);
+                items = played_items;
             }
         }
 

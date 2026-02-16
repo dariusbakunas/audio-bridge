@@ -124,6 +124,9 @@ pub enum QueueItem {
         /// True when this is the currently playing track.
         #[serde(default)]
         now_playing: bool,
+        /// True when this track has already played.
+        #[serde(default)]
+        played: bool,
     },
     /// Queue entry that no longer exists on disk.
     Missing { path: String },

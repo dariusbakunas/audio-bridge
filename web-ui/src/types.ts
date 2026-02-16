@@ -48,6 +48,7 @@ export interface QueueItemTrack {
   artist?: string | null;
   format: string;
   now_playing?: boolean | null;
+  played?: boolean | null;
 }
 
 export interface QueueItemMissing {

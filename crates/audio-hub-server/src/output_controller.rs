@@ -269,6 +269,9 @@ impl OutputController {
         let Some(path) = previous else {
             return Ok(false);
         };
+        if let Some(current) = current {
+            state.playback.manager.queue_add_next_paths(vec![current]);
+        }
         state.playback.manager.set_manual_advance_in_flight(true);
         self.dispatch_play(state, path.clone(), None, false)?;
         state.playback.manager.update_has_previous();
