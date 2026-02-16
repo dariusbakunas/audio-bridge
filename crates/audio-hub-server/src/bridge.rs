@@ -4,12 +4,12 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::TryRecvError;
 
-use crate::bridge_transport::BridgeTransportClientBlocking;
+use crate::bridge_transport::BridgeTransportClient;
 
 #[derive(Debug, Clone)]
 pub enum BridgeCommand {
@@ -46,25 +46,25 @@ pub fn spawn_bridge_worker(
     public_base_url: String,
     metadata: Option<crate::metadata_db::MetadataDb>,
 ) {
-    std::thread::spawn(move || {
+    actix_web::rt::spawn(async move {
         worker_running.store(true, Ordering::Relaxed);
         tracing::info!(bridge_id = %bridge_id, http_addr = %http_addr, "bridge worker start");
-        let client = BridgeTransportClientBlocking::new(http_addr, public_base_url, metadata);
+        let client = BridgeTransportClient::new_with_base(http_addr, public_base_url, metadata);
 
         loop {
-        if let Ok(cmd) = cmd_rx.recv_timeout(Duration::from_millis(250)) {
-            match cmd {
-                BridgeCommand::Quit => break,
+            match cmd_rx.try_recv() {
+                Ok(cmd) => match cmd {
+                    BridgeCommand::Quit => break,
                     BridgeCommand::PauseToggle => {
-                        let _ = client.pause_toggle();
+                        let _ = client.pause_toggle().await;
                         status.on_pause_toggle();
                     }
                     BridgeCommand::Stop => {
-                        let _ = client.stop();
+                        let _ = client.stop().await;
                         status.on_stop();
                     }
                     BridgeCommand::Seek { ms } => {
-                        let _ = client.seek(ms);
+                        let _ = client.seek(ms).await;
                         status.mark_seek_in_flight();
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
@@ -75,11 +75,16 @@ pub fn spawn_bridge_worker(
                             title.as_deref(),
                             seek_ms,
                             start_paused,
-                        );
+                        )
+                        .await;
 
                         status.on_play(path, false);
                     }
-            }
+                },
+                Err(TryRecvError::Empty) => {
+                    actix_web::rt::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                Err(TryRecvError::Disconnected) => break,
             }
         }
         worker_running.store(false, Ordering::Relaxed);

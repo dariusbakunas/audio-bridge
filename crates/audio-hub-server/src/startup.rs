@@ -22,7 +22,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
-use crate::bridge_transport::BridgeTransportClientBlocking;
+use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config};
 use crate::bridge_manager::parse_output_id;
 use crate::config;
@@ -69,7 +69,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
 
     let mut device_to_set: Option<String> = None;
     let (active_bridge_id, active_output_id) =
-        resolve_active_output(&cfg, &bridges, &mut device_to_set)?;
+        resolve_active_output(&cfg, &bridges, &mut device_to_set).await?;
     let active_http_addr = active_bridge_id.as_ref().and_then(|bridge_id| {
         bridges
             .iter()
@@ -77,7 +77,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .map(|b| b.http_addr)
     });
 
-    apply_active_bridge_device(device_to_set, active_http_addr, &public_base_url);
+    apply_active_bridge_device(device_to_set, active_http_addr, &public_base_url).await;
     let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
@@ -542,14 +542,19 @@ fn init_metadata_db_and_library(
     Ok((metadata_db, library))
 }
 
-fn apply_active_bridge_device(
+async fn apply_active_bridge_device(
     device_to_set: Option<String>,
     active_http_addr: Option<std::net::SocketAddr>,
     public_base_url: &str,
 ) {
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = BridgeTransportClientBlocking::new(http_addr, public_base_url.to_string(), None)
-            .set_device(&device_name);
+        let _ = BridgeTransportClient::new_with_base(
+            http_addr,
+            public_base_url.to_string(),
+            None,
+        )
+        .set_device(&device_name)
+        .await;
     }
 }
 
@@ -635,7 +640,7 @@ fn build_local_state(
 }
 
 /// Resolve active output id from config and available bridges.
-fn resolve_active_output(
+async fn resolve_active_output(
     cfg: &config::ServerConfig,
     bridges: &[crate::config::BridgeConfigResolved],
     device_to_set: &mut Option<String>,
@@ -649,8 +654,9 @@ fn resolve_active_output(
                     .find(|b| b.id == bridge_id)
                     .map(|b| b.http_addr);
                 if let Some(http_addr) = http_addr {
-                    if let Ok(devices) = BridgeTransportClientBlocking::new(http_addr, String::new(), None)
+                    if let Ok(devices) = BridgeTransportClient::new(http_addr)
                         .list_devices()
+                        .await
                     {
                         if let Some(device) = devices.iter().find(|d| d.id == device_id) {
                             let active_id = format!("bridge:{}:{}", bridge_id, device.id);
@@ -680,8 +686,9 @@ fn resolve_active_output(
                     if first_bridge.is_none() {
                         first_bridge = Some(bridge.clone());
                     }
-                    match BridgeTransportClientBlocking::new(bridge.http_addr, String::new(), None)
+                    match BridgeTransportClient::new(bridge.http_addr)
                         .list_devices()
+                        .await
                     {
                         Ok(devices) if !devices.is_empty() => {
                             let device = devices[0].clone();
@@ -764,6 +771,7 @@ mod tests {
 
     #[test]
     fn resolve_active_output_supports_local_override() {
+        let system = actix_web::rt::System::new();
         let mut device_to_set = None;
         let cfg = config::ServerConfig {
             bind: None,
@@ -779,7 +787,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
         };
-        let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
+        let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
         assert_eq!(result.0, None);
         assert_eq!(result.1, Some("local:default".to_string()));
         assert_eq!(device_to_set, None);
@@ -787,6 +795,7 @@ mod tests {
 
     #[test]
     fn resolve_active_output_defaults_to_none_without_bridges() {
+        let system = actix_web::rt::System::new();
         let mut device_to_set = None;
         let cfg = config::ServerConfig {
             bind: None,
@@ -802,7 +811,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
         };
-        let result = resolve_active_output(&cfg, &[], &mut device_to_set).expect("resolve");
+        let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
         assert_eq!(result, (None, None));
         assert_eq!(device_to_set, None);
     }

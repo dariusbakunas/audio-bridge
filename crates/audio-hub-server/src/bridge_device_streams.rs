@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use actix_web::web;
 
-use crate::bridge_transport::{BridgeTransportClientBlocking, HttpDevicesSnapshot, HttpStatusResponse};
+use crate::bridge_transport::{BridgeTransportClient, HttpDevicesSnapshot, HttpStatusResponse};
 use crate::bridge::update_online_and_should_emit;
 use crate::playback_transport::ChannelTransport;
 use crate::queue_service::QueueService;
@@ -54,6 +54,11 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
     }
 
     std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("bridge device stream runtime");
+        runtime.block_on(async move {
         let mut last_snapshot: Option<HttpDevicesSnapshot> = None;
         let mut failures = 0usize;
         loop {
@@ -62,7 +67,11 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
             };
             let is_configured = is_configured_bridge(&state, &bridge_id);
             let events = state.events.clone();
-            let client = BridgeTransportClientBlocking::new(http_addr, String::new(), Some(state.metadata.db.clone()));
+            let client = BridgeTransportClient::new_with_base(
+                http_addr,
+                String::new(),
+                Some(state.metadata.db.clone()),
+            );
             let seen_event = AtomicBool::new(false);
             let result = client.listen_devices_stream(|snapshot| {
                 if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
@@ -73,7 +82,7 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
                     last_snapshot = Some(snapshot);
                     events.outputs_changed();
                 }
-            });
+            }).await;
             if let Err(e) = result {
                 if seen_event.load(Ordering::Relaxed) {
                     failures = 0;
@@ -111,7 +120,7 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
                 .as_secs()
                 .saturating_mul(failures.max(1) as u64);
             let delay = Duration::from_secs(delay_secs).min(RETRY_MAX_DELAY);
-            std::thread::sleep(delay);
+            tokio::time::sleep(delay).await;
         }
 
         if let Ok(mut active) = state.providers.bridge.device_streams.lock() {
@@ -120,6 +129,7 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
         if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
             cache.remove(&bridge_id);
         }
+        });
     });
 }
 
@@ -131,6 +141,11 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
     }
 
     std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("bridge status stream runtime");
+        runtime.block_on(async move {
         let mut last_snapshot: Option<HttpStatusResponse> = None;
         let mut last_duration_ms: Option<u64> = None;
         let mut failures = 0usize;
@@ -139,7 +154,11 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
                 break;
             };
             let events = state.events.clone();
-            let client = BridgeTransportClientBlocking::new(http_addr, String::new(), Some(state.metadata.db.clone()));
+            let client = BridgeTransportClient::new_with_base(
+                http_addr,
+                String::new(),
+                Some(state.metadata.db.clone()),
+            );
             let result = client.listen_status_stream(|snapshot| {
                 if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                     cache.insert(bridge_id.clone(), snapshot.clone());
@@ -149,7 +168,7 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
                     last_snapshot = Some(snapshot);
                     events.status_changed();
                 }
-            });
+            }).await;
             if let Err(e) = result {
                 failures = failures.saturating_add(1);
                 if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
@@ -171,7 +190,7 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
                 .as_secs()
                 .saturating_mul(failures.max(1) as u64);
             let delay = Duration::from_secs(delay_secs).min(RETRY_MAX_DELAY);
-            std::thread::sleep(delay);
+            tokio::time::sleep(delay).await;
         }
 
         if let Ok(mut active) = state.providers.bridge.status_streams.lock() {
@@ -180,6 +199,7 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
         if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
             cache.remove(&bridge_id);
         }
+        });
     });
 }
 

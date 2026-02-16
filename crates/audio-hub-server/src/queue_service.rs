@@ -668,9 +668,9 @@ mod tests {
     #[test]
     fn clear_returns_true_only_when_items_exist() {
         let service = make_service();
-        assert!(!service.clear());
+        assert!(!service.clear(false));
         service.add_paths(vec![PathBuf::from("/music/a.flac")]);
-        assert!(service.clear());
+        assert!(service.clear(false));
         let queue = service.queue.lock().unwrap();
         assert!(queue.items.is_empty());
     }
