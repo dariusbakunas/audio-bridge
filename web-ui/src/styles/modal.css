@@ -316,6 +316,10 @@
   border-bottom: 1px solid var(--border);
   padding-bottom: 12px;
   margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-panel);
 }
 
 @keyframes slide-in {
