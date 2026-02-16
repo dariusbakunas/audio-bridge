@@ -230,6 +230,15 @@ pub struct TrackMetadataUpdateRequest {
     pub disc_number: Option<u32>,
 }
 
+/// Supported metadata fields for a track file.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackMetadataFieldsResponse {
+    /// Tag type detected for the file, if known.
+    pub tag_type: Option<String>,
+    /// Supported field keys for editing.
+    pub fields: Vec<String>,
+}
+
 /// Current metadata fields for an album.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct AlbumMetadataResponse {
@@ -259,6 +268,103 @@ pub struct AlbumMetadataUpdateRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct AlbumMetadataUpdateResponse {
     /// Album id after update (may differ if merged).
+    pub album_id: i64,
+}
+
+/// Text metadata for an artist or album.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TextMetadata {
+    pub text: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub updated_at_ms: Option<i64>,
+}
+
+/// Media asset metadata exposed to the UI.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct MediaAssetInfo {
+    pub id: i64,
+    pub url: String,
+    #[serde(default)]
+    pub checksum: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub updated_at_ms: Option<i64>,
+}
+
+/// Response payload for artist profile metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ArtistProfileResponse {
+    pub artist_id: i64,
+    pub lang: String,
+    pub bio: Option<TextMetadata>,
+    pub image: Option<MediaAssetInfo>,
+}
+
+/// Response payload for album profile metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumProfileResponse {
+    pub album_id: i64,
+    pub lang: String,
+    pub notes: Option<TextMetadata>,
+    pub image: Option<MediaAssetInfo>,
+}
+
+/// Update request for artist profile metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ArtistProfileUpdateRequest {
+    pub artist_id: i64,
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub bio_locked: Option<bool>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// Update request for album profile metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumProfileUpdateRequest {
+    pub album_id: i64,
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub notes_locked: Option<bool>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// Request to set an artist image from a URL.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ArtistImageSetRequest {
+    pub artist_id: i64,
+    pub url: String,
+}
+
+/// Request to clear an artist image.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ArtistImageClearRequest {
+    pub artist_id: i64,
+}
+
+/// Request to set an album image from a URL.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumImageSetRequest {
+    pub album_id: i64,
+    pub url: String,
+}
+
+/// Request to clear an album image.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct AlbumImageClearRequest {
     pub album_id: i64,
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchJson, postJson } from "../api";
-import { TrackMetadataResponse } from "../types";
+import { TrackMetadataFieldsResponse, TrackMetadataResponse } from "../types";
 import Modal from "./Modal";
 
 interface TrackMetadataModalProps {
@@ -53,6 +53,8 @@ export default function TrackMetadataModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [supportedFields, setSupportedFields] = useState<string[] | null>(null);
+  const [tagType, setTagType] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
@@ -65,6 +67,8 @@ export default function TrackMetadataModal({
     setTrackNumber(defaults.trackNumber ? String(defaults.trackNumber) : "");
     setDiscNumber(defaults.discNumber ? String(defaults.discNumber) : "");
     setError(null);
+    setSupportedFields(null);
+    setTagType("");
 
     if (!trackId && !trackPath) {
       setLoading(false);
@@ -74,20 +78,27 @@ export default function TrackMetadataModal({
     const query = trackId
       ? `track_id=${trackId}`
       : `path=${encodeURIComponent(trackPath ?? "")}`;
-    fetchJson<TrackMetadataResponse>(`/tracks/metadata?${query}`)
-      .then((response) => {
-        if (!active || !response) return;
-        setTitle(response.title ?? "");
-        setArtist(response.artist ?? "");
-        setAlbum(response.album ?? "");
-        setAlbumArtist(response.album_artist ?? "");
-        setYear(response.year ? String(response.year) : "");
-        setTrackNumber(response.track_number ? String(response.track_number) : "");
-        setDiscNumber(response.disc_number ? String(response.disc_number) : "");
-      })
-      .catch((err) => {
+    const metadataPromise = fetchJson<TrackMetadataResponse>(`/tracks/metadata?${query}`);
+    const fieldsPromise = fetchJson<TrackMetadataFieldsResponse>(`/tracks/metadata/fields?${query}`);
+    Promise.allSettled([metadataPromise, fieldsPromise])
+      .then(([metadataResult, fieldsResult]) => {
         if (!active) return;
-        setError((err as Error).message);
+        if (metadataResult.status === "fulfilled" && metadataResult.value) {
+          const response = metadataResult.value;
+          setTitle(response.title ?? "");
+          setArtist(response.artist ?? "");
+          setAlbum(response.album ?? "");
+          setAlbumArtist(response.album_artist ?? "");
+          setYear(response.year ? String(response.year) : "");
+          setTrackNumber(response.track_number ? String(response.track_number) : "");
+          setDiscNumber(response.disc_number ? String(response.disc_number) : "");
+        } else if (metadataResult.status === "rejected") {
+          setError(metadataResult.reason instanceof Error ? metadataResult.reason.message : String(metadataResult.reason));
+        }
+        if (fieldsResult.status === "fulfilled" && fieldsResult.value) {
+          setSupportedFields(fieldsResult.value.fields ?? []);
+          setTagType(fieldsResult.value.tag_type ?? "");
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -160,6 +171,9 @@ export default function TrackMetadataModal({
     }
   };
 
+  const supportsField = (key: string) =>
+    supportedFields === null || supportedFields.includes(key);
+
   return (
     <Modal open={open} title="Edit track metadata" onClose={onClose}>
       <div className="track-meta">
@@ -169,10 +183,16 @@ export default function TrackMetadataModal({
           <div className="muted small track-meta-note">
             Leave a field blank to keep the existing tag value.
           </div>
+          {tagType ? (
+            <div className="muted small track-meta-note">
+              Tag type: {tagType}
+            </div>
+          ) : null}
         </div>
 
         <div className="track-meta-form">
-          <label className="track-meta-field">
+          {supportsField("title") ? (
+            <label className="track-meta-field">
             <span className="muted small">Track title</span>
             <input
               className="track-meta-input"
@@ -181,7 +201,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("artist") ? (
+            <label className="track-meta-field">
             <span className="muted small">Artist</span>
             <input
               className="track-meta-input"
@@ -190,7 +212,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("album") ? (
+            <label className="track-meta-field">
             <span className="muted small">Album</span>
             <input
               className="track-meta-input"
@@ -199,7 +223,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("album_artist") ? (
+            <label className="track-meta-field">
             <span className="muted small">Album artist</span>
             <input
               className="track-meta-input"
@@ -208,7 +234,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("year") ? (
+            <label className="track-meta-field">
             <span className="muted small">Year</span>
             <input
               className="track-meta-input"
@@ -218,7 +246,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("track_number") ? (
+            <label className="track-meta-field">
             <span className="muted small">Track #</span>
             <input
               className="track-meta-input"
@@ -228,7 +258,9 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
-          <label className="track-meta-field">
+          ) : null}
+          {supportsField("disc_number") ? (
+            <label className="track-meta-field">
             <span className="muted small">Disc #</span>
             <input
               className="track-meta-input"
@@ -238,6 +270,7 @@ export default function TrackMetadataModal({
               disabled={loading}
             />
           </label>
+          ) : null}
         </div>
 
         <div className="track-meta-actions">

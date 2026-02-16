@@ -6,24 +6,37 @@ use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::musicbrainz::MusicBrainzMatch;
+use crate::media_assets::MediaAssetStore;
 use crate::models::{
+    AlbumImageClearRequest,
+    AlbumImageSetRequest,
     AlbumListResponse,
     AlbumMetadataResponse,
     AlbumMetadataUpdateRequest,
     AlbumMetadataUpdateResponse,
+    AlbumProfileResponse,
+    AlbumProfileUpdateRequest,
+    ArtistImageClearRequest,
+    ArtistImageSetRequest,
     ArtistListResponse,
+    ArtistProfileResponse,
+    ArtistProfileUpdateRequest,
+    MediaAssetInfo,
     MusicBrainzMatchApplyRequest,
     MusicBrainzMatchCandidate,
     MusicBrainzMatchKind,
     MusicBrainzMatchSearchRequest,
     MusicBrainzMatchSearchResponse,
+    TextMetadata,
     TrackListResponse,
     TrackMetadataResponse,
+    TrackMetadataFieldsResponse,
     TrackMetadataUpdateRequest,
     TrackResolveResponse,
 };
+use crate::metadata_db::{MediaAssetRecord, TextEntry};
 use crate::state::AppState;
-use crate::tag_writer::{write_track_tags, TrackTagUpdate};
+use crate::tag_writer::{supported_track_fields, tag_type_label, write_track_tags, TrackTagUpdate};
 
 #[derive(Deserialize, ToSchema)]
 pub struct ListQuery {
@@ -82,6 +95,53 @@ pub struct TrackMetadataQuery {
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct AlbumMetadataQuery {
     pub album_id: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct ArtistProfileQuery {
+    pub artist_id: i64,
+    #[serde(default)]
+    pub lang: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct AlbumProfileQuery {
+    pub album_id: i64,
+    #[serde(default)]
+    pub lang: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+pub struct MediaAssetPath {
+    pub id: i64,
+}
+
+const DEFAULT_LANG: &str = "en-US";
+
+fn map_text_metadata(entry: TextEntry) -> TextMetadata {
+    TextMetadata {
+        text: entry.text,
+        source: entry.source,
+        locked: entry.locked,
+        updated_at_ms: entry.updated_at_ms,
+    }
+}
+
+fn map_media_asset_info(entry: MediaAssetRecord) -> MediaAssetInfo {
+    MediaAssetInfo {
+        id: entry.id,
+        url: format!("/media/{}", entry.id),
+        checksum: entry.checksum,
+        source_url: entry.source_url,
+        updated_at_ms: entry.updated_at_ms,
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[utoipa::path(
@@ -146,6 +206,46 @@ pub async fn tracks_metadata(
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => HttpResponse::InternalServerError().body(err),
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/tracks/metadata/fields",
+    params(TrackMetadataQuery),
+    responses(
+        (status = 200, description = "Track metadata fields", body = TrackMetadataFieldsResponse),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[get("/tracks/metadata/fields")]
+/// Return supported tag fields for a track path.
+pub async fn tracks_metadata_fields(
+    state: web::Data<AppState>,
+    query: web::Query<TrackMetadataQuery>,
+) -> impl Responder {
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let path = if let Some(track_id) = query.track_id {
+        match state.metadata.db.track_path_for_id(track_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else if let Some(path) = query.path.as_ref() {
+        path.clone()
+    } else {
+        return HttpResponse::BadRequest().body("track_id or path is required");
+    };
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+
+    let (tag_type, fields) = supported_track_fields(&full_path);
+    let tag_label = tag_type.map(tag_type_label).map(|s| s.to_string());
+    HttpResponse::Ok().json(TrackMetadataFieldsResponse {
+        tag_type: tag_label,
+        fields: fields.into_iter().map(|s| s.to_string()).collect(),
+    })
 }
 
 #[utoipa::path(
@@ -363,6 +463,464 @@ pub async fn albums_metadata_update(
     HttpResponse::Ok().json(AlbumMetadataUpdateResponse {
         album_id: updated_album_id,
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/artists/profile",
+    params(ArtistProfileQuery),
+    responses(
+        (status = 200, description = "Artist profile", body = ArtistProfileResponse),
+        (status = 404, description = "Artist not found")
+    )
+)]
+#[get("/artists/profile")]
+/// Read artist profile metadata.
+pub async fn artist_profile(
+    state: web::Data<AppState>,
+    query: web::Query<ArtistProfileQuery>,
+) -> impl Responder {
+    let lang = query.lang.as_deref().unwrap_or(DEFAULT_LANG).trim();
+    if lang.is_empty() {
+        return HttpResponse::BadRequest().body("lang is required");
+    }
+    let db = &state.metadata.db;
+    match db.artist_exists(query.artist_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let bio = match db.artist_bio(query.artist_id, lang) {
+        Ok(value) => value.map(map_text_metadata),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let image = match db.media_asset_for("artist", query.artist_id, "image") {
+        Ok(value) => value.map(map_media_asset_info),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    HttpResponse::Ok().json(ArtistProfileResponse {
+        artist_id: query.artist_id,
+        lang: lang.to_string(),
+        bio,
+        image,
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/artists/profile/update",
+    request_body = ArtistProfileUpdateRequest,
+    responses(
+        (status = 200, description = "Artist profile updated", body = ArtistProfileResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Artist not found")
+    )
+)]
+#[post("/artists/profile/update")]
+/// Update artist profile metadata.
+pub async fn artist_profile_update(
+    state: web::Data<AppState>,
+    body: web::Json<ArtistProfileUpdateRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let lang = request.lang.as_deref().unwrap_or(DEFAULT_LANG).trim();
+    if lang.is_empty() {
+        return HttpResponse::BadRequest().body("lang is required");
+    }
+    let db = &state.metadata.db;
+    match db.artist_exists(request.artist_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let mut updated = false;
+    let source = request
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("manual");
+    let updated_at_ms = now_ms();
+
+    if let Some(bio) = request.bio {
+        updated = true;
+        let text = bio.trim();
+        if text.is_empty() {
+            if let Err(err) = db.delete_artist_bio(request.artist_id, lang) {
+                return HttpResponse::InternalServerError().body(err.to_string());
+            }
+        } else if let Err(err) = db.upsert_artist_bio(
+            request.artist_id,
+            lang,
+            text,
+            Some(source),
+            request.bio_locked.unwrap_or(true),
+            Some(updated_at_ms),
+        ) {
+            return HttpResponse::InternalServerError().body(err.to_string());
+        }
+    }
+
+    if !updated {
+        return HttpResponse::BadRequest().body("no profile fields provided");
+    }
+
+    let bio = match db.artist_bio(request.artist_id, lang) {
+        Ok(value) => value.map(map_text_metadata),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let image = match db.media_asset_for("artist", request.artist_id, "image") {
+        Ok(value) => value.map(map_media_asset_info),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    HttpResponse::Ok().json(ArtistProfileResponse {
+        artist_id: request.artist_id,
+        lang: lang.to_string(),
+        bio,
+        image,
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/albums/profile",
+    params(AlbumProfileQuery),
+    responses(
+        (status = 200, description = "Album profile", body = AlbumProfileResponse),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[get("/albums/profile")]
+/// Read album profile metadata.
+pub async fn album_profile(
+    state: web::Data<AppState>,
+    query: web::Query<AlbumProfileQuery>,
+) -> impl Responder {
+    let lang = query.lang.as_deref().unwrap_or(DEFAULT_LANG).trim();
+    if lang.is_empty() {
+        return HttpResponse::BadRequest().body("lang is required");
+    }
+    let db = &state.metadata.db;
+    match db.album_exists(query.album_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let notes = match db.album_notes(query.album_id, lang) {
+        Ok(value) => value.map(map_text_metadata),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let image = match db.media_asset_for("album", query.album_id, "image") {
+        Ok(value) => value.map(map_media_asset_info),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    HttpResponse::Ok().json(AlbumProfileResponse {
+        album_id: query.album_id,
+        lang: lang.to_string(),
+        notes,
+        image,
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/albums/profile/update",
+    request_body = AlbumProfileUpdateRequest,
+    responses(
+        (status = 200, description = "Album profile updated", body = AlbumProfileResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[post("/albums/profile/update")]
+/// Update album profile metadata.
+pub async fn album_profile_update(
+    state: web::Data<AppState>,
+    body: web::Json<AlbumProfileUpdateRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let lang = request.lang.as_deref().unwrap_or(DEFAULT_LANG).trim();
+    if lang.is_empty() {
+        return HttpResponse::BadRequest().body("lang is required");
+    }
+    let db = &state.metadata.db;
+    match db.album_exists(request.album_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let mut updated = false;
+    let source = request
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("manual");
+    let updated_at_ms = now_ms();
+
+    if let Some(notes) = request.notes {
+        updated = true;
+        let text = notes.trim();
+        if text.is_empty() {
+            if let Err(err) = db.delete_album_notes(request.album_id, lang) {
+                return HttpResponse::InternalServerError().body(err.to_string());
+            }
+        } else if let Err(err) = db.upsert_album_notes(
+            request.album_id,
+            lang,
+            text,
+            Some(source),
+            request.notes_locked.unwrap_or(true),
+            Some(updated_at_ms),
+        ) {
+            return HttpResponse::InternalServerError().body(err.to_string());
+        }
+    }
+
+    if !updated {
+        return HttpResponse::BadRequest().body("no profile fields provided");
+    }
+
+    let notes = match db.album_notes(request.album_id, lang) {
+        Ok(value) => value.map(map_text_metadata),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let image = match db.media_asset_for("album", request.album_id, "image") {
+        Ok(value) => value.map(map_media_asset_info),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    HttpResponse::Ok().json(AlbumProfileResponse {
+        album_id: request.album_id,
+        lang: lang.to_string(),
+        notes,
+        image,
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/artists/image/set",
+    request_body = ArtistImageSetRequest,
+    responses(
+        (status = 200, description = "Artist image updated", body = MediaAssetInfo),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Artist not found")
+    )
+)]
+#[post("/artists/image/set")]
+/// Fetch and store an artist image from a URL.
+pub async fn artist_image_set(
+    state: web::Data<AppState>,
+    body: web::Json<ArtistImageSetRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let db = &state.metadata.db;
+    match db.artist_exists(request.artist_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let store = MediaAssetStore::new(root);
+    let previous = match db.media_asset_for("artist", request.artist_id, "image") {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let stored = match store
+        .store_image_from_url("artist", request.artist_id, "image", &request.url)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::BadRequest().body(err.to_string()),
+    };
+    let id = match db.upsert_media_asset(
+        "artist",
+        request.artist_id,
+        "image",
+        &stored.local_path,
+        Some(&stored.checksum),
+        Some(&stored.source_url),
+        Some(stored.updated_at_ms),
+    ) {
+        Ok(id) => id,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    if let Some(previous) = previous {
+        if previous.local_path != stored.local_path {
+            let _ = store.delete_asset_file(&previous.local_path);
+        }
+    }
+    HttpResponse::Ok().json(MediaAssetInfo {
+        id,
+        url: format!("/media/{}", id),
+        checksum: Some(stored.checksum),
+        source_url: Some(stored.source_url),
+        updated_at_ms: Some(stored.updated_at_ms),
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/artists/image/clear",
+    request_body = ArtistImageClearRequest,
+    responses(
+        (status = 200, description = "Artist image cleared"),
+        (status = 404, description = "Artist not found")
+    )
+)]
+#[post("/artists/image/clear")]
+/// Clear an artist image.
+pub async fn artist_image_clear(
+    state: web::Data<AppState>,
+    body: web::Json<ArtistImageClearRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let db = &state.metadata.db;
+    match db.artist_exists(request.artist_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let store = MediaAssetStore::new(root);
+    let previous = match db.delete_media_asset("artist", request.artist_id, "image") {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    if let Some(previous) = previous {
+        let _ = store.delete_asset_file(&previous.local_path);
+    }
+    HttpResponse::Ok().finish()
+}
+
+#[utoipa::path(
+    post,
+    path = "/albums/image/set",
+    request_body = AlbumImageSetRequest,
+    responses(
+        (status = 200, description = "Album image updated", body = MediaAssetInfo),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[post("/albums/image/set")]
+/// Fetch and store an album image from a URL.
+pub async fn album_image_set(
+    state: web::Data<AppState>,
+    body: web::Json<AlbumImageSetRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let db = &state.metadata.db;
+    match db.album_exists(request.album_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let store = MediaAssetStore::new(root);
+    let previous = match db.media_asset_for("album", request.album_id, "image") {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let stored = match store
+        .store_image_from_url("album", request.album_id, "image", &request.url)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::BadRequest().body(err.to_string()),
+    };
+    let id = match db.upsert_media_asset(
+        "album",
+        request.album_id,
+        "image",
+        &stored.local_path,
+        Some(&stored.checksum),
+        Some(&stored.source_url),
+        Some(stored.updated_at_ms),
+    ) {
+        Ok(id) => id,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    if let Some(previous) = previous {
+        if previous.local_path != stored.local_path {
+            let _ = store.delete_asset_file(&previous.local_path);
+        }
+    }
+    HttpResponse::Ok().json(MediaAssetInfo {
+        id,
+        url: format!("/media/{}", id),
+        checksum: Some(stored.checksum),
+        source_url: Some(stored.source_url),
+        updated_at_ms: Some(stored.updated_at_ms),
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/albums/image/clear",
+    request_body = AlbumImageClearRequest,
+    responses(
+        (status = 200, description = "Album image cleared"),
+        (status = 404, description = "Album not found")
+    )
+)]
+#[post("/albums/image/clear")]
+/// Clear an album image.
+pub async fn album_image_clear(
+    state: web::Data<AppState>,
+    body: web::Json<AlbumImageClearRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let db = &state.metadata.db;
+    match db.album_exists(request.album_id) {
+        Ok(true) => {}
+        Ok(false) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    }
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let store = MediaAssetStore::new(root);
+    let previous = match db.delete_media_asset("album", request.album_id, "image") {
+        Ok(value) => value,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    if let Some(previous) = previous {
+        let _ = store.delete_asset_file(&previous.local_path);
+    }
+    HttpResponse::Ok().finish()
+}
+
+#[utoipa::path(
+    get,
+    path = "/media/{id}",
+    params(MediaAssetPath),
+    responses(
+        (status = 200, description = "Media asset"),
+        (status = 404, description = "Asset not found")
+    )
+)]
+#[get("/media/{id}")]
+/// Serve a media asset by id.
+pub async fn media_asset(
+    state: web::Data<AppState>,
+    path: web::Path<MediaAssetPath>,
+    req: HttpRequest,
+) -> impl Responder {
+    let db = &state.metadata.db;
+    let record = match db.media_asset_by_id(path.id) {
+        Ok(Some(value)) => value,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let store = MediaAssetStore::new(root);
+    let full_path = match store.resolve_asset_path(&record.local_path) {
+        Ok(path) => path,
+        Err(_) => return HttpResponse::NotFound().finish(),
+    };
+    match NamedFile::open(full_path) {
+        Ok(file) => file.into_response(&req),
+        Err(_) => HttpResponse::NotFound().finish(),
+    }
 }
 
 #[utoipa::path(

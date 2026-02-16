@@ -91,6 +91,7 @@ export interface AlbumSummary {
   id: number;
   title: string;
   artist?: string | null;
+  artist_id?: number | null;
   year?: number | null;
   mbid?: string | null;
   track_count: number;
@@ -137,6 +138,11 @@ export interface TrackMetadataResponse {
   disc_number?: number | null;
 }
 
+export interface TrackMetadataFieldsResponse {
+  tag_type?: string | null;
+  fields: string[];
+}
+
 export interface AlbumMetadataResponse {
   album_id: number;
   title?: string | null;
@@ -146,6 +152,35 @@ export interface AlbumMetadataResponse {
 
 export interface AlbumMetadataUpdateResponse {
   album_id: number;
+}
+
+export interface TextMetadata {
+  text: string;
+  source?: string | null;
+  locked?: boolean | null;
+  updated_at_ms?: number | null;
+}
+
+export interface MediaAssetInfo {
+  id: number;
+  url: string;
+  checksum?: string | null;
+  source_url?: string | null;
+  updated_at_ms?: number | null;
+}
+
+export interface ArtistProfileResponse {
+  artist_id: number;
+  lang: string;
+  bio?: TextMetadata | null;
+  image?: MediaAssetInfo | null;
+}
+
+export interface AlbumProfileResponse {
+  album_id: number;
+  lang: string;
+  notes?: TextMetadata | null;
+  image?: MediaAssetInfo | null;
 }
 
 export type MusicBrainzMatchKind = "track" | "album";

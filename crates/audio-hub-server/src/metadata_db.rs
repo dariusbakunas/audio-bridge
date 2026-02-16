@@ -10,7 +10,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::musicbrainz::MusicBrainzMatch;
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 7;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -51,6 +51,7 @@ pub struct AlbumSummary {
     pub id: i64,
     pub title: String,
     pub artist: Option<String>,
+    pub artist_id: Option<i64>,
     pub year: Option<i32>,
     pub mbid: Option<String>,
     pub track_count: i64,
@@ -73,6 +74,27 @@ pub struct TrackSummary {
     pub format: Option<String>,
     pub mbid: Option<String>,
     pub cover_art_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextEntry {
+    pub lang: String,
+    pub text: String,
+    pub source: Option<String>,
+    pub locked: bool,
+    pub updated_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaAssetRecord {
+    pub id: i64,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub kind: String,
+    pub local_path: String,
+    pub checksum: Option<String>,
+    pub source_url: Option<String>,
+    pub updated_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +121,30 @@ fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
         mbid: row.get(3)?,
         album_count: row.get(4)?,
         track_count: row.get(5)?,
+    })
+}
+
+fn map_text_entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TextEntry> {
+    let locked: i64 = row.get(3)?;
+    Ok(TextEntry {
+        lang: row.get(0)?,
+        text: row.get(1)?,
+        source: row.get(2)?,
+        locked: locked != 0,
+        updated_at_ms: row.get(4)?,
+    })
+}
+
+fn map_media_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAssetRecord> {
+    Ok(MediaAssetRecord {
+        id: row.get(0)?,
+        owner_type: row.get(1)?,
+        owner_id: row.get(2)?,
+        kind: row.get(3)?,
+        local_path: row.get(4)?,
+        checksum: row.get(5)?,
+        source_url: row.get(6)?,
+        updated_at_ms: row.get(7)?,
     })
 }
 
@@ -933,7 +979,7 @@ impl MetadataDb {
         let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
         let mut stmt = conn.prepare(
             r#"
-            SELECT al.id, al.title, ar.name, al.year, al.mbid,
+            SELECT al.id, al.title, ar.name, al.artist_id, al.year, al.mbid,
                    COUNT(t.id) AS track_count, al.cover_art_path,
                    MAX(t.bit_depth) AS max_bit_depth
             FROM albums al
@@ -953,8 +999,8 @@ impl MetadataDb {
             params![artist_id, search_like, limit, offset],
             |row| {
                 let album_id: i64 = row.get(0)?;
-                let cover_path: Option<String> = row.get(6)?;
-                let max_bit_depth: Option<i64> = row.get(7)?;
+                let cover_path: Option<String> = row.get(7)?;
+                let max_bit_depth: Option<i64> = row.get(8)?;
                 let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                 let cover_art_url = cover_path
                     .as_deref()
@@ -964,9 +1010,10 @@ impl MetadataDb {
                     id: album_id,
                     title: row.get(1)?,
                     artist: row.get(2)?,
-                    year: row.get(3)?,
-                    mbid: row.get(4)?,
-                    track_count: row.get(5)?,
+                    artist_id: row.get(3)?,
+                    year: row.get(4)?,
+                    mbid: row.get(5)?,
+                    track_count: row.get(6)?,
                     cover_art_path: cover_path,
                     cover_art_url,
                     hi_res,
@@ -982,7 +1029,7 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT al.id, al.title, ar.name, al.year, al.mbid,
+                SELECT al.id, al.title, ar.name, al.artist_id, al.year, al.mbid,
                        COUNT(t.id) AS track_count, al.cover_art_path,
                        MAX(t.bit_depth) AS max_bit_depth
                 FROM albums al
@@ -994,8 +1041,8 @@ impl MetadataDb {
                 params![album_id],
                 |row| {
                     let album_id: i64 = row.get(0)?;
-                    let cover_path: Option<String> = row.get(6)?;
-                    let max_bit_depth: Option<i64> = row.get(7)?;
+                    let cover_path: Option<String> = row.get(7)?;
+                    let max_bit_depth: Option<i64> = row.get(8)?;
                     let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                     let cover_art_url = cover_path
                         .as_deref()
@@ -1005,9 +1052,10 @@ impl MetadataDb {
                         id: album_id,
                         title: row.get(1)?,
                         artist: row.get(2)?,
-                        year: row.get(3)?,
-                        mbid: row.get(4)?,
-                        track_count: row.get(5)?,
+                        artist_id: row.get(3)?,
+                        year: row.get(4)?,
+                        mbid: row.get(5)?,
+                        track_count: row.get(6)?,
                         cover_art_path: cover_path,
                         cover_art_url,
                         hi_res,
@@ -1016,6 +1064,238 @@ impl MetadataDb {
             )
             .optional()
             .context("select album summary by id")
+    }
+
+    pub fn artist_exists(&self, artist_id: i64) -> Result<bool> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM artists WHERE id = ?1",
+                params![artist_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("select artist exists")?;
+        Ok(value.is_some())
+    }
+
+    pub fn album_exists(&self, album_id: i64) -> Result<bool> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let value: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM albums WHERE id = ?1",
+                params![album_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("select album exists")?;
+        Ok(value.is_some())
+    }
+
+    pub fn artist_bio(&self, artist_id: i64, lang: &str) -> Result<Option<TextEntry>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            r#"
+            SELECT lang, text, source, locked, updated_at_ms
+            FROM artist_bios
+            WHERE artist_id = ?1 AND lang = ?2
+            "#,
+            params![artist_id, lang],
+            map_text_entry_row,
+        )
+        .optional()
+        .context("select artist bio")
+    }
+
+    pub fn album_notes(&self, album_id: i64, lang: &str) -> Result<Option<TextEntry>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            r#"
+            SELECT lang, text, source, locked, updated_at_ms
+            FROM album_notes
+            WHERE album_id = ?1 AND lang = ?2
+            "#,
+            params![album_id, lang],
+            map_text_entry_row,
+        )
+        .optional()
+        .context("select album notes")
+    }
+
+    pub fn upsert_artist_bio(
+        &self,
+        artist_id: i64,
+        lang: &str,
+        text: &str,
+        source: Option<&str>,
+        locked: bool,
+        updated_at_ms: Option<i64>,
+    ) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let locked_value = if locked { 1 } else { 0 };
+        conn.execute(
+            r#"
+            INSERT INTO artist_bios (artist_id, lang, text, source, locked, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(artist_id, lang) DO UPDATE SET
+                text = excluded.text,
+                source = excluded.source,
+                locked = excluded.locked,
+                updated_at_ms = excluded.updated_at_ms
+            "#,
+            params![artist_id, lang, text, source, locked_value, updated_at_ms],
+        )
+        .context("upsert artist bio")?;
+        Ok(())
+    }
+
+    pub fn upsert_album_notes(
+        &self,
+        album_id: i64,
+        lang: &str,
+        text: &str,
+        source: Option<&str>,
+        locked: bool,
+        updated_at_ms: Option<i64>,
+    ) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let locked_value = if locked { 1 } else { 0 };
+        conn.execute(
+            r#"
+            INSERT INTO album_notes (album_id, lang, text, source, locked, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(album_id, lang) DO UPDATE SET
+                text = excluded.text,
+                source = excluded.source,
+                locked = excluded.locked,
+                updated_at_ms = excluded.updated_at_ms
+            "#,
+            params![album_id, lang, text, source, locked_value, updated_at_ms],
+        )
+        .context("upsert album notes")?;
+        Ok(())
+    }
+
+    pub fn delete_artist_bio(&self, artist_id: i64, lang: &str) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            "DELETE FROM artist_bios WHERE artist_id = ?1 AND lang = ?2",
+            params![artist_id, lang],
+        )
+        .context("delete artist bio")?;
+        Ok(())
+    }
+
+    pub fn delete_album_notes(&self, album_id: i64, lang: &str) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            "DELETE FROM album_notes WHERE album_id = ?1 AND lang = ?2",
+            params![album_id, lang],
+        )
+        .context("delete album notes")?;
+        Ok(())
+    }
+
+    pub fn media_asset_for(
+        &self,
+        owner_type: &str,
+        owner_id: i64,
+        kind: &str,
+    ) -> Result<Option<MediaAssetRecord>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            r#"
+            SELECT id, owner_type, owner_id, kind, local_path, checksum, source_url, updated_at_ms
+            FROM media_assets
+            WHERE owner_type = ?1 AND owner_id = ?2 AND kind = ?3
+            "#,
+            params![owner_type, owner_id, kind],
+            map_media_asset_row,
+        )
+        .optional()
+        .context("select media asset")
+    }
+
+    pub fn media_asset_by_id(&self, asset_id: i64) -> Result<Option<MediaAssetRecord>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            r#"
+            SELECT id, owner_type, owner_id, kind, local_path, checksum, source_url, updated_at_ms
+            FROM media_assets
+            WHERE id = ?1
+            "#,
+            params![asset_id],
+            map_media_asset_row,
+        )
+        .optional()
+        .context("select media asset by id")
+    }
+
+    pub fn upsert_media_asset(
+        &self,
+        owner_type: &str,
+        owner_id: i64,
+        kind: &str,
+        local_path: &str,
+        checksum: Option<&str>,
+        source_url: Option<&str>,
+        updated_at_ms: Option<i64>,
+    ) -> Result<i64> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin media asset tx")?;
+        tx.execute(
+            "DELETE FROM media_assets WHERE owner_type = ?1 AND owner_id = ?2 AND kind = ?3",
+            params![owner_type, owner_id, kind],
+        )
+        .context("delete existing media asset")?;
+        tx.execute(
+            r#"
+            INSERT INTO media_assets (owner_type, owner_id, kind, local_path, checksum, source_url, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                owner_type,
+                owner_id,
+                kind,
+                local_path,
+                checksum,
+                source_url,
+                updated_at_ms
+            ],
+        )
+        .context("insert media asset")?;
+        let id = tx.last_insert_rowid();
+        tx.commit().context("commit media asset tx")?;
+        Ok(id)
+    }
+
+    pub fn delete_media_asset(
+        &self,
+        owner_type: &str,
+        owner_id: i64,
+        kind: &str,
+    ) -> Result<Option<MediaAssetRecord>> {
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin delete media asset tx")?;
+        let existing = tx
+            .query_row(
+                r#"
+                SELECT id, owner_type, owner_id, kind, local_path, checksum, source_url, updated_at_ms
+                FROM media_assets
+                WHERE owner_type = ?1 AND owner_id = ?2 AND kind = ?3
+                "#,
+                params![owner_type, owner_id, kind],
+                map_media_asset_row,
+            )
+            .optional()
+            .context("select existing media asset")?;
+        tx.execute(
+            "DELETE FROM media_assets WHERE owner_type = ?1 AND owner_id = ?2 AND kind = ?3",
+            params![owner_type, owner_id, kind],
+        )
+        .context("delete media asset")?;
+        tx.commit().context("commit delete media asset tx")?;
+        Ok(existing)
     }
 
     pub fn list_tracks(
@@ -1276,11 +1556,46 @@ fn init_schema(conn: &Connection) -> Result<()> {
             FOREIGN KEY(album_id) REFERENCES albums(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS artist_bios (
+            artist_id INTEGER NOT NULL,
+            lang TEXT NOT NULL,
+            text TEXT NOT NULL,
+            source TEXT,
+            locked INTEGER NOT NULL DEFAULT 0,
+            updated_at_ms INTEGER,
+            PRIMARY KEY (artist_id, lang),
+            FOREIGN KEY(artist_id) REFERENCES artists(id) ON DELETE CASCADE
+        );
+
+
+        CREATE TABLE IF NOT EXISTS album_notes (
+            album_id INTEGER NOT NULL,
+            lang TEXT NOT NULL,
+            text TEXT NOT NULL,
+            source TEXT,
+            locked INTEGER NOT NULL DEFAULT 0,
+            updated_at_ms INTEGER,
+            PRIMARY KEY (album_id, lang),
+            FOREIGN KEY(album_id) REFERENCES albums(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS media_assets (
+            id INTEGER PRIMARY KEY,
+            owner_type TEXT NOT NULL,
+            owner_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            local_path TEXT NOT NULL,
+            checksum TEXT,
+            source_url TEXT,
+            updated_at_ms INTEGER
+        );
+
         CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_title_artist ON albums(title, artist_id);
         CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);
         CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks(artist_id);
         CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_media_assets_owner_kind ON media_assets(owner_type, owner_id, kind);
         "#,
     )
     .context("create metadata schema")?;
@@ -1339,6 +1654,68 @@ fn init_schema(conn: &Connection) -> Result<()> {
     if version < 5 {
         conn.execute("ALTER TABLE tracks ADD COLUMN bit_depth INTEGER", [])
             .context("migrate tracks bit_depth")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
+    if version < 6 {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS artist_bios (
+                artist_id INTEGER NOT NULL,
+                lang TEXT NOT NULL,
+                text TEXT NOT NULL,
+                source TEXT,
+                locked INTEGER NOT NULL DEFAULT 0,
+                updated_at_ms INTEGER,
+                PRIMARY KEY (artist_id, lang),
+                FOREIGN KEY(artist_id) REFERENCES artists(id) ON DELETE CASCADE
+            );
+
+
+            CREATE TABLE IF NOT EXISTS album_notes (
+                album_id INTEGER NOT NULL,
+                lang TEXT NOT NULL,
+                text TEXT NOT NULL,
+                source TEXT,
+                locked INTEGER NOT NULL DEFAULT 0,
+                updated_at_ms INTEGER,
+                PRIMARY KEY (album_id, lang),
+                FOREIGN KEY(album_id) REFERENCES albums(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS media_assets (
+                id INTEGER PRIMARY KEY,
+                owner_type TEXT NOT NULL,
+                owner_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                local_path TEXT NOT NULL,
+                checksum TEXT,
+                source_url TEXT,
+                updated_at_ms INTEGER
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_media_assets_owner_kind ON media_assets(owner_type, owner_id, kind);
+            "#,
+        )
+        .context("migrate bio/notes/assets tables")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
+    if version < 7 {
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS artist_histories;
+            DROP TABLE IF EXISTS album_histories;
+            "#,
+        )
+        .context("drop history tables")?;
         conn.execute(
             "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
             params![SCHEMA_VERSION.to_string()],

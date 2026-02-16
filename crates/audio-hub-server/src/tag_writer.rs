@@ -65,7 +65,7 @@ pub fn write_track_tags(path: &Path, update: TrackTagUpdate<'_>) -> Result<()> {
     Ok(())
 }
 
-fn default_tag_type(path: &Path) -> Option<TagType> {
+pub fn default_tag_type(path: &Path) -> Option<TagType> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     let tag_type = match ext.as_str() {
         "flac" | "ogg" | "oga" | "opus" => TagType::VorbisComments,
@@ -75,6 +75,40 @@ fn default_tag_type(path: &Path) -> Option<TagType> {
         _ => TagType::Id3v2,
     };
     Some(tag_type)
+}
+
+pub fn supported_track_fields(path: &Path) -> (Option<TagType>, Vec<&'static str>) {
+    let tag_type = default_tag_type(path);
+    let fields = match tag_type {
+        Some(TagType::VorbisComments)
+        | Some(TagType::Mp4Ilst)
+        | Some(TagType::Id3v2)
+        | Some(TagType::Id3v1)
+        | Some(TagType::Ape) => vec![
+            "title",
+            "artist",
+            "album",
+            "album_artist",
+            "year",
+            "track_number",
+            "disc_number",
+        ],
+        _ => Vec::new(),
+    };
+    (tag_type, fields)
+}
+
+pub fn tag_type_label(tag_type: TagType) -> &'static str {
+    match tag_type {
+        TagType::VorbisComments => "vorbis_comments",
+        TagType::Mp4Ilst => "mp4_ilst",
+        TagType::Id3v2 => "id3v2",
+        TagType::Id3v1 => "id3v1",
+        TagType::Ape => "ape",
+        TagType::RiffInfo => "riff_info",
+        TagType::AiffText => "aiff_text",
+        _ => "unknown",
+    }
 }
 
 #[cfg(test)]

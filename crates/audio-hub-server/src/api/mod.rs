@@ -22,17 +22,27 @@ pub use library::{
 };
 pub use logs::{logs_clear, LogsClearResponse};
 pub use metadata::{
+    album_image_clear,
+    album_image_set,
+    album_profile,
+    album_profile_update,
     album_cover,
     albums_list,
     albums_metadata,
     albums_metadata_update,
     art_for_track,
+    artist_image_clear,
+    artist_image_set,
+    artist_profile,
+    artist_profile_update,
     artists_list,
+    media_asset,
     musicbrainz_match_apply,
     musicbrainz_match_search,
     track_cover,
     tracks_list,
     tracks_metadata,
+    tracks_metadata_fields,
     tracks_metadata_update,
     tracks_resolve,
 };

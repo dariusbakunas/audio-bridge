@@ -6,10 +6,18 @@ interface ModalProps {
   title: string;
   onClose: () => void;
   headerRight?: ReactNode;
+  className?: string;
   children: ReactNode;
 }
 
-export default function Modal({ open, title, onClose, headerRight, children }: ModalProps) {
+export default function Modal({
+  open,
+  title,
+  onClose,
+  headerRight,
+  className,
+  children
+}: ModalProps) {
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
@@ -23,7 +31,10 @@ export default function Modal({ open, title, onClose, headerRight, children }: M
 
   return (
     <div className="modal" onClick={onClose}>
-      <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+      <div
+        className={["modal-card", className].filter(Boolean).join(" ")}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="card-header">
           <span>{title}</span>
           <div className="card-actions">

@@ -24,6 +24,7 @@ import {
 } from "./api";
 import {
   AlbumListResponse,
+  AlbumProfileResponse,
   AlbumSummary,
   LogEvent,
   MetadataEvent,
@@ -37,6 +38,8 @@ import {
 import AlbumDetailView from "./components/AlbumDetailView";
 import AlbumMetadataDialog from "./components/AlbumMetadataDialog";
 import AlbumsView from "./components/AlbumsView";
+import CatalogMetadataDialog from "./components/CatalogMetadataDialog";
+import AlbumNotesModal from "./components/AlbumNotesModal";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
 import TrackMetadataModal from "./components/TrackMetadataModal";
 import OutputsModal from "./components/OutputsModal";
@@ -244,6 +247,8 @@ export default function App() {
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [catalogOpen, setCatalogOpen] = useState<boolean>(false);
+  const [albumNotesOpen, setAlbumNotesOpen] = useState<boolean>(false);
   const [navCollapsed, setNavCollapsed] = useState<boolean>(false);
   const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection">("metadata");
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
@@ -258,6 +263,9 @@ export default function App() {
   const [albumTracks, setAlbumTracks] = useState<TrackSummary[]>([]);
   const [albumTracksLoading, setAlbumTracksLoading] = useState<boolean>(false);
   const [albumTracksError, setAlbumTracksError] = useState<string | null>(null);
+  const [albumProfile, setAlbumProfile] = useState<AlbumProfileResponse | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState<boolean>(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
@@ -1096,10 +1104,44 @@ export default function App() {
     }
   }, [markServerConnected]);
 
+  const loadCatalogProfiles = useCallback(async (albumId: number | null) => {
+    if (albumId === null) {
+      setAlbumProfile(null);
+      setCatalogError(null);
+      return;
+    }
+    setCatalogError(null);
+    setCatalogLoading(true);
+    try {
+      const albumPromise = fetchJson<AlbumProfileResponse>(
+        `/albums/profile?album_id=${albumId}&lang=en-US`
+      );
+      const [albumResult] = await Promise.allSettled([albumPromise]);
+      if (albumResult.status === "fulfilled") {
+        setAlbumProfile(albumResult.value);
+      } else {
+        setCatalogError(albumResult.reason instanceof Error ? albumResult.reason.message : String(albumResult.reason));
+      }
+    } catch (err) {
+      setCatalogError((err as Error).message);
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!serverConnected) return;
     loadAlbumTracks(albumViewId);
   }, [albumViewId, loadAlbumTracks, serverConnected]);
+
+  useEffect(() => {
+    setAlbumNotesOpen(false);
+  }, [albumViewId]);
+
+  useEffect(() => {
+    if (!serverConnected) return;
+    loadCatalogProfiles(albumViewId);
+  }, [albumViewId, loadCatalogProfiles, serverConnected]);
 
   const handlePlayMedia = useCallback(async () => {
     if (status?.now_playing) {
@@ -1394,6 +1436,9 @@ export default function App() {
                 runTrackMenuAction(openTrackEditorForAlbum, path)
               }
               onEditAlbumMetadata={openAlbumEditor}
+              onEditCatalogMetadata={() => setCatalogOpen(true)}
+              onReadAlbumNotes={() => setAlbumNotesOpen(true)}
+              albumProfile={albumProfile}
             />
           ) : null}
 
@@ -1575,6 +1620,33 @@ export default function App() {
             loadAlbumTracks(updatedAlbumId);
           }
           loadAlbums();
+        }}
+        />
+      ) : null}
+
+      {!showGate ? (
+        <AlbumNotesModal
+        open={albumNotesOpen}
+        title={selectedAlbum?.title ?? ""}
+        artist={selectedAlbum?.artist ?? ""}
+        notes={albumProfile?.notes?.text ?? ""}
+        onClose={() => setAlbumNotesOpen(false)}
+        />
+      ) : null}
+
+      {!showGate ? (
+        <CatalogMetadataDialog
+        open={catalogOpen}
+        albumId={albumViewId}
+        albumTitle={selectedAlbum?.title ?? ""}
+        artistName={selectedAlbum?.artist ?? ""}
+        onClose={() => setCatalogOpen(false)}
+        onUpdated={({ album }) => {
+          if (album) {
+            setAlbumProfile(album);
+          } else {
+            loadCatalogProfiles(albumViewId, selectedAlbum?.artist_id ?? null);
+          }
         }}
         />
       ) : null}

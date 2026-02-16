@@ -1,7 +1,7 @@
-import { AlbumSummary, TrackSummary } from "../types";
+import { AlbumProfileResponse, AlbumSummary, TrackSummary } from "../types";
 import hiResBadge from "../assets/hi-res.png";
 import TrackMenu from "./TrackMenu";
-import { Heart, Pause, Pencil, Play, Share2 } from "lucide-react";
+import { BookOpen, Heart, Pause, Pencil, Play, Share2 } from "lucide-react";
 
 interface AlbumDetailViewProps {
   album: AlbumSummary | null;
@@ -27,6 +27,9 @@ interface AlbumDetailViewProps {
   onFixTrackMatch: (path: string) => void;
   onEditTrackMetadata: (path: string) => void;
   onEditAlbumMetadata: () => void;
+  onEditCatalogMetadata: () => void;
+  onReadAlbumNotes: () => void;
+  albumProfile?: AlbumProfileResponse | null;
   nowPlayingPath?: string | null;
 }
 
@@ -54,11 +57,15 @@ export default function AlbumDetailView({
   onFixTrackMatch,
   onEditTrackMetadata,
   onEditAlbumMetadata,
+  onEditCatalogMetadata,
+  onReadAlbumNotes,
+  albumProfile,
   nowPlayingPath
 }: AlbumDetailViewProps) {
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
+  const albumNotes = albumProfile?.notes?.text?.trim() ?? "";
   return (
     <section className="album-view">
       <div className="album-hero">
@@ -132,6 +139,16 @@ export default function AlbumDetailView({
                 <button
                   className="icon-btn album-action-icon"
                   type="button"
+                  onClick={onEditCatalogMetadata}
+                  disabled={!album}
+                  aria-label="Edit catalog metadata"
+                  title="Edit catalog metadata"
+                >
+                  <BookOpen className="icon" aria-hidden="true" />
+                </button>
+                <button
+                  className="icon-btn album-action-icon"
+                  type="button"
                   aria-label="Favorite album"
                   title="Favorite (not implemented)"
                   onClick={() => {}}
@@ -153,6 +170,21 @@ export default function AlbumDetailView({
         </div>
       </div>
       <div className="album-tracklist">
+          {albumNotes ? (
+            <div className="album-notes">
+            <div className="album-notes-header">
+                <div className="album-notes-label">Album notes</div>
+              </div>
+              <p className="album-notes-preview">{albumNotes}</p>
+              <button
+                className="album-notes-read"
+                type="button"
+                onClick={onReadAlbumNotes}
+              >
+                READ MORE →
+              </button>
+            </div>
+          ) : null}
           {loading ? <p className="muted">Loading tracks...</p> : null}
           {error ? <p className="muted">{error}</p> : null}
           {!loading && !error ? (
@@ -245,7 +277,7 @@ export default function AlbumDetailView({
               ) : null}
             </div>
           ) : null}
-        </div>
+      </div>
     </section>
   );
 }
