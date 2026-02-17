@@ -112,6 +112,8 @@ export interface TrackSummary {
   disc_number?: number | null;
   duration_ms?: number | null;
   format?: string | null;
+  sample_rate?: number | null;
+  bit_depth?: number | null;
   mbid?: string | null;
   cover_art_url?: string | null;
 }

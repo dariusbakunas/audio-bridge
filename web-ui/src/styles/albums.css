@@ -607,7 +607,7 @@
 .album-track-format {
   color: var(--accent-2-dim);
   text-transform: uppercase;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .album-track-duration {

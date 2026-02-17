@@ -66,6 +66,19 @@ export default function AlbumDetailView({
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
   const albumNotes = albumProfile?.notes?.text?.trim() ?? "";
+  const formatSampleRate = (hz?: number | null) => {
+    if (!hz) return null;
+    const khz = hz / 1000;
+    const value = Number.isInteger(khz) ? khz.toFixed(0) : khz.toFixed(1);
+    return `${value}kHz`;
+  };
+  const formatTrackQuality = (track: TrackSummary) => {
+    const format = track.format ?? "—";
+    const rate = formatSampleRate(track.sample_rate);
+    const depth = track.bit_depth ? `${track.bit_depth}bit` : null;
+    const detail = rate && depth ? `${rate}/${depth}` : rate ?? depth;
+    return detail ? `${format} ${detail}` : format;
+  };
   return (
     <section className="album-view">
       <div className="album-hero">
@@ -249,7 +262,7 @@ export default function AlbumDetailView({
                         <div className="muted small">{track.artist ?? "Unknown artist"}</div>
                       </div>
                       <div className="album-track-format mono">
-                        {track.format ?? "—"}
+                        {formatTrackQuality(track)}
                       </div>
                       <div className="album-track-duration mono">
                         {formatMs(track.duration_ms)}
