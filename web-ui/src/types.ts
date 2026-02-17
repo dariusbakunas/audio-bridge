@@ -89,6 +89,7 @@ export interface LibraryResponse {
 
 export interface AlbumSummary {
   id: number;
+  uuid?: string | null;
   title: string;
   artist?: string | null;
   artist_id?: number | null;

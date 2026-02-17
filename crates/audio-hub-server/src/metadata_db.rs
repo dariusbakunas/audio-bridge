@@ -10,7 +10,8 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::musicbrainz::MusicBrainzMatch;
-const SCHEMA_VERSION: i32 = 7;
+use uuid::Uuid;
+const SCHEMA_VERSION: i32 = 8;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -39,6 +40,7 @@ pub struct TrackRecord {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct ArtistSummary {
     pub id: i64,
+    pub uuid: Option<String>,
     pub name: String,
     pub sort_name: Option<String>,
     pub mbid: Option<String>,
@@ -49,6 +51,7 @@ pub struct ArtistSummary {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct AlbumSummary {
     pub id: i64,
+    pub uuid: Option<String>,
     pub title: String,
     pub artist: Option<String>,
     pub artist_id: Option<i64>,
@@ -72,6 +75,8 @@ pub struct TrackSummary {
     pub disc_number: Option<u32>,
     pub duration_ms: Option<u64>,
     pub format: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
     pub mbid: Option<String>,
     pub cover_art_url: Option<String>,
 }
@@ -116,11 +121,12 @@ pub struct CoverArtCandidate {
 fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
     Ok(ArtistSummary {
         id: row.get(0)?,
-        name: row.get(1)?,
-        sort_name: row.get(2)?,
-        mbid: row.get(3)?,
-        album_count: row.get(4)?,
-        track_count: row.get(5)?,
+        uuid: row.get(1)?,
+        name: row.get(2)?,
+        sort_name: row.get(3)?,
+        mbid: row.get(4)?,
+        album_count: row.get(5)?,
+        track_count: row.get(6)?,
     })
 }
 
@@ -931,9 +937,9 @@ impl MetadataDb {
         let mut stmt = if search_like.is_some() {
             conn.prepare(
                 r#"
-                SELECT a.id, a.name, a.sort_name, a.mbid,
-                       COUNT(DISTINCT al.id) AS album_count,
-                       COUNT(t.id) AS track_count
+            SELECT a.id, a.uuid, a.name, a.sort_name, a.mbid,
+                   COUNT(DISTINCT al.id) AS album_count,
+                   COUNT(t.id) AS track_count
                 FROM artists a
                 LEFT JOIN albums al ON al.artist_id = a.id
                 LEFT JOIN tracks t ON t.artist_id = a.id
@@ -946,9 +952,9 @@ impl MetadataDb {
         } else {
             conn.prepare(
                 r#"
-                SELECT a.id, a.name, a.sort_name, a.mbid,
-                       COUNT(DISTINCT al.id) AS album_count,
-                       COUNT(t.id) AS track_count
+            SELECT a.id, a.uuid, a.name, a.sort_name, a.mbid,
+                   COUNT(DISTINCT al.id) AS album_count,
+                   COUNT(t.id) AS track_count
                 FROM artists a
                 LEFT JOIN albums al ON al.artist_id = a.id
                 LEFT JOIN tracks t ON t.artist_id = a.id
@@ -979,7 +985,7 @@ impl MetadataDb {
         let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
         let mut stmt = conn.prepare(
             r#"
-            SELECT al.id, al.title, ar.name, al.artist_id, al.year, al.mbid,
+            SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year, al.mbid,
                    COUNT(t.id) AS track_count, al.cover_art_path,
                    MAX(t.bit_depth) AS max_bit_depth
             FROM albums al
@@ -999,8 +1005,8 @@ impl MetadataDb {
             params![artist_id, search_like, limit, offset],
             |row| {
                 let album_id: i64 = row.get(0)?;
-                let cover_path: Option<String> = row.get(7)?;
-                let max_bit_depth: Option<i64> = row.get(8)?;
+                let cover_path: Option<String> = row.get(8)?;
+                let max_bit_depth: Option<i64> = row.get(9)?;
                 let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                 let cover_art_url = cover_path
                     .as_deref()
@@ -1008,12 +1014,13 @@ impl MetadataDb {
                     .map(|_| format!("/albums/{}/cover", album_id));
                 Ok(AlbumSummary {
                     id: album_id,
-                    title: row.get(1)?,
-                    artist: row.get(2)?,
-                    artist_id: row.get(3)?,
-                    year: row.get(4)?,
-                    mbid: row.get(5)?,
-                    track_count: row.get(6)?,
+                    uuid: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    artist_id: row.get(4)?,
+                    year: row.get(5)?,
+                    mbid: row.get(6)?,
+                    track_count: row.get(7)?,
                     cover_art_path: cover_path,
                     cover_art_url,
                     hi_res,
@@ -1029,7 +1036,7 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT al.id, al.title, ar.name, al.artist_id, al.year, al.mbid,
+                SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year, al.mbid,
                        COUNT(t.id) AS track_count, al.cover_art_path,
                        MAX(t.bit_depth) AS max_bit_depth
                 FROM albums al
@@ -1041,8 +1048,8 @@ impl MetadataDb {
                 params![album_id],
                 |row| {
                     let album_id: i64 = row.get(0)?;
-                    let cover_path: Option<String> = row.get(7)?;
-                    let max_bit_depth: Option<i64> = row.get(8)?;
+                    let cover_path: Option<String> = row.get(8)?;
+                    let max_bit_depth: Option<i64> = row.get(9)?;
                     let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                     let cover_art_url = cover_path
                         .as_deref()
@@ -1050,12 +1057,13 @@ impl MetadataDb {
                         .map(|_| format!("/albums/{}/cover", album_id));
                     Ok(AlbumSummary {
                         id: album_id,
-                        title: row.get(1)?,
-                        artist: row.get(2)?,
-                        artist_id: row.get(3)?,
-                        year: row.get(4)?,
-                        mbid: row.get(5)?,
-                        track_count: row.get(6)?,
+                        uuid: row.get(1)?,
+                        title: row.get(2)?,
+                        artist: row.get(3)?,
+                        artist_id: row.get(4)?,
+                        year: row.get(5)?,
+                        mbid: row.get(6)?,
+                        track_count: row.get(7)?,
                         cover_art_path: cover_path,
                         cover_art_url,
                         hi_res,
@@ -1311,8 +1319,8 @@ impl MetadataDb {
         let mut stmt = conn.prepare(
             r#"
             SELECT t.id, t.path, t.file_name, t.title, ar.name, al.title,
-                   t.track_number, t.disc_number, t.duration_ms, t.format, t.mbid,
-                   al.cover_art_path
+                   t.track_number, t.disc_number, t.duration_ms, t.format,
+                   t.sample_rate, t.bit_depth, t.mbid, al.cover_art_path
             FROM tracks t
             LEFT JOIN artists ar ON ar.id = t.artist_id
             LEFT JOIN albums al ON al.id = t.album_id
@@ -1327,7 +1335,7 @@ impl MetadataDb {
             params![album_id, artist_id, search_like, limit, offset],
             |row| {
                 let track_id: i64 = row.get(0)?;
-                let cover_path: Option<String> = row.get(11)?;
+                let cover_path: Option<String> = row.get(13)?;
                 let cover_art_url = cover_path
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
@@ -1343,7 +1351,9 @@ impl MetadataDb {
                     disc_number: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
                     duration_ms: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
                     format: row.get(9)?,
-                    mbid: row.get(10)?,
+                    sample_rate: row.get::<_, Option<i64>>(10)?.map(|v| v as u32),
+                    bit_depth: row.get::<_, Option<i64>>(11)?.map(|v| v as u32),
+                    mbid: row.get(12)?,
                     cover_art_url,
                 })
             },
@@ -1482,6 +1492,52 @@ fn is_blank(value: &Option<String>) -> bool {
     value.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
 }
 
+fn backfill_uuids(conn: &Connection, table: &str) -> Result<()> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT id FROM {table} WHERE uuid IS NULL"))?;
+    let ids = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+    for id in ids.filter_map(Result::ok) {
+        let uuid = Uuid::new_v4().to_string();
+        conn.execute(
+            &format!("UPDATE {table} SET uuid = ?1 WHERE id = ?2"),
+            params![uuid, id],
+        )
+        .with_context(|| format!("backfill {table} uuid"))?;
+    }
+    Ok(())
+}
+
+fn ensure_uuid_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_uuid ON artists(uuid);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_uuid ON albums(uuid);
+        "#,
+    )
+    .context("create uuid indexes")?;
+    Ok(())
+}
+
+fn ensure_row_uuid(conn: &Connection, table: &str, id: i64) -> Result<()> {
+    let existing: Option<String> = conn
+        .query_row(
+            &format!("SELECT uuid FROM {table} WHERE id = ?1"),
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .with_context(|| format!("select {table} uuid"))?;
+    if existing.as_deref().map(|v| v.trim().is_empty()).unwrap_or(true) {
+        let uuid = Uuid::new_v4().to_string();
+        conn.execute(
+            &format!("UPDATE {table} SET uuid = ?1 WHERE id = ?2"),
+            params![uuid, id],
+        )
+        .with_context(|| format!("update {table} uuid"))?;
+    }
+    Ok(())
+}
+
 fn find_artist_id(conn: &Connection, name: &str) -> Result<Option<i64>> {
     let id = conn
         .query_row(
@@ -1516,6 +1572,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE TABLE IF NOT EXISTS artists (
             id INTEGER PRIMARY KEY,
+            uuid TEXT,
             name TEXT NOT NULL,
             sort_name TEXT,
             mbid TEXT
@@ -1523,6 +1580,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE TABLE IF NOT EXISTS albums (
             id INTEGER PRIMARY KEY,
+            uuid TEXT,
             title TEXT NOT NULL,
             sort_title TEXT,
             artist_id INTEGER,
@@ -1616,6 +1674,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
             params![SCHEMA_VERSION.to_string()],
         )
         .context("insert schema version")?;
+        ensure_uuid_indexes(conn)?;
         return Ok(());
     }
     let version = version.unwrap_or(1);
@@ -1723,6 +1782,24 @@ fn init_schema(conn: &Connection) -> Result<()> {
         .context("update schema version")?;
     }
 
+    if version < 8 {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE artists ADD COLUMN uuid TEXT;
+            ALTER TABLE albums ADD COLUMN uuid TEXT;
+            "#,
+        )
+        .context("add artist/album uuid columns")?;
+        ensure_uuid_indexes(conn)?;
+        backfill_uuids(conn, "artists")?;
+        backfill_uuids(conn, "albums")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
     Ok(())
 }
 
@@ -1777,8 +1854,8 @@ mod tests {
 
 fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
     conn.execute(
-        "INSERT OR IGNORE INTO artists (name, sort_name) VALUES (?1, ?2)",
-        params![name, name.to_lowercase()],
+        "INSERT OR IGNORE INTO artists (uuid, name, sort_name) VALUES (?1, ?2, ?3)",
+        params![Uuid::new_v4().to_string(), name, name.to_lowercase()],
     )
     .context("upsert artist")?;
     let id: i64 = conn.query_row(
@@ -1786,13 +1863,14 @@ fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
         params![name],
         |row| row.get(0),
     )?;
+    ensure_row_uuid(conn, "artists", id)?;
     Ok(id)
 }
 
 fn upsert_album(conn: &Connection, title: &str, artist_id: Option<i64>, year: Option<i32>) -> Result<i64> {
     conn.execute(
-        "INSERT OR IGNORE INTO albums (title, artist_id, year, sort_title) VALUES (?1, ?2, ?3, ?4)",
-        params![title, artist_id, year, title.to_lowercase()],
+        "INSERT OR IGNORE INTO albums (uuid, title, artist_id, year, sort_title) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![Uuid::new_v4().to_string(), title, artist_id, year, title.to_lowercase()],
     )
     .context("upsert album")?;
     let id: i64 = conn.query_row(
@@ -1800,5 +1878,6 @@ fn upsert_album(conn: &Connection, title: &str, artist_id: Option<i64>, year: Op
         params![title, artist_id],
         |row| row.get(0),
     )?;
+    ensure_row_uuid(conn, "albums", id)?;
     Ok(id)
 }
