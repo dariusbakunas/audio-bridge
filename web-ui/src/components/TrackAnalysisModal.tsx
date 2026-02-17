@@ -495,7 +495,15 @@ export default function TrackAnalysisModal({
           </div>
         ) : null}
         <div className="analysis-controls">
-          <span className="muted small">FFT size</span>
+          <span className="muted small">
+            FFT size
+            <span
+              className="analysis-help"
+              data-tooltip="Controls time vs frequency detail. Larger sizes sharpen frequency resolution but smear time detail."
+            >
+              ?
+            </span>
+          </span>
           <div className="analysis-duration">
             {[2048, 4096, 8192].map((value) => (
               <button
