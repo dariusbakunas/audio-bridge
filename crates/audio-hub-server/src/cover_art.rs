@@ -314,7 +314,8 @@ mod tests {
             }),
             ..TrackMeta::default()
         };
-        let record = MetadataService::build_track_record(&track_path, "track.flac", &meta, &fs_meta);
+        let record =
+            MetadataService::build_track_record(&track_path, "track.flac", &meta, &fs_meta, None);
         db.upsert_track(&record).expect("upsert track");
         db.set_album_cover_if_empty("Album", Some("Artist"), "existing.jpg")
             .expect("set cover");

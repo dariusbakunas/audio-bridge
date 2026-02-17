@@ -550,6 +550,7 @@ fn init_metadata_db_and_library(
         metadata_wake,
     );
     let library = metadata_service.scan_library(false)?;
+    metadata_service.ensure_album_markers();
     Ok((metadata_db, library))
 }
 

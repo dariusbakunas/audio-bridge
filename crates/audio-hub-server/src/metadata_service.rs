@@ -1,10 +1,13 @@
 //! Shared metadata operations (scan/rescan/update helpers).
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::RwLock;
 
 use actix_web::HttpResponse;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::cover_art::CoverArtResolver;
 use crate::events::{EventBus, MetadataEvent};
@@ -19,6 +22,18 @@ pub struct MetadataService {
     events: EventBus,
     metadata_wake: MetadataWake,
     root: PathBuf,
+}
+
+const ALBUM_MARKER_DIR: &str = ".audio-hub";
+const ALBUM_MARKER_FILE: &str = "album.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AlbumFolderMarker {
+    album_uuid: String,
+    title: Option<String>,
+    artist: Option<String>,
+    original_year: Option<i32>,
+    created_at_ms: i64,
 }
 
 impl MetadataService {
@@ -42,6 +57,7 @@ impl MetadataService {
         file_name: &str,
         meta: &TrackMeta,
         fs_meta: &std::fs::Metadata,
+        album_uuid: Option<String>,
     ) -> TrackRecord {
         let (album, disc_number, _source) = normalize_album_and_disc(path, meta);
         TrackRecord {
@@ -51,6 +67,7 @@ impl MetadataService {
             artist: meta.artist.clone(),
             album_artist: meta.album_artist.clone(),
             album,
+            album_uuid,
             track_number: meta.track_number,
             disc_number,
             year: meta.year,
@@ -131,6 +148,7 @@ impl MetadataService {
         }
         normalized_meta.album = album;
         normalized_meta.disc_number = disc_number;
+        let album_uuid = self.album_uuid_for_track(full_path, &normalized_meta);
         let file_name = full_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -140,7 +158,8 @@ impl MetadataService {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let record = Self::build_track_record(full_path, file_name, &normalized_meta, &fs_meta);
+        let record =
+            Self::build_track_record(full_path, file_name, &normalized_meta, &fs_meta, album_uuid);
         let _ = self.db.clear_musicbrainz_no_match(&record.path);
         if let Err(err) = self.upsert_track_record(full_path, &normalized_meta, &record) {
             return Err(HttpResponse::InternalServerError().body(err));
@@ -224,6 +243,7 @@ impl MetadataService {
             }
         }
         self.db.prune_orphaned_albums_and_artists()?;
+        self.ensure_album_markers();
         Ok(index)
     }
 
@@ -254,7 +274,14 @@ fn scan_library_with_paths(
                 }
                 normalized_meta.album = album;
                 normalized_meta.disc_number = disc_number;
-                let record = Self::build_track_record(path, file_name, &normalized_meta, fs_meta);
+                let album_uuid = self.album_uuid_for_track(path, &normalized_meta);
+                let record = Self::build_track_record(
+                    path,
+                    file_name,
+                    &normalized_meta,
+                    fs_meta,
+                    album_uuid,
+                );
                 if let Err(err) = self.upsert_track_record(path, &normalized_meta, &record) {
                     tracing::warn!(error = %err, path = %record.path, "metadata upsert failed");
                 }
@@ -316,6 +343,36 @@ fn scan_library_with_paths(
         Ok(index)
     }
 
+    pub fn ensure_album_markers(&self) {
+        let candidates = match self.db.album_marker_candidates() {
+            Ok(list) => list,
+            Err(err) => {
+                tracing::warn!(error = %err, "album marker candidate query failed");
+                return;
+            }
+        };
+        for candidate in candidates {
+            let path = PathBuf::from(candidate.path);
+            let Some(dir) = path.parent() else { continue };
+            if read_album_marker(dir).is_some() {
+                continue;
+            }
+            let marker = AlbumFolderMarker {
+                album_uuid: candidate.album_uuid,
+                title: candidate.title,
+                artist: candidate.artist,
+                original_year: candidate.original_year.or(candidate.year),
+                created_at_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+            };
+            if let Err(err) = write_album_marker(dir, &marker) {
+                tracing::warn!(error = %err, path = %dir.display(), "album marker write failed");
+            }
+        }
+    }
+
     pub fn resolve_track_path(root: &Path, raw_path: &str) -> Result<PathBuf, HttpResponse> {
         let raw_path = PathBuf::from(raw_path);
         let full_path = match raw_path.canonicalize() {
@@ -329,6 +386,37 @@ fn scan_library_with_paths(
             return Err(HttpResponse::NotFound().finish());
         }
         Ok(full_path)
+    }
+
+    fn album_uuid_for_track(&self, path: &Path, meta: &TrackMeta) -> Option<String> {
+        let Some(album_title) = meta.album.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
+            return None;
+        };
+        let dir = path.parent()?;
+        if let Some(marker) = read_album_marker(dir) {
+            return Some(marker.album_uuid);
+        }
+        let album_artist = meta.album_artist.as_deref().or(meta.artist.as_deref());
+        let existing = self
+            .db
+            .album_uuid_for_title_artist(album_title, album_artist)
+            .ok()
+            .flatten();
+        let album_uuid = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let marker = AlbumFolderMarker {
+            album_uuid: album_uuid.clone(),
+            title: Some(album_title.to_string()),
+            artist: album_artist.map(|value| value.to_string()),
+            original_year: meta.year,
+            created_at_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+        };
+        if let Err(err) = write_album_marker(dir, &marker) {
+            tracing::warn!(error = %err, path = %dir.display(), "album marker write failed");
+        }
+        Some(album_uuid)
     }
 }
 
@@ -366,6 +454,27 @@ fn normalize_album_and_disc(
     };
 
     (album, disc_number, source)
+}
+
+fn album_marker_path(dir: &Path) -> PathBuf {
+    dir.join(ALBUM_MARKER_DIR).join(ALBUM_MARKER_FILE)
+}
+
+fn read_album_marker(dir: &Path) -> Option<AlbumFolderMarker> {
+    let path = album_marker_path(dir);
+    let data = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+fn write_album_marker(dir: &Path, marker: &AlbumFolderMarker) -> Result<(), String> {
+    let marker_dir = dir.join(ALBUM_MARKER_DIR);
+    std::fs::create_dir_all(&marker_dir).map_err(|err| err.to_string())?;
+    let path = marker_dir.join(ALBUM_MARKER_FILE);
+    if path.exists() {
+        return Ok(());
+    }
+    let data = serde_json::to_string_pretty(marker).map_err(|err| err.to_string())?;
+    std::fs::write(path, data).map_err(|err| err.to_string())
 }
 
 fn extract_disc_suffix(raw: &str) -> Option<(String, u32)> {
@@ -512,7 +621,8 @@ mod tests {
             ..TrackMeta::default()
         };
 
-        let record = MetadataService::build_track_record(&path, "song.flac", &meta, &fs_meta);
+        let record =
+            MetadataService::build_track_record(&path, "song.flac", &meta, &fs_meta, None);
         assert_eq!(record.title.as_deref(), Some("Title"));
         assert_eq!(record.artist.as_deref(), Some("Artist"));
         assert_eq!(record.album.as_deref(), Some("Album"));

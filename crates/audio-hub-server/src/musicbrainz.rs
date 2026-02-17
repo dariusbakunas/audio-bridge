@@ -489,6 +489,7 @@ fn enrich_candidate(
         artist: Some(candidate.artist.clone()),
         album_artist: candidate.album_artist.clone(),
         album: candidate.album.clone(),
+        album_uuid: None,
         track_number: None,
         disc_number: None,
         year: None,

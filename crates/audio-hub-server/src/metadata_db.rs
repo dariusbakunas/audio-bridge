@@ -3,6 +3,7 @@
 //! Provides pooled connections and schema bootstrap.
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use r2d2::Pool;
@@ -11,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::musicbrainz::MusicBrainzMatch;
 use uuid::Uuid;
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -26,6 +27,7 @@ pub struct TrackRecord {
     pub artist: Option<String>,
     pub album_artist: Option<String>,
     pub album: Option<String>,
+    pub album_uuid: Option<String>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
     pub year: Option<i32>,
@@ -82,6 +84,16 @@ pub struct TrackSummary {
     pub bit_depth: Option<u32>,
     pub mbid: Option<String>,
     pub cover_art_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlbumMarkerCandidate {
+    pub album_uuid: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub original_year: Option<i32>,
+    pub year: Option<i32>,
+    pub path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -298,7 +310,11 @@ impl MetadataDb {
         let album_id = if keep_album_link {
             existing_album_id
         } else if let Some(title) = record.album.as_deref() {
-            Some(upsert_album(&tx, title, album_artist_id, record.year)?)
+            if let Some(uuid) = record.album_uuid.as_deref() {
+                Some(upsert_album_with_uuid(&tx, uuid, title, album_artist_id, record.year)?)
+            } else {
+                Some(upsert_album(&tx, title, album_artist_id, record.year)?)
+            }
         } else {
             None
         };
@@ -342,6 +358,14 @@ impl MetadataDb {
             ],
         )
             .context("upsert track")?;
+
+        if let Some(album_id) = album_id {
+            tx.execute(
+                "UPDATE albums SET orphaned_at = NULL WHERE id = ?1",
+                params![album_id],
+            )
+            .context("clear album orphaned_at")?;
+        }
 
         tx.commit().context("commit metadata tx")?;
         Ok(())
@@ -560,7 +584,7 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title,
+                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title, al.uuid,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
                        t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
                 FROM tracks t
@@ -578,25 +602,26 @@ impl MetadataDb {
                         artist: row.get(3)?,
                         album_artist: row.get(4)?,
                         album: row.get(5)?,
+                        album_uuid: row.get(6)?,
                         track_number: row
-                            .get::<_, Option<i64>>(6)?
-                            .map(|v| v as u32),
-                        disc_number: row
                             .get::<_, Option<i64>>(7)?
                             .map(|v| v as u32),
-                        year: row.get(8)?,
+                        disc_number: row
+                            .get::<_, Option<i64>>(8)?
+                            .map(|v| v as u32),
+                        year: row.get(9)?,
                         duration_ms: row
-                            .get::<_, Option<i64>>(9)?
+                            .get::<_, Option<i64>>(10)?
                             .map(|v| v as u64),
                         sample_rate: row
-                            .get::<_, Option<i64>>(10)?
-                            .map(|v| v as u32),
-                        bit_depth: row
                             .get::<_, Option<i64>>(11)?
                             .map(|v| v as u32),
-                        format: row.get(12)?,
-                        mtime_ms: row.get(13)?,
-                        size_bytes: row.get(14)?,
+                        bit_depth: row
+                            .get::<_, Option<i64>>(12)?
+                            .map(|v| v as u32),
+                        format: row.get(13)?,
+                        mtime_ms: row.get(14)?,
+                        size_bytes: row.get(15)?,
                     })
                 },
             )
@@ -609,7 +634,7 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title,
+                SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title, al.uuid,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
                        t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
                 FROM tracks t
@@ -627,25 +652,26 @@ impl MetadataDb {
                         artist: row.get(3)?,
                         album_artist: row.get(4)?,
                         album: row.get(5)?,
+                        album_uuid: row.get(6)?,
                         track_number: row
-                            .get::<_, Option<i64>>(6)?
-                            .map(|v| v as u32),
-                        disc_number: row
                             .get::<_, Option<i64>>(7)?
                             .map(|v| v as u32),
-                        year: row.get(8)?,
+                        disc_number: row
+                            .get::<_, Option<i64>>(8)?
+                            .map(|v| v as u32),
+                        year: row.get(9)?,
                         duration_ms: row
-                            .get::<_, Option<i64>>(9)?
+                            .get::<_, Option<i64>>(10)?
                             .map(|v| v as u64),
                         sample_rate: row
-                            .get::<_, Option<i64>>(10)?
-                            .map(|v| v as u32),
-                        bit_depth: row
                             .get::<_, Option<i64>>(11)?
                             .map(|v| v as u32),
-                        format: row.get(12)?,
-                        mtime_ms: row.get(13)?,
-                        size_bytes: row.get(14)?,
+                        bit_depth: row
+                            .get::<_, Option<i64>>(12)?
+                            .map(|v| v as u32),
+                        format: row.get(13)?,
+                        mtime_ms: row.get(14)?,
+                        size_bytes: row.get(15)?,
                     })
                 },
             )
@@ -687,6 +713,51 @@ impl MetadataDb {
             )
             .optional()
             .context("fetch album id for track")
+    }
+
+    pub fn album_marker_candidates(&self) -> Result<Vec<AlbumMarkerCandidate>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT al.uuid, al.title, ar.name, al.original_year, al.year, MIN(t.path)
+            FROM albums al
+            JOIN tracks t ON t.album_id = al.id
+            LEFT JOIN artists ar ON ar.id = al.artist_id
+            WHERE al.uuid IS NOT NULL AND al.uuid != ''
+            GROUP BY al.id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AlbumMarkerCandidate {
+                album_uuid: row.get(0)?,
+                title: row.get(1)?,
+                artist: row.get(2)?,
+                original_year: row.get(3)?,
+                year: row.get(4)?,
+                path: row.get(5)?,
+            })
+        })?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn album_uuid_for_title_artist(
+        &self,
+        title: &str,
+        artist: Option<&str>,
+    ) -> Result<Option<String>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        let artist_id = if let Some(name) = artist {
+            find_artist_id(&conn, name)?
+        } else {
+            None
+        };
+        conn.query_row(
+            "SELECT uuid FROM albums WHERE title = ?1 AND artist_id IS ?2",
+            params![title, artist_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("lookup album uuid by title/artist")
     }
 
     pub fn list_musicbrainz_candidates(
@@ -997,6 +1068,7 @@ impl MetadataDb {
             LEFT JOIN tracks t ON t.album_id = al.id
             WHERE (?1 IS NULL OR al.artist_id = ?1)
               AND (?2 IS NULL OR LOWER(al.title) LIKE ?2)
+              AND al.orphaned_at IS NULL
             GROUP BY al.id
             ORDER BY
                 CASE WHEN ar.name IS NULL THEN 1 ELSE 0 END,
@@ -1509,23 +1581,30 @@ impl MetadataDb {
     pub fn prune_orphaned_albums_and_artists(&self) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
-        tx.execute(
-            "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)",
-            [],
-        )
-        .context("delete orphaned albums")?;
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         tx.execute(
             r#"
-            DELETE FROM artists
-            WHERE id NOT IN (
-                SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL
-                UNION
-                SELECT DISTINCT artist_id FROM albums WHERE artist_id IS NOT NULL
-            )
+            UPDATE albums
+            SET orphaned_at = ?1
+            WHERE orphaned_at IS NULL
+              AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+            "#,
+            params![now_ms],
+        )
+        .context("mark orphaned albums")?;
+        tx.execute(
+            r#"
+            UPDATE albums
+            SET orphaned_at = NULL
+            WHERE orphaned_at IS NOT NULL
+              AND id IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
             "#,
             [],
         )
-        .context("delete orphaned artists")?;
+        .context("clear orphaned albums")?;
         tx.commit().context("commit metadata tx")?;
         Ok(())
     }
@@ -1635,6 +1714,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
             original_year INTEGER,
             edition_year INTEGER,
             edition_label TEXT,
+            orphaned_at INTEGER,
             mbid TEXT,
             cover_art_path TEXT,
             caa_fail_count INTEGER,
@@ -1866,6 +1946,16 @@ fn init_schema(conn: &Connection) -> Result<()> {
         .context("update schema version")?;
     }
 
+    if version < 10 {
+        conn.execute("ALTER TABLE albums ADD COLUMN orphaned_at INTEGER", [])
+            .context("add album orphaned_at")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
     Ok(())
 }
 
@@ -1945,5 +2035,54 @@ fn upsert_album(conn: &Connection, title: &str, artist_id: Option<i64>, year: Op
         |row| row.get(0),
     )?;
     ensure_row_uuid(conn, "albums", id)?;
+    Ok(id)
+}
+
+fn upsert_album_with_uuid(
+    conn: &Connection,
+    uuid: &str,
+    title: &str,
+    artist_id: Option<i64>,
+    year: Option<i32>,
+) -> Result<i64> {
+    let existing: Option<(i64, Option<String>, Option<i64>, Option<i32>)> = conn
+        .query_row(
+            "SELECT id, title, artist_id, year FROM albums WHERE uuid = ?1",
+            params![uuid],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .context("lookup album by uuid")?;
+    let id = if let Some((id, current_title, current_artist_id, current_year)) = existing {
+        let mut needs_update = false;
+        if current_title.as_deref() != Some(title) {
+            needs_update = true;
+        }
+        if artist_id.is_some() && current_artist_id != artist_id {
+            needs_update = true;
+        }
+        if year.is_some() && current_year != year {
+            needs_update = true;
+        }
+        if needs_update {
+            conn.execute(
+                "UPDATE albums SET title = ?1, artist_id = COALESCE(?2, artist_id), year = COALESCE(?3, year), sort_title = ?4 WHERE id = ?5",
+                params![title, artist_id, year, title.to_lowercase(), id],
+            )
+            .context("update album by uuid")?;
+        }
+        id
+    } else {
+        conn.execute(
+            "INSERT INTO albums (uuid, title, artist_id, year, sort_title) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![uuid, title, artist_id, year, title.to_lowercase()],
+        )
+        .context("insert album with uuid")?;
+        conn.query_row(
+            "SELECT id FROM albums WHERE uuid = ?1",
+            params![uuid],
+            |row| row.get(0),
+        )?
+    };
     Ok(id)
 }

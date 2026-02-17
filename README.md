@@ -67,6 +67,42 @@ Notes:
 - Resampler is inserted only when source and output rates differ.
 - Queues are bounded to balance latency and underrun resistance.
 
+### Metadata architecture (conceptual)
+
+```mermaid
+flowchart LR
+    FS[Music library on disk] -->|scan/rescan| MS[MetadataService]
+    MS -->|probe + normalize| META[TrackMeta]
+    MS -->|upsert| DB[(metadata.sqlite)]
+    MS -->|index update| IDX[LibraryIndex]
+    META -->|cover art hints| CA[CoverArtResolver]
+    CA -->|store paths| DB
+    DB -->|albums/tracks| API[HTTP API]
+    API -->|UI queries| UI[web-ui / hub-cli]
+```
+
+Notes:
+- `MetadataService` orchestrates scans, normalization, DB writes, and index updates.
+- `metadata.sqlite` is the source of truth for album/artist/track metadata used by the UI and playback.
+
+### Album marker flow (optional)
+
+```mermaid
+sequenceDiagram
+    participant FS as Album folder
+    participant MS as MetadataService
+    participant DB as metadata.sqlite
+
+    MS->>FS: read .audio-hub/album.json
+    alt marker exists
+        MS->>DB: upsert album by uuid
+    else marker missing
+        MS->>DB: reuse existing uuid (title/artist) or generate new
+        MS->>FS: write .audio-hub/album.json
+        MS->>DB: upsert album by uuid
+    end
+```
+
 ### Outputs + providers
 
 - Providers expose outputs (devices). The hub keeps one active output at a time.
