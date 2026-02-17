@@ -997,6 +997,7 @@ impl MetadataDb {
             ORDER BY
                 CASE WHEN ar.name IS NULL THEN 1 ELSE 0 END,
                 COALESCE(ar.sort_name, ar.name),
+                COALESCE(al.year, 9999),
                 COALESCE(al.sort_title, al.title)
             LIMIT ?3 OFFSET ?4
             "#,
