@@ -62,9 +62,203 @@ function formatRatio(value?: number | null): string {
 }
 
 function formatHz(value?: number | null): string {
-  if (!value) return "—";
+  if (value === null || value === undefined) return "—";
+  if (value <= 0) return "0 Hz";
   if (value >= 1000) return `${(value / 1000).toFixed(1)} kHz`;
   return `${value.toFixed(0)} Hz`;
+}
+
+function openSpectrogramTab(
+  canvas: HTMLCanvasElement | null,
+  title: string,
+  artist?: string | null,
+  sampleRate?: number | null,
+  durationSeconds?: number
+) {
+  if (!canvas) return;
+  const scale = 2;
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = canvas.width * scale;
+  exportCanvas.height = canvas.height * scale;
+  const exportCtx = exportCanvas.getContext("2d");
+  if (!exportCtx) return;
+  exportCtx.imageSmoothingEnabled = false;
+  exportCtx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+  const imageUrl = exportCanvas.toDataURL("image/png");
+  const safeTitle = title || "Track analysis";
+  const safeArtist = artist || "";
+  const tab = window.open("", "_blank");
+  if (!tab) return;
+  const nyquist = sampleRate ? sampleRate / 2 : null;
+  const freqLabels = nyquist
+    ? [0.25, 0.5, 0.75, 1].map((ratio) => ({
+        top: (1 - ratio) * 100,
+        label: formatHz(nyquist * ratio)
+      }))
+    : [];
+  const timeLabels = durationSeconds
+    ? Array.from({ length: 5 }, (_, idx) => {
+        const ratio = idx / 4;
+        return { left: ratio * 100, label: formatTime(durationSeconds * ratio) };
+      })
+    : [];
+
+  tab.document.write(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${safeTitle}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", sans-serif;
+        background: #0f1215;
+        color: #f3f4f6;
+      }
+      .page {
+        padding: 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 1.4rem;
+      }
+      .artist {
+        color: #b8c0cc;
+        margin-bottom: 16px;
+      }
+      .spectrogram-wrap {
+        display: grid;
+        grid-template-columns: 70px 1fr 70px;
+        gap: 12px;
+        align-items: stretch;
+      }
+      .axis-y {
+        position: relative;
+        font-size: 0.65rem;
+        color: #b8c0cc;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .axis-y span {
+        position: absolute;
+        right: 0;
+        transform: translateY(-50%);
+        white-space: nowrap;
+      }
+      .spectrogram {
+        position: relative;
+      }
+      img {
+        width: 100%;
+        height: auto;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        background: #0b0e12;
+      }
+      .axis-x {
+        position: relative;
+        height: 16px;
+        margin-top: 6px;
+        font-size: 0.65rem;
+        color: #b8c0cc;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .axis-x span {
+        position: absolute;
+        top: 0;
+        transform: translateX(-50%);
+        white-space: nowrap;
+      }
+      .legend {
+        position: relative;
+        display: grid;
+        grid-template-columns: 12px 1fr;
+        gap: 6px;
+      }
+      .bar {
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(
+          to bottom,
+          rgb(255, 245, 230) 0%,
+          rgb(255, 210, 40) 10%,
+          rgb(255, 140, 0) 20%,
+          rgb(200, 40, 40) 35%,
+          rgb(80, 30, 140) 55%,
+          rgb(12, 20, 90) 75%,
+          rgb(2, 6, 20) 100%
+        );
+      }
+      .labels {
+        position: relative;
+        font-size: 0.65rem;
+        color: #b8c0cc;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .labels span {
+        position: absolute;
+        right: 0;
+        transform: translateY(-50%);
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>${safeTitle}</h1>
+      ${safeArtist ? `<div class="artist">${safeArtist}</div>` : ""}
+      <div class="spectrogram-wrap">
+        <div class="axis-y">
+          ${freqLabels
+            .map((label) => `<span style="top:${label.top}%">${label.label}</span>`)
+            .join("")}
+        </div>
+        <div class="spectrogram">
+          <img src="${imageUrl}" alt="Spectrogram" />
+          <div class="axis-x">
+            ${timeLabels
+              .map((label) => `<span style="left:${label.left}%">${label.label}</span>`)
+              .join("")}
+          </div>
+        </div>
+        <div class="legend">
+          <div class="bar"></div>
+          <div class="labels">
+            ${[
+              "0 dB",
+              "-10 dB",
+              "-20 dB",
+              "-30 dB",
+              "-40 dB",
+              "-50 dB",
+              "-60 dB",
+              "-70 dB",
+              "-80 dB",
+              "-90 dB",
+              "-100 dB",
+              "-110 dB",
+              "-120 dB"
+            ]
+              .map((label, index, arr) => {
+                const top = (index / (arr.length - 1)) * 100;
+                return `<span style="top:${top}%">${label}</span>`;
+              })
+              .join("")}
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`);
+  tab.document.close();
 }
 
 function formatTime(seconds: number): string {
@@ -133,7 +327,7 @@ export default function TrackAnalysisModal({
   const freqLabels = useMemo(() => {
     if (!analysis) return [] as Array<{ top: number; label: string }>;
     const nyquist = analysis.sample_rate / 2;
-    return [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
+    return [0.25, 0.5, 0.75, 1].map((ratio) => ({
       top: (1 - ratio) * 100,
       label: formatHz(nyquist * ratio)
     }));
@@ -340,6 +534,22 @@ export default function TrackAnalysisModal({
           </div>
         </div>
         <div className="modal-actions">
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() =>
+              openSpectrogramTab(
+                canvasRef.current,
+                title,
+                artist,
+                analysis?.sample_rate ?? null,
+                analysis?.duration_ms ? analysis.duration_ms / 1000 : undefined
+              )
+            }
+            disabled={!analysis}
+          >
+            Open full view
+          </button>
           <button className="btn" type="button" onClick={onClose}>
             Close
           </button>
