@@ -117,6 +117,12 @@
   gap: 12px;
 }
 
+.output-list-wrap {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .queue-list {
   display: flex;
   flex-direction: column;
