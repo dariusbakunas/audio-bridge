@@ -147,6 +147,10 @@ Then start `audio-hub-server` as usual and open `http://<SERVER_IP>:8080/`.
 
 The browser UI registers itself as a playback output; select the `browser:<id>` output to play directly in that browser.
 
+### Track analysis (experimental)
+
+The web UI includes an on-demand track analysis modal (spectrogram + basic heuristics). It runs entirely on the server when you click **Analyze track** in the track menu and does not precompute anything during library scans.
+
 For local development:
 
 ```bash

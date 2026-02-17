@@ -12,7 +12,6 @@
 .modal-card {
   width: min(720px, 100%);
   max-height: 80vh;
-  overflow: auto;
   background: var(--bg-panel);
   border-radius: var(--radius-sm);
   padding: 20px 22px;
@@ -384,6 +383,227 @@
   color: var(--ink);
   white-space: pre-wrap;
   line-height: 1.6;
+}
+
+.analysis-modal {
+  width: min(960px, 100%);
+  max-height: 90vh;
+}
+
+.analysis-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analysis-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.analysis-artist {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.analysis-spectrogram {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  padding: 12px 18px 24px;
+  background: var(--bg-overlay);
+  border-radius: var(--radius-sm);
+  min-height: 260px;
+  overflow-x: hidden;
+}
+
+.analysis-spectrogram-grid {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  height: 100%;
+}
+
+.analysis-y-axis {
+  position: relative;
+  height: 100%;
+}
+
+.analysis-x-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+}
+
+.analysis-axis-label {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 0.62rem;
+  color: var(--muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.analysis-x-axis .analysis-axis-label {
+  transform: translateX(-50%);
+  top: 0;
+}
+
+.analysis-spectrogram-canvas {
+  position: relative;
+  height: 100%;
+  padding-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.analysis-spectrogram canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.analysis-cutoff {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(212, 150, 95, 0.7);
+  pointer-events: none;
+}
+
+.analysis-cutoff-label {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(18, 21, 26, 0.8);
+  border: 1px solid rgba(212, 150, 95, 0.4);
+  color: var(--accent-2);
+  pointer-events: none;
+}
+
+.analysis-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-2);
+  margin-top: 12px;
+}
+
+.analysis-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.analysis-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.85rem;
+}
+
+.analysis-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(212, 150, 95, 0.4);
+  color: var(--accent-2);
+  font-size: 0.6rem;
+  font-weight: 600;
+  cursor: help;
+}
+
+.analysis-help::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 18, 0.95);
+  border: 1px solid rgba(212, 150, 95, 0.4);
+  color: var(--text);
+  font-size: 0.7rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.15s ease;
+}
+
+.analysis-help:hover::after {
+  opacity: 1;
+}
+
+.analysis-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.analysis-duration {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analysis-duration .btn.active {
+  background: var(--accent);
+  color: #0a0c0f;
+  border-color: var(--accent);
+}
+
+.analysis-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.analysis-note {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(212, 150, 95, 0.3);
+  background: rgba(212, 150, 95, 0.08);
+}
+
+@media (max-width: 800px) {
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .side-panel-backdrop {

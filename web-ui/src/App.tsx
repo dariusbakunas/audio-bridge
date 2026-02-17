@@ -42,6 +42,7 @@ import CatalogMetadataDialog from "./components/CatalogMetadataDialog";
 import AlbumNotesModal from "./components/AlbumNotesModal";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
 import TrackMetadataModal from "./components/TrackMetadataModal";
+import TrackAnalysisModal from "./components/TrackAnalysisModal";
 import OutputsModal from "./components/OutputsModal";
 import PlayerBar from "./components/PlayerBar";
 import QueueModal from "./components/QueueModal";
@@ -249,6 +250,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [catalogOpen, setCatalogOpen] = useState<boolean>(false);
   const [albumNotesOpen, setAlbumNotesOpen] = useState<boolean>(false);
+  const [analysisTarget, setAnalysisTarget] = useState<{
+    trackId: number;
+    title: string;
+    artist?: string | null;
+  } | null>(null);
   const [navCollapsed, setNavCollapsed] = useState<boolean>(false);
   const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection">("metadata");
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
@@ -1455,6 +1461,15 @@ export default function App() {
               onEditTrackMetadata={(path) =>
                 runTrackMenuAction(openTrackEditorForAlbum, path)
               }
+              onAnalyzeTrack={(track) => {
+                runTrackMenuAction(() => {
+                  setAnalysisTarget({
+                    trackId: track.id,
+                    title: track.title ?? track.file_name,
+                    artist: track.artist ?? null
+                  });
+                }, track.path);
+              }}
               onEditAlbumMetadata={openAlbumEditor}
               onEditCatalogMetadata={() => setCatalogOpen(true)}
               onReadAlbumNotes={() => setAlbumNotesOpen(true)}
@@ -1651,6 +1666,16 @@ export default function App() {
         artist={selectedAlbum?.artist ?? ""}
         notes={albumProfile?.notes?.text ?? ""}
         onClose={() => setAlbumNotesOpen(false)}
+        />
+      ) : null}
+
+      {!showGate ? (
+        <TrackAnalysisModal
+        open={Boolean(analysisTarget)}
+        trackId={analysisTarget?.trackId ?? null}
+        title={analysisTarget?.title ?? ""}
+        artist={analysisTarget?.artist ?? null}
+        onClose={() => setAnalysisTarget(null)}
         />
       ) : null}
 

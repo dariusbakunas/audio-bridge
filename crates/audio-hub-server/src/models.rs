@@ -239,6 +239,60 @@ pub struct TrackMetadataFieldsResponse {
     pub fields: Vec<String>,
 }
 
+/// Request payload for on-demand track analysis.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackAnalysisRequest {
+    /// Optional track id from the metadata DB.
+    #[serde(default)]
+    pub track_id: Option<i64>,
+    /// Absolute track path.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Max seconds to analyze (defaults to 30).
+    #[serde(default)]
+    pub max_seconds: Option<f32>,
+    /// Spectrogram width (columns).
+    #[serde(default)]
+    pub width: Option<usize>,
+    /// Spectrogram height (rows).
+    #[serde(default)]
+    pub height: Option<usize>,
+    /// FFT window size (samples).
+    #[serde(default)]
+    pub window_size: Option<usize>,
+    /// High-frequency cutoff override (Hz) for ultrasonic ratio.
+    #[serde(default)]
+    pub high_cutoff_hz: Option<f32>,
+}
+
+/// Heuristic analysis data for a track.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackAnalysisHeuristics {
+    #[serde(default)]
+    pub rolloff_hz: Option<f32>,
+    #[serde(default)]
+    pub ultrasonic_ratio: Option<f32>,
+    #[serde(default)]
+    pub upper_audible_ratio: Option<f32>,
+    #[serde(default)]
+    pub dynamic_range_db: Option<f32>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+/// On-demand track analysis response.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackAnalysisResponse {
+    pub width: usize,
+    pub height: usize,
+    pub sample_rate: u32,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    /// Base64-encoded spectrogram intensity data (row-major, 0..255).
+    pub data_base64: String,
+    pub heuristics: TrackAnalysisHeuristics,
+}
+
 /// Current metadata fields for an album.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct AlbumMetadataResponse {

@@ -145,3 +145,4 @@ web-ui/.vite/
 config.toml
 .env
 certs/
+*.sqlite

@@ -45,6 +45,7 @@ pub use metadata::{
     tracks_metadata_fields,
     tracks_metadata_update,
     tracks_resolve,
+    tracks_analysis,
 };
 pub use outputs::{
     outputs_list,

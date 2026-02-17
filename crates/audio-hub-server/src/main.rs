@@ -18,6 +18,7 @@ mod metadata_db;
 mod metadata_service;
 mod media_assets;
 mod musicbrainz;
+mod track_analysis;
 mod openapi;
 mod output_controller;
 mod output_providers;

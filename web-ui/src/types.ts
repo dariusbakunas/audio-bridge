@@ -149,6 +149,33 @@ export interface TrackMetadataFieldsResponse {
   fields: string[];
 }
 
+export interface TrackAnalysisHeuristics {
+  rolloff_hz?: number | null;
+  ultrasonic_ratio?: number | null;
+  upper_audible_ratio?: number | null;
+  dynamic_range_db?: number | null;
+  notes?: string[] | null;
+}
+
+export interface TrackAnalysisResponse {
+  width: number;
+  height: number;
+  sample_rate: number;
+  duration_ms?: number | null;
+  data_base64: string;
+  heuristics: TrackAnalysisHeuristics;
+}
+
+export interface TrackAnalysisRequest {
+  track_id?: number | null;
+  path?: string | null;
+  max_seconds?: number;
+  width?: number;
+  height?: number;
+  window_size?: number;
+  high_cutoff_hz?: number;
+}
+
 export interface AlbumMetadataResponse {
   album_id: number;
   title?: string | null;

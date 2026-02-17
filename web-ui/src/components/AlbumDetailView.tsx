@@ -27,6 +27,7 @@ interface AlbumDetailViewProps {
   onMenuRescan: (path: string) => void;
   onFixTrackMatch: (path: string) => void;
   onEditTrackMetadata: (path: string) => void;
+  onAnalyzeTrack: (track: TrackSummary) => void;
   onEditAlbumMetadata: () => void;
   onEditCatalogMetadata: () => void;
   onReadAlbumNotes: () => void;
@@ -57,6 +58,7 @@ export default function AlbumDetailView({
   onMenuRescan,
   onFixTrackMatch,
   onEditTrackMetadata,
+  onAnalyzeTrack,
   onEditAlbumMetadata,
   onEditCatalogMetadata,
   onReadAlbumNotes,
@@ -293,6 +295,7 @@ export default function AlbumDetailView({
                           onFixMatch={() => onFixTrackMatch(track.path)}
                           onEditMetadata={() => onEditTrackMetadata(track.path)}
                           onRescan={() => onMenuRescan(track.path)}
+                          onAnalyze={() => onAnalyzeTrack(track)}
                         />
                       </div>
                     </div>

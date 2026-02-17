@@ -13,6 +13,7 @@ interface TrackMenuProps {
   onRescan: () => void;
   onFixMatch?: () => void;
   onEditMetadata?: () => void;
+  onAnalyze?: () => void;
 }
 
 export default function TrackMenu({
@@ -25,7 +26,8 @@ export default function TrackMenu({
   onPlayNext,
   onRescan,
   onFixMatch,
-  onEditMetadata
+  onEditMetadata,
+  onAnalyze
 }: TrackMenuProps) {
   return (
     <div className="track-menu-wrap" data-track-menu="true">
@@ -65,6 +67,11 @@ export default function TrackMenu({
           {onEditMetadata ? (
             <button className="track-menu-item" onClick={onEditMetadata}>
               Edit file metadata
+            </button>
+          ) : null}
+          {onAnalyze ? (
+            <button className="track-menu-item" onClick={onAnalyze}>
+              Analyze track
             </button>
           ) : null}
           <button className="track-menu-item" onClick={onRescan}>

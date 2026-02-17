@@ -33,8 +33,13 @@ use crate::models::{
     TrackMetadataFieldsResponse,
     TrackMetadataUpdateRequest,
     TrackResolveResponse,
+    TrackAnalysisRequest,
+    TrackAnalysisResponse,
+    TrackAnalysisHeuristics,
 };
 use crate::metadata_db::{MediaAssetRecord, TextEntry};
+use crate::track_analysis::{analyze_track, AnalysisOptions};
+use base64::{engine::general_purpose, Engine as _};
 use crate::state::AppState;
 use crate::tag_writer::{supported_track_fields, tag_type_label, write_track_tags, TrackTagUpdate};
 
@@ -327,6 +332,84 @@ pub async fn tracks_metadata_update(
     }
 
     HttpResponse::Ok().finish()
+}
+
+#[utoipa::path(
+    post,
+    path = "/tracks/analysis",
+    request_body = TrackAnalysisRequest,
+    responses(
+        (status = 200, description = "Track analysis", body = TrackAnalysisResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Track not found")
+    )
+)]
+#[post("/tracks/analysis")]
+/// Run on-demand analysis (spectrogram + heuristics) for a track.
+pub async fn tracks_analysis(
+    state: web::Data<AppState>,
+    body: web::Json<TrackAnalysisRequest>,
+) -> impl Responder {
+    let request = body.into_inner();
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let path = if let Some(track_id) = request.track_id {
+        match state.metadata.db.track_path_for_id(track_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else if let Some(path) = request.path.as_ref() {
+        path.clone()
+    } else {
+        return HttpResponse::BadRequest().body("track_id or path is required");
+    };
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+
+    let max_seconds = match request.max_seconds {
+        Some(value) if value > 0.0 => value.clamp(5.0, 1800.0),
+        _ => 0.0,
+    };
+    let width = request.width.unwrap_or(480).clamp(120, 1024);
+    let height = request.height.unwrap_or(128).clamp(64, 512);
+    let window_size = request.window_size.unwrap_or(4096).clamp(2048, 8192);
+    let high_cutoff_hz = request.high_cutoff_hz.filter(|value| *value > 1000.0);
+    let analysis = match web::block(move || {
+        analyze_track(
+            &full_path,
+            AnalysisOptions {
+                max_seconds,
+                width,
+                height,
+                window_size,
+                high_cutoff_hz,
+            },
+        )
+    })
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(err)) => return HttpResponse::BadRequest().body(err.to_string()),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+
+    let data_base64 = general_purpose::STANDARD.encode(&analysis.data);
+    HttpResponse::Ok().json(TrackAnalysisResponse {
+        width: analysis.width,
+        height: analysis.height,
+        sample_rate: analysis.sample_rate,
+        duration_ms: analysis.duration_ms,
+        data_base64,
+        heuristics: TrackAnalysisHeuristics {
+            rolloff_hz: analysis.heuristics.rolloff_hz,
+            ultrasonic_ratio: analysis.heuristics.ultrasonic_ratio,
+            upper_audible_ratio: analysis.heuristics.upper_audible_ratio,
+            dynamic_range_db: analysis.heuristics.dynamic_range_db,
+            notes: analysis.heuristics.notes,
+        },
+    })
 }
 
 #[utoipa::path(

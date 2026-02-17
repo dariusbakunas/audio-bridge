@@ -162,6 +162,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::tracks_metadata)
             .service(api::tracks_metadata_fields)
             .service(api::tracks_metadata_update)
+            .service(api::tracks_analysis)
             .service(api::albums_metadata)
             .service(api::albums_metadata_update)
             .service(api::artist_profile)
