@@ -431,6 +431,13 @@
   height: 100%;
 }
 
+.analysis-spectrogram-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .analysis-y-axis {
   position: relative;
   height: 100%;
@@ -464,6 +471,45 @@
   height: 100%;
   padding-bottom: 16px;
   box-sizing: border-box;
+}
+
+.analysis-color-legend {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 6px;
+  height: 100%;
+  min-height: 180px;
+}
+
+.analysis-color-bar {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(
+    to bottom,
+    rgb(255, 245, 230) 0%,
+    rgb(255, 210, 40) 10%,
+    rgb(255, 140, 0) 20%,
+    rgb(200, 40, 40) 35%,
+    rgb(80, 30, 140) 55%,
+    rgb(12, 20, 90) 75%,
+    rgb(2, 6, 20) 100%
+  );
+}
+
+.analysis-color-labels {
+  position: relative;
+  font-size: 0.6rem;
+  color: var(--muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.analysis-color-label {
+  position: absolute;
+  transform: translateY(-50%);
+  right: 0;
+  white-space: nowrap;
 }
 
 .analysis-spectrogram canvas {

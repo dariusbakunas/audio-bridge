@@ -21,11 +21,31 @@ function decodeBase64ToBytes(data: string): Uint8Array {
 }
 
 function colorMap(value: number): [number, number, number] {
-  const t = value / 255;
-  const r = Math.min(255, Math.max(0, Math.floor(255 * Math.pow(t, 0.6))));
-  const g = Math.min(255, Math.max(0, Math.floor(255 * Math.pow(t, 1.2))));
-  const b = Math.min(255, Math.max(0, Math.floor(255 * Math.pow(t, 2.0))));
-  return [r, g, b];
+  const t = Math.min(1, Math.max(0, value / 255));
+  const curve = Math.pow(t, 0.9);
+  const stops: Array<[number, [number, number, number]]> = [
+    [0.0, [2, 6, 20]],    // near-black
+    [0.2, [12, 20, 90]],  // deep blue
+    [0.4, [80, 30, 140]], // purple
+    [0.6, [200, 40, 40]], // red
+    [0.8, [255, 140, 0]], // orange
+    [0.92, [255, 210, 40]], // yellow
+    [1.0, [255, 245, 230]]  // near-white
+  ];
+  const blend = (a: number, b: number, p: number) => Math.round(a + (b - a) * p);
+  for (let i = 1; i < stops.length; i += 1) {
+    const [t1, c1] = stops[i];
+    const [t0, c0] = stops[i - 1];
+    if (curve <= t1) {
+      const p = (curve - t0) / (t1 - t0);
+      return [
+        blend(c0[0], c1[0], p),
+        blend(c0[1], c1[1], p),
+        blend(c0[2], c1[2], p)
+      ];
+    }
+  }
+  return stops[stops.length - 1][1];
 }
 
 function formatDb(value?: number | null): string {
@@ -164,40 +184,70 @@ export default function TrackAnalysisModal({
                     </div>
                   ))}
                 </div>
-                <div className="analysis-spectrogram-canvas">
-                  <canvas ref={canvasRef} />
-                  <div
-                    className="analysis-cutoff"
-                    style={{
-                      top: `${analysis ? (1 - cutoffHz / (analysis.sample_rate / 2)) * 100 : 0}%`
-                    }}
-                  />
-                  <div
-                    className="analysis-cutoff-label"
-                    style={{
-                      top: `${analysis ? (1 - cutoffHz / (analysis.sample_rate / 2)) * 100 : 0}%`
-                    }}
-                  >
-                    {formatHz(cutoffHz)}
+                <div className="analysis-spectrogram-wrap">
+                  <div className="analysis-spectrogram-canvas">
+                    <canvas ref={canvasRef} />
+                    <div
+                      className="analysis-cutoff"
+                      style={{
+                        top: `${analysis ? (1 - cutoffHz / (analysis.sample_rate / 2)) * 100 : 0}%`
+                      }}
+                    />
+                    <div
+                      className="analysis-cutoff-label"
+                      style={{
+                        top: `${analysis ? (1 - cutoffHz / (analysis.sample_rate / 2)) * 100 : 0}%`
+                      }}
+                    >
+                      {formatHz(cutoffHz)}
+                    </div>
+                    <div className="analysis-x-axis">
+                      {timeLabels.map((label) => (
+                        <span
+                          key={`${label.label}-${label.left}`}
+                          className="analysis-axis-label"
+                          style={{
+                            left: `${label.left}%`,
+                            transform:
+                              label.left <= 0
+                                ? "translateX(0)"
+                                : label.left >= 100
+                                  ? "translateX(-100%)"
+                                  : "translateX(-50%)"
+                          }}
+                        >
+                          {label.label}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="analysis-x-axis">
-                    {timeLabels.map((label) => (
-                      <span
-                        key={`${label.label}-${label.left}`}
-                        className="analysis-axis-label"
-                        style={{
-                          left: `${label.left}%`,
-                          transform:
-                            label.left <= 0
-                              ? "translateX(0)"
-                              : label.left >= 100
-                                ? "translateX(-100%)"
-                                : "translateX(-50%)"
-                        }}
-                      >
-                        {label.label}
-                      </span>
-                    ))}
+                  <div className="analysis-color-legend">
+                    <div className="analysis-color-bar" />
+                    <div className="analysis-color-labels">
+                      {[
+                        { label: "0 dB", top: 0 },
+                        { label: "-10 dB", top: 10 },
+                        { label: "-20 dB", top: 20 },
+                        { label: "-30 dB", top: 30 },
+                        { label: "-40 dB", top: 40 },
+                        { label: "-50 dB", top: 50 },
+                        { label: "-60 dB", top: 60 },
+                        { label: "-70 dB", top: 70 },
+                        { label: "-80 dB", top: 80 },
+                        { label: "-90 dB", top: 90 },
+                        { label: "-100 dB", top: 100 },
+                        { label: "-110 dB", top: 110 },
+                        { label: "-120 dB", top: 120 }
+                      ].map((item) => (
+                        <span
+                          key={item.label}
+                          className="analysis-color-label"
+                          style={{ top: `${item.top / 120 * 100}%` }}
+                        >
+                          {item.label}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
