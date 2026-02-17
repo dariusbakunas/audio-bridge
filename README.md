@@ -151,6 +151,8 @@ The browser UI registers itself as a playback output; select the `browser:<id>` 
 
 The web UI includes an on-demand track analysis modal (spectrogram + basic heuristics). It runs entirely on the server when you click **Analyze track** in the track menu and does not precompute anything during library scans.
 
+![web-ui analysis screenshot](docs/screenshots/web-ui-analysis.png)
+
 For local development:
 
 ```bash
