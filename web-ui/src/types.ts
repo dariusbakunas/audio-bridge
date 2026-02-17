@@ -94,6 +94,9 @@ export interface AlbumSummary {
   artist?: string | null;
   artist_id?: number | null;
   year?: number | null;
+  original_year?: number | null;
+  edition_year?: number | null;
+  edition_label?: string | null;
   mbid?: string | null;
   track_count: number;
   cover_art_path?: string | null;
@@ -183,6 +186,9 @@ export interface AlbumProfileResponse {
   album_id: number;
   lang: string;
   notes?: TextMetadata | null;
+  original_year?: number | null;
+  edition_year?: number | null;
+  edition_label?: string | null;
   image?: MediaAssetInfo | null;
 }
 

@@ -123,6 +123,30 @@
   gap: 10px;
 }
 
+.queue-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.queue-panel .card-header {
+  height: var(--header-height);
+  padding: 0 22px;
+  margin-bottom: 0;
+  background: rgba(18, 21, 26, 0.95);
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+}
+
+.queue-panel .queue-list {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 22px 20px;
+}
+
 .queue-row {
   display: flex;
   justify-content: space-between;

@@ -5,6 +5,15 @@ import Modal from "./Modal";
 
 const DEFAULT_LANG = "en-US";
 
+function parseOptionalInt(value: string, allowZero = false): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (Number.isNaN(parsed)) return undefined;
+  if (!allowZero && parsed <= 0) return undefined;
+  return parsed;
+}
+
 type CatalogMetadataDialogProps = {
   open: boolean;
   albumId: number | null;
@@ -29,7 +38,13 @@ export default function CatalogMetadataDialog({
   onUpdated
 }: CatalogMetadataDialogProps) {
   const [albumNotes, setAlbumNotes] = useState("");
+  const [originalYear, setOriginalYear] = useState("");
+  const [editionYear, setEditionYear] = useState("");
+  const [editionLabel, setEditionLabel] = useState("");
   const [initialAlbumNotes, setInitialAlbumNotes] = useState("");
+  const [initialOriginalYear, setInitialOriginalYear] = useState("");
+  const [initialEditionYear, setInitialEditionYear] = useState("");
+  const [initialEditionLabel, setInitialEditionLabel] = useState("");
   const [cachedAlbumImage, setCachedAlbumImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -38,7 +53,13 @@ export default function CatalogMetadataDialog({
   useEffect(() => {
     if (!open) return;
     setAlbumNotes("");
+    setOriginalYear("");
+    setEditionYear("");
+    setEditionLabel("");
     setInitialAlbumNotes("");
+    setInitialOriginalYear("");
+    setInitialEditionYear("");
+    setInitialEditionLabel("");
     setCachedAlbumImage(null);
     setError(null);
 
@@ -58,6 +79,15 @@ export default function CatalogMetadataDialog({
           const notes = album.notes?.text ?? "";
           setAlbumNotes(notes);
           setInitialAlbumNotes(notes);
+          const original = album.original_year ? String(album.original_year) : "";
+          const editionYearValue = album.edition_year ? String(album.edition_year) : "";
+          const editionLabelValue = album.edition_label ?? "";
+          setOriginalYear(original);
+          setEditionYear(editionYearValue);
+          setEditionLabel(editionLabelValue);
+          setInitialOriginalYear(original);
+          setInitialEditionYear(editionYearValue);
+          setInitialEditionLabel(editionLabelValue);
           setCachedAlbumImage(resolveAssetUrl(album.image));
         }
         if (albumResult.status === "rejected") {
@@ -74,16 +104,29 @@ export default function CatalogMetadataDialog({
   }, [open, albumId]);
 
   const notesChanged = useMemo(() => albumNotes.trim() !== initialAlbumNotes.trim(), [albumNotes, initialAlbumNotes]);
+  const originalYearChanged = useMemo(() => originalYear.trim() !== initialOriginalYear.trim(), [originalYear, initialOriginalYear]);
+  const editionYearChanged = useMemo(() => editionYear.trim() !== initialEditionYear.trim(), [editionYear, initialEditionYear]);
+  const editionLabelChanged = useMemo(() => editionLabel.trim() !== initialEditionLabel.trim(), [editionLabel, initialEditionLabel]);
 
   const handleSave = async () => {
     if (!albumId) return;
-    if (!notesChanged) return;
+    if (!notesChanged && !originalYearChanged && !editionYearChanged && !editionLabelChanged) {
+      return;
+    }
+    if (originalYear.trim() && parseOptionalInt(originalYear) === undefined) {
+      setError("Original year must be a valid number.");
+      return;
+    }
+    if (editionYear.trim() && parseOptionalInt(editionYear) === undefined) {
+      setError("Edition year must be a valid number.");
+      return;
+    }
     setSaving(true);
     setError(null);
 
     try {
       let updatedAlbum: AlbumProfileResponse | undefined;
-      if (albumId && notesChanged) {
+      if (albumId && (notesChanged || originalYearChanged || editionYearChanged || editionLabelChanged)) {
         const payload: Record<string, string | number | boolean> = {
           album_id: albumId,
           lang: DEFAULT_LANG,
@@ -91,6 +134,15 @@ export default function CatalogMetadataDialog({
         };
         if (notesChanged) payload.notes = albumNotes.trim();
         if (notesChanged && albumNotes.trim()) payload.notes_locked = true;
+        if (originalYearChanged) {
+          const parsed = parseOptionalInt(originalYear, true);
+          payload.original_year = parsed ?? 0;
+        }
+        if (editionYearChanged) {
+          const parsed = parseOptionalInt(editionYear, true);
+          payload.edition_year = parsed ?? 0;
+        }
+        if (editionLabelChanged) payload.edition_label = editionLabel.trim();
         updatedAlbum = await postJson<AlbumProfileResponse>("/albums/profile/update", payload);
       }
 
@@ -143,6 +195,27 @@ export default function CatalogMetadataDialog({
                 onChange={(event) => setAlbumNotes(event.target.value)}
                 placeholder="Add album notes (offline cached)"
               />
+              <div className="catalog-meta-section-title">Original year</div>
+              <input
+                className="catalog-meta-input"
+                value={originalYear}
+                onChange={(event) => setOriginalYear(event.target.value)}
+                placeholder="1985"
+              />
+              <div className="catalog-meta-section-title">Edition label</div>
+              <input
+                className="catalog-meta-input"
+                value={editionLabel}
+                onChange={(event) => setEditionLabel(event.target.value)}
+                placeholder="2015 Remaster"
+              />
+              <div className="catalog-meta-section-title">Edition year</div>
+              <input
+                className="catalog-meta-input"
+                value={editionYear}
+                onChange={(event) => setEditionYear(event.target.value)}
+                placeholder="2015"
+              />
               {cachedAlbumImage ? (
                 <div className="catalog-meta-image">
                   <img src={cachedAlbumImage} alt="Album asset" />
@@ -160,7 +233,7 @@ export default function CatalogMetadataDialog({
             className="btn"
             type="button"
             onClick={handleSave}
-            disabled={saving || loading || !notesChanged}
+            disabled={saving || loading || (!notesChanged && !originalYearChanged && !editionYearChanged && !editionLabelChanged)}
           >
             {saving ? "Saving..." : "Save"}
           </button>

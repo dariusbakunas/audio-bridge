@@ -414,7 +414,6 @@
   height: 100%;
   background: var(--bg-panel);
   border-left: 1px solid var(--border-strong);
-  padding: 20px 22px;
   box-shadow: var(--shadow);
   overflow: auto;
   animation: slide-in 180ms ease;

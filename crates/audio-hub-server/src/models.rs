@@ -311,6 +311,12 @@ pub struct AlbumProfileResponse {
     pub album_id: i64,
     pub lang: String,
     pub notes: Option<TextMetadata>,
+    #[serde(default)]
+    pub original_year: Option<i32>,
+    #[serde(default)]
+    pub edition_year: Option<i32>,
+    #[serde(default)]
+    pub edition_label: Option<String>,
     pub image: Option<MediaAssetInfo>,
 }
 
@@ -338,6 +344,12 @@ pub struct AlbumProfileUpdateRequest {
     pub notes: Option<String>,
     #[serde(default)]
     pub notes_locked: Option<bool>,
+    #[serde(default)]
+    pub original_year: Option<i32>,
+    #[serde(default)]
+    pub edition_year: Option<i32>,
+    #[serde(default)]
+    pub edition_label: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
 }

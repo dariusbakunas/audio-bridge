@@ -374,7 +374,17 @@ export default function App() {
       const title = album.title?.toLowerCase() ?? "";
       const artist = album.artist?.toLowerCase() ?? "";
       const year = album.year ? String(album.year) : "";
-      return title.includes(query) || artist.includes(query) || year.includes(query);
+      const originalYear = album.original_year ? String(album.original_year) : "";
+      const editionYear = album.edition_year ? String(album.edition_year) : "";
+      const editionLabel = album.edition_label?.toLowerCase() ?? "";
+      return (
+        title.includes(query) ||
+        artist.includes(query) ||
+        year.includes(query) ||
+        originalYear.includes(query) ||
+        editionYear.includes(query) ||
+        editionLabel.includes(query)
+      );
     });
   }, [albums, albumSearch]);
   const heuristicAlbumId = useMemo(() => {
@@ -1136,6 +1146,16 @@ export default function App() {
 
   useEffect(() => {
     setAlbumNotesOpen(false);
+  }, [albumViewId]);
+
+  useEffect(() => {
+    if (albumViewId === null) return;
+    const main = document.querySelector<HTMLElement>(".main");
+    if (main) {
+      main.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }, [albumViewId]);
 
   useEffect(() => {

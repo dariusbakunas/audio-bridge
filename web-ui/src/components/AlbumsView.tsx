@@ -44,6 +44,7 @@ export default function AlbumsView({
         viewMode === "grid" ? (
           <div className="album-grid">
             {albums.map((album) => {
+              const displayYear = album.original_year ?? album.year ?? null;
               const coverSrc = album.cover_art_url
                 ? `${album.cover_art_url}${album.cover_art_path ? `?v=${encodeURIComponent(album.cover_art_path)}` : ""}`
                 : placeholder(album.title, album.artist);
@@ -114,7 +115,7 @@ export default function AlbumsView({
                       </div>
                       <div className="album-artist">{album.artist ?? "Unknown artist"}</div>
                       <div className="album-meta-row mono">
-                        <span>{album.year ?? "—"}</span>
+                        <span>{displayYear ?? "—"}</span>
                         <span className="meta-sep">•</span>
                         <span>{album.track_count} tracks</span>
                       </div>
@@ -128,6 +129,7 @@ export default function AlbumsView({
         ) : (
           <div className="album-list">
             {albums.map((album) => {
+              const displayYear = album.original_year ?? album.year ?? null;
               const coverSrc = album.cover_art_url
                 ? `${album.cover_art_url}${album.cover_art_path ? `?v=${encodeURIComponent(album.cover_art_path)}` : ""}`
                 : placeholder(album.title, album.artist);
@@ -145,7 +147,7 @@ export default function AlbumsView({
                     <div className="album-list-title">{album.title}</div>
                     <div className="muted small">{album.artist ?? "Unknown artist"}</div>
                     <div className="muted small mono">
-                      {album.year ? `${album.year} · ` : ""}
+                      {displayYear ? `${displayYear} · ` : ""}
                       {album.track_count ?? 0} tracks
                     </div>
                   </div>

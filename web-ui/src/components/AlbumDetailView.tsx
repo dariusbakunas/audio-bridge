@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AlbumProfileResponse, AlbumSummary, TrackSummary } from "../types";
 import hiResBadge from "../assets/hi-res.png";
 import TrackMenu from "./TrackMenu";
@@ -62,10 +63,21 @@ export default function AlbumDetailView({
   albumProfile,
   nowPlayingPath
 }: AlbumDetailViewProps) {
+  const heroRef = useRef<HTMLDivElement | null>(null);
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
   const albumNotes = albumProfile?.notes?.text?.trim() ?? "";
+  const displayYear = album?.original_year ?? album?.year ?? null;
+  const editionLabel = album?.edition_label?.trim() ?? "";
+  const editionYear = album?.edition_year ?? null;
+  const editionDetail = editionLabel || editionYear
+    ? `${editionLabel || "Edition"}${editionYear ? ` (${editionYear})` : ""}`
+    : "";
+  useEffect(() => {
+    if (!heroRef.current) return;
+    heroRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [album?.id]);
   const formatSampleRate = (hz?: number | null) => {
     if (!hz) return null;
     const khz = hz / 1000;
@@ -81,7 +93,7 @@ export default function AlbumDetailView({
   };
   return (
     <section className="album-view">
-      <div className="album-hero">
+      <div className="album-hero" ref={heroRef}>
         <div className="album-hero-inner">
           <div className="album-detail-left">
             <div className="album-cover-frame large">
@@ -101,7 +113,9 @@ export default function AlbumDetailView({
               <div className="album-eyebrow">Album</div>
               <h2 className="album-detail-title">
                 <span className="album-detail-title-text">
-                  {album?.title ?? "Unknown album"}
+                  {album?.title ?? "Unknown album"} {editionLabel ? (
+                    <span className="album-edition-label">{editionLabel}</span>
+                ) : null}
                 </span>
                 {album?.hi_res ? (
                   <span
@@ -115,8 +129,8 @@ export default function AlbumDetailView({
               </h2>
               <div className="album-meta-line">
                 <span>{album?.artist ?? "Unknown artist"}</span>
-                {album?.year ? <span className="meta-sep">•</span> : null}
-                {album?.year ? <span>{album.year}</span> : null}
+                {displayYear ? <span className="meta-sep">•</span> : null}
+                {displayYear ? <span>{displayYear}</span> : null}
                 <span className="meta-sep">•</span>
                 <span>{album?.track_count ?? tracks.length} tracks</span>
               </div>

@@ -606,6 +606,10 @@ pub async fn album_profile(
         Ok(false) => return HttpResponse::NotFound().finish(),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     }
+    let (original_year, edition_year, edition_label) = match db.album_edition_fields(query.album_id) {
+        Ok(values) => values,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
     let notes = match db.album_notes(query.album_id, lang) {
         Ok(value) => value.map(map_text_metadata),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
@@ -618,6 +622,9 @@ pub async fn album_profile(
         album_id: query.album_id,
         lang: lang.to_string(),
         notes,
+        original_year,
+        edition_year,
+        edition_label,
         image,
     })
 }
@@ -677,10 +684,57 @@ pub async fn album_profile_update(
         }
     }
 
+    if request.original_year.is_some()
+        || request.edition_year.is_some()
+        || request.edition_label.is_some()
+    {
+        let (current_original, current_edition_year, current_edition_label) =
+            match db.album_edition_fields(request.album_id) {
+                Ok(values) => values,
+                Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+            };
+        let edition_label = request
+            .edition_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .or_else(|| {
+                if request.edition_label.is_some() {
+                    None
+                } else {
+                    current_edition_label
+                }
+            });
+        let original_year = match request.original_year {
+            Some(value) if value > 0 => Some(value),
+            Some(_) => None,
+            None => current_original,
+        };
+        let edition_year = match request.edition_year {
+            Some(value) if value > 0 => Some(value),
+            Some(_) => None,
+            None => current_edition_year,
+        };
+        if let Err(err) = db.update_album_edition_fields(
+            request.album_id,
+            original_year,
+            edition_year,
+            edition_label.as_deref(),
+        ) {
+            return HttpResponse::InternalServerError().body(err.to_string());
+        }
+        updated = true;
+    }
+
     if !updated {
         return HttpResponse::BadRequest().body("no profile fields provided");
     }
 
+    let (original_year, edition_year, edition_label) = match db.album_edition_fields(request.album_id) {
+        Ok(values) => values,
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
     let notes = match db.album_notes(request.album_id, lang) {
         Ok(value) => value.map(map_text_metadata),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
@@ -693,6 +747,9 @@ pub async fn album_profile_update(
         album_id: request.album_id,
         lang: lang.to_string(),
         notes,
+        original_year,
+        edition_year,
+        edition_label,
         image,
     })
 }

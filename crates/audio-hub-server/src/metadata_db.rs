@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::musicbrainz::MusicBrainzMatch;
 use uuid::Uuid;
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 #[derive(Clone)]
 pub struct MetadataDb {
@@ -56,6 +56,9 @@ pub struct AlbumSummary {
     pub artist: Option<String>,
     pub artist_id: Option<i64>,
     pub year: Option<i32>,
+    pub original_year: Option<i32>,
+    pub edition_year: Option<i32>,
+    pub edition_label: Option<String>,
     pub mbid: Option<String>,
     pub track_count: i64,
     pub cover_art_path: Option<String>,
@@ -985,7 +988,8 @@ impl MetadataDb {
         let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
         let mut stmt = conn.prepare(
             r#"
-            SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year, al.mbid,
+            SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year,
+                   al.original_year, al.edition_year, al.edition_label, al.mbid,
                    COUNT(t.id) AS track_count, al.cover_art_path,
                    MAX(t.bit_depth) AS max_bit_depth
             FROM albums al
@@ -997,7 +1001,7 @@ impl MetadataDb {
             ORDER BY
                 CASE WHEN ar.name IS NULL THEN 1 ELSE 0 END,
                 COALESCE(ar.sort_name, ar.name),
-                COALESCE(al.year, 9999),
+                COALESCE(al.original_year, al.year, 9999),
                 COALESCE(al.sort_title, al.title)
             LIMIT ?3 OFFSET ?4
             "#,
@@ -1006,8 +1010,8 @@ impl MetadataDb {
             params![artist_id, search_like, limit, offset],
             |row| {
                 let album_id: i64 = row.get(0)?;
-                let cover_path: Option<String> = row.get(8)?;
-                let max_bit_depth: Option<i64> = row.get(9)?;
+                let cover_path: Option<String> = row.get(11)?;
+                let max_bit_depth: Option<i64> = row.get(12)?;
                 let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                 let cover_art_url = cover_path
                     .as_deref()
@@ -1020,8 +1024,11 @@ impl MetadataDb {
                     artist: row.get(3)?,
                     artist_id: row.get(4)?,
                     year: row.get(5)?,
-                    mbid: row.get(6)?,
-                    track_count: row.get(7)?,
+                    original_year: row.get(6)?,
+                    edition_year: row.get(7)?,
+                    edition_label: row.get(8)?,
+                    mbid: row.get(9)?,
+                    track_count: row.get(10)?,
                     cover_art_path: cover_path,
                     cover_art_url,
                     hi_res,
@@ -1037,7 +1044,8 @@ impl MetadataDb {
         conn
             .query_row(
                 r#"
-                SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year, al.mbid,
+                SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year,
+                       al.original_year, al.edition_year, al.edition_label, al.mbid,
                        COUNT(t.id) AS track_count, al.cover_art_path,
                        MAX(t.bit_depth) AS max_bit_depth
                 FROM albums al
@@ -1049,8 +1057,8 @@ impl MetadataDb {
                 params![album_id],
                 |row| {
                     let album_id: i64 = row.get(0)?;
-                    let cover_path: Option<String> = row.get(8)?;
-                    let max_bit_depth: Option<i64> = row.get(9)?;
+                    let cover_path: Option<String> = row.get(11)?;
+                    let max_bit_depth: Option<i64> = row.get(12)?;
                     let hi_res = max_bit_depth.unwrap_or(0) >= 24;
                     let cover_art_url = cover_path
                         .as_deref()
@@ -1063,8 +1071,11 @@ impl MetadataDb {
                         artist: row.get(3)?,
                         artist_id: row.get(4)?,
                         year: row.get(5)?,
-                        mbid: row.get(6)?,
-                        track_count: row.get(7)?,
+                        original_year: row.get(6)?,
+                        edition_year: row.get(7)?,
+                        edition_label: row.get(8)?,
+                        mbid: row.get(9)?,
+                        track_count: row.get(10)?,
                         cover_art_path: cover_path,
                         cover_art_url,
                         hi_res,
@@ -1099,6 +1110,41 @@ impl MetadataDb {
             .optional()
             .context("select album exists")?;
         Ok(value.is_some())
+    }
+
+    pub fn album_edition_fields(
+        &self,
+        album_id: i64,
+    ) -> Result<(Option<i32>, Option<i32>, Option<String>)> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            "SELECT original_year, edition_year, edition_label FROM albums WHERE id = ?1",
+            params![album_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .context("select album edition fields")
+    }
+
+    pub fn update_album_edition_fields(
+        &self,
+        album_id: i64,
+        original_year: Option<i32>,
+        edition_year: Option<i32>,
+        edition_label: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.execute(
+            r#"
+            UPDATE albums
+            SET original_year = ?1,
+                edition_year = ?2,
+                edition_label = ?3
+            WHERE id = ?4
+            "#,
+            params![original_year, edition_year, edition_label, album_id],
+        )
+        .context("update album edition fields")?;
+        Ok(())
     }
 
     pub fn artist_bio(&self, artist_id: i64, lang: &str) -> Result<Option<TextEntry>> {
@@ -1586,6 +1632,9 @@ fn init_schema(conn: &Connection) -> Result<()> {
             sort_title TEXT,
             artist_id INTEGER,
             year INTEGER,
+            original_year INTEGER,
+            edition_year INTEGER,
+            edition_label TEXT,
             mbid TEXT,
             cover_art_path TEXT,
             caa_fail_count INTEGER,
@@ -1794,6 +1843,22 @@ fn init_schema(conn: &Connection) -> Result<()> {
         ensure_uuid_indexes(conn)?;
         backfill_uuids(conn, "artists")?;
         backfill_uuids(conn, "albums")?;
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION.to_string()],
+        )
+        .context("update schema version")?;
+    }
+
+    if version < 9 {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE albums ADD COLUMN original_year INTEGER;
+            ALTER TABLE albums ADD COLUMN edition_year INTEGER;
+            ALTER TABLE albums ADD COLUMN edition_label TEXT;
+            "#,
+        )
+        .context("add album edition columns")?;
         conn.execute(
             "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
             params![SCHEMA_VERSION.to_string()],

@@ -48,7 +48,7 @@ export default function QueueModal({
       onClick={onClose}
     >
       <aside
-        className="side-panel"
+        className="side-panel queue-panel"
         aria-label="Queue"
         onClick={(event) => event.stopPropagation()}
       >

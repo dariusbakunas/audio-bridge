@@ -221,6 +221,12 @@
   color: var(--border);
 }
 
+.album-edition-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .album-card:hover .album-title,
 .album-card:focus-within .album-title {
   color: var(--accent);
@@ -322,6 +328,7 @@
   border-bottom: 1px solid var(--border-subtle);
   background: transparent;
   padding-bottom: 24px;
+  scroll-margin-top: calc(var(--header-height) + 12px);
 }
 
 .album-hero-inner {
