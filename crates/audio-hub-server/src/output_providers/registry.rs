@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, StatusResponse};
 use crate::output_providers::bridge_provider::BridgeProvider;
 use crate::output_providers::browser_provider::BrowserProvider;
+use crate::output_providers::cast_provider::CastProvider;
 use crate::output_providers::local_provider::LocalProvider;
 use crate::state::AppState;
 use tracing::warn;
@@ -94,6 +95,7 @@ impl OutputRegistry {
             Box::new(BridgeProvider),
             Box::new(LocalProvider),
             Box::new(BrowserProvider),
+            Box::new(CastProvider),
         ])
     }
 
