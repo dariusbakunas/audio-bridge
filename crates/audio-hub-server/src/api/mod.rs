@@ -148,6 +148,7 @@ mod tests {
         };
 
         let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+        let cast_state = Arc::new(crate::state::CastProviderState::new());
         let state = AppState::new(
             library,
             metadata_db,
@@ -156,6 +157,7 @@ mod tests {
             bridge_state,
             local_state,
             browser_state,
+            cast_state,
             playback_manager,
             device_selection,
             events,

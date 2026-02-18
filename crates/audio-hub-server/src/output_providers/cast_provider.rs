@@ -2,16 +2,11 @@
 //!
 //! Currently supports discovery and listing only. Playback control is not implemented yet.
 
-use std::time::{Duration, Instant};
-
 use async_trait::async_trait;
-use mdns_sd::{ServiceDaemon, ServiceEvent};
 
 use crate::models::{OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse};
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
-
-const CAST_SERVICE: &str = "_googlecast._tcp.local.";
 
 #[derive(Debug, Clone)]
 struct CastDevice {
@@ -44,44 +39,6 @@ impl CastProvider {
 
     fn active_output_id(state: &AppState) -> Option<String> {
         state.providers.bridge.bridges.lock().unwrap().active_output_id.clone()
-    }
-
-    fn discover_devices(timeout: Duration) -> Vec<CastDevice> {
-        let daemon = match ServiceDaemon::new() {
-            Ok(d) => d,
-            Err(_) => return Vec::new(),
-        };
-        let receiver = match daemon.browse(CAST_SERVICE) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-
-        let deadline = Instant::now() + timeout;
-        let mut devices = std::collections::HashMap::new();
-        while Instant::now() < deadline {
-            for event in receiver.try_iter() {
-                if let ServiceEvent::ServiceResolved(info) = event {
-                    let id = property_value(&info, "id")
-                        .unwrap_or_else(|| info.get_fullname().to_string());
-                    let name = property_value(&info, "fn").unwrap_or_else(|| id.clone());
-                    let host = first_ipv4_addr(&info)
-                        .map(|ip| ip.to_string())
-                        .or_else(|| info.get_hostname().to_string().strip_suffix('.').map(|s| s.to_string()));
-                    let port = info.get_port();
-                    devices.insert(
-                        id.clone(),
-                        CastDevice {
-                            id,
-                            name,
-                            host,
-                            port,
-                        },
-                    );
-                }
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        devices.into_values().collect()
     }
 
     fn device_output_info(device: &CastDevice, active_id: &Option<String>) -> OutputInfo {
@@ -142,13 +99,20 @@ impl OutputProvider for CastProvider {
 
     async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
         let active_id = Self::active_output_id(state);
-        let devices = tokio::task::spawn_blocking(|| Self::discover_devices(Duration::from_millis(250)))
-            .await
-            .unwrap_or_default();
-        devices
-            .iter()
-            .map(|device| Self::device_output_info(device, &active_id))
-            .collect()
+        let snapshot = state.providers.cast.discovered.lock().ok();
+        snapshot
+            .map(|map| {
+                map.values()
+                    .map(|device| CastDevice {
+                        id: device.id.clone(),
+                        name: device.name.clone(),
+                        host: device.host.clone(),
+                        port: device.port,
+                    })
+                    .map(|device| Self::device_output_info(&device, &active_id))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn can_handle_output_id(&self, output_id: &str) -> bool {
@@ -167,20 +131,55 @@ impl OutputProvider for CastProvider {
     ) {
     }
 
-    async fn ensure_active_connected(&self, _state: &AppState) -> Result<(), ProviderError> {
-        Err(ProviderError::Unavailable(
-            "cast playback not implemented".to_string(),
-        ))
+    async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError> {
+        let active_id = Self::active_output_id(state)
+            .ok_or_else(|| ProviderError::Unavailable("no active output selected".to_string()))?;
+        let Some(device_id) = Self::parse_output_id(&active_id) else {
+            return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        let found = state
+            .providers
+            .cast
+            .discovered
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&device_id).cloned());
+        if found.is_some() {
+            Ok(())
+        } else {
+            Err(ProviderError::Unavailable("cast device offline".to_string()))
+        }
     }
 
     async fn select_output(
         &self,
-        _state: &AppState,
+        state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
-        if Self::parse_output_id(output_id).is_none() {
+        let Some(device_id) = Self::parse_output_id(output_id) else {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
+        };
+        let found = state
+            .providers
+            .cast
+            .discovered
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&device_id).cloned());
+        if found.is_none() {
+            return Err(ProviderError::Unavailable("cast device offline".to_string()));
         }
+
+        {
+            let player = state.providers.bridge.player.lock().unwrap();
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
+        }
+        {
+            let mut bridges = state.providers.bridge.bridges.lock().unwrap();
+            bridges.active_output_id = Some(output_id.to_string());
+            bridges.active_bridge_id = None;
+        }
+
         Err(ProviderError::Unavailable(
             "cast playback not implemented".to_string(),
         ))
@@ -211,19 +210,4 @@ impl OutputProvider for CastProvider {
             "cast playback not implemented".to_string(),
         ))
     }
-}
-
-fn property_value(info: &mdns_sd::ResolvedService, key: &str) -> Option<String> {
-    info.get_property(key)
-        .map(|p| p.val_str().to_string())
-        .map(|s| s.strip_prefix(&format!("{key}=")).unwrap_or(&s).to_string())
-}
-
-fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr> {
-    info.get_addresses()
-        .iter()
-        .find_map(|ip| match ip {
-            mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
-            _ => None,
-        })
 }

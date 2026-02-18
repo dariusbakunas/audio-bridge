@@ -526,6 +526,7 @@ mod tests {
         };
         let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
         let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+        let cast_state = Arc::new(crate::state::CastProviderState::new());
         AppState::new(
             library,
             metadata_db,
@@ -534,6 +535,7 @@ mod tests {
             bridge_state,
             local_state,
             browser_state,
+            cast_state,
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
@@ -595,6 +597,7 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
         let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+        let cast_state = Arc::new(crate::state::CastProviderState::new());
         let state = AppState::new(
             library,
             metadata_db,
@@ -603,6 +606,7 @@ mod tests {
             bridge_state,
             local_state,
             browser_state,
+            cast_state,
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),
@@ -751,6 +755,7 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
         let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+        let cast_state = Arc::new(crate::state::CastProviderState::new());
         let state = AppState::new(
             library,
             metadata_db,
@@ -759,6 +764,7 @@ mod tests {
             bridge_state,
             local_state,
             browser_state,
+            cast_state,
             playback_manager,
             device_selection,
             crate::events::EventBus::new(),

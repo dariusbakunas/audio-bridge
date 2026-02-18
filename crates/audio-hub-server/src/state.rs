@@ -124,6 +124,8 @@ pub struct ProviderState {
     pub local: Arc<LocalProviderState>,
     /// Browser provider state (websocket receivers).
     pub browser: Arc<BrowserProviderState>,
+    /// Cast provider state (discovered Chromecast devices).
+    pub cast: Arc<CastProviderState>,
 }
 
 /// Grouped output dependencies.
@@ -159,6 +161,7 @@ impl AppState {
         bridge: Arc<BridgeProviderState>,
         local: Arc<LocalProviderState>,
         browser: Arc<BrowserProviderState>,
+        cast: Arc<CastProviderState>,
         playback_manager: PlaybackManager,
         device_selection: DeviceSelectionState,
         events: EventBus,
@@ -171,7 +174,7 @@ impl AppState {
                 musicbrainz,
                 wake: metadata_wake,
             },
-            providers: ProviderState { bridge, local, browser },
+            providers: ProviderState { bridge, local, browser, cast },
             playback: PlaybackState {
                 manager: playback_manager,
                 device_selection,
@@ -201,6 +204,16 @@ pub struct DiscoveredBridge {
     /// Bridge config with resolved fields.
     pub bridge: crate::config::BridgeConfigResolved,
     /// Last-seen timestamp used for expiry.
+    pub last_seen: std::time::Instant,
+}
+
+/// Discovered Chromecast entry from mDNS.
+#[derive(Clone, Debug)]
+pub struct DiscoveredCast {
+    pub id: String,
+    pub name: String,
+    pub host: Option<String>,
+    pub port: u16,
     pub last_seen: std::time::Instant,
 }
 
@@ -290,6 +303,20 @@ pub struct LocalProviderState {
     pub player: Arc<Mutex<BridgePlayer>>,
     /// Local playback running flag.
     pub running: Arc<AtomicBool>,
+}
+
+/// Shared state for Chromecast output provider discovery.
+#[derive(Debug)]
+pub struct CastProviderState {
+    pub discovered: Arc<Mutex<std::collections::HashMap<String, DiscoveredCast>>>,
+}
+
+impl CastProviderState {
+    pub fn new() -> Self {
+        Self {
+            discovered: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
 }
 
 /// Selected output devices for local and bridge providers.

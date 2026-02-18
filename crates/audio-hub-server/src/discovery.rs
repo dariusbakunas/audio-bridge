@@ -9,7 +9,7 @@ use crate::bridge_device_streams::{
     spawn_bridge_device_stream_for_discovered,
     spawn_bridge_status_stream_for_discovered,
 };
-use crate::state::AppState;
+use crate::state::{AppState, DiscoveredCast};
 
 pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
     std::thread::spawn(move || {
@@ -110,6 +110,97 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
                     }
                 }
                 _ => {}
+            }
+        }
+    });
+}
+
+pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
+    std::thread::spawn(move || {
+        let daemon = match ServiceDaemon::new() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "mdns: failed to start cast daemon");
+                return;
+            }
+        };
+        let receiver = match daemon.browse("_googlecast._tcp.local.") {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "mdns: cast browse failed");
+                return;
+            }
+        };
+        tracing::info!("mdns: browsing for _googlecast._tcp.local.");
+        let mut fullname_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for event in receiver {
+            match event {
+                ServiceEvent::ServiceFound(_ty, fullname) => {
+                    if let Some(id) = fullname_to_id.get(&fullname).cloned() {
+                        if let Ok(mut map) = state.providers.cast.discovered.lock() {
+                            if let Some(entry) = map.get_mut(&id) {
+                                entry.last_seen = std::time::Instant::now();
+                            }
+                        }
+                    }
+                }
+                ServiceEvent::ServiceResolved(info) => {
+                    let id = property_value(&info, "id")
+                        .unwrap_or_else(|| info.get_fullname().to_string());
+                    let name = property_value(&info, "fn").unwrap_or_else(|| id.clone());
+                    let host = first_ipv4_addr(&info)
+                        .map(|ip| ip.to_string())
+                        .or_else(|| info.get_hostname().to_string().strip_suffix('.').map(|s| s.to_string()));
+                    let port = info.get_port();
+                    if let Ok(mut map) = state.providers.cast.discovered.lock() {
+                        let now = std::time::Instant::now();
+                        map.insert(
+                            id.clone(),
+                            DiscoveredCast {
+                                id: id.clone(),
+                                name,
+                                host,
+                                port,
+                                last_seen: now,
+                            },
+                        );
+                    }
+                    state.events.outputs_changed();
+                    fullname_to_id.insert(info.get_fullname().to_string(), id);
+                }
+                ServiceEvent::ServiceRemoved(name, _) => {
+                    if let Some(id) = fullname_to_id.remove(&name) {
+                        if let Ok(mut map) = state.providers.cast.discovered.lock() {
+                            map.remove(&id);
+                        }
+                        state.events.outputs_changed();
+                        tracing::info!(cast_id = %id, "mdns: cast removed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
+pub(crate) fn spawn_cast_health_watcher(state: web::Data<AppState>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        let snapshot = match state.providers.cast.discovered.lock() {
+            Ok(map) => map
+                .iter()
+                .map(|(id, entry)| (id.clone(), entry.last_seen))
+                .collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+        let now = std::time::Instant::now();
+        for (id, last_seen) in snapshot {
+            if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
+                if let Ok(mut map) = state.providers.cast.discovered.lock() {
+                    map.remove(&id);
+                }
+                state.events.outputs_changed();
+                tracing::info!(cast_id = %id, "mdns: cast removed (stale)");
             }
         }
     });

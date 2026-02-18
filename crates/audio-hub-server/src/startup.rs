@@ -27,14 +27,19 @@ use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn
 use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::cover_art::CoverArtFetcher;
-use crate::discovery::{spawn_discovered_health_watcher, spawn_mdns_discovery};
+use crate::discovery::{
+    spawn_cast_health_watcher,
+    spawn_cast_mdns_discovery,
+    spawn_discovered_health_watcher,
+    spawn_mdns_discovery,
+};
 use crate::metadata_db::MetadataDb;
 use crate::metadata_service::MetadataService;
 use crate::musicbrainz::{MusicBrainzClient, spawn_enrichment_loop};
 use crate::events::LogBus;
 use crate::state::MetadataWake;
 use crate::openapi;
-use crate::state::{AppState, BridgeProviderState, BridgeState, LocalProviderState, PlayerStatus, QueueState};
+use crate::state::{AppState, BridgeProviderState, BridgeState, CastProviderState, LocalProviderState, PlayerStatus, QueueState};
 
 /// Build server state and start the Actix HTTP server.
 pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> Result<()> {
@@ -82,6 +87,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
     let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
+    let cast_state = Arc::new(CastProviderState::new());
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -90,6 +96,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         bridge_state,
         local_state,
         browser_state,
+        cast_state,
         playback_manager,
         device_selection,
         events,
@@ -115,6 +122,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     setup_shutdown(state.providers.bridge.player.clone());
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
+    spawn_cast_mdns_discovery(state.clone());
+    spawn_cast_health_watcher(state.clone());
     spawn_bridge_device_streams_for_config(state.clone());
     spawn_bridge_status_streams_for_config(state.clone());
     let server = HttpServer::new(move || {
