@@ -149,6 +149,9 @@ impl OutputRegistry {
         output_id: &str,
     ) -> Result<(), ProviderError> {
         let previous = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        if previous.as_deref() == Some(output_id) {
+            return self.ensure_active_connected(state).await;
+        }
         if previous.as_deref() != Some(output_id) {
             if let Some(prev_id) = previous.as_deref() {
                 for provider in &self.providers {
