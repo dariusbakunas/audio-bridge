@@ -124,6 +124,7 @@ pub fn spawn_cast_worker(
     events: EventBus,
     public_base_url: String,
     metadata: Option<MetadataDb>,
+    bridge_state: Arc<Mutex<crate::state::BridgeState>>,
 ) {
     std::thread::spawn(move || {
         let addr = resolve_device_addr(&device.host, device.port);
@@ -189,7 +190,6 @@ pub fn spawn_cast_worker(
                                 );
                             }
                         }
-                        status.on_stop();
                     }
                     BridgeCommand::Seek { ms } => {
                         if let Some(session) = session.as_ref() {
@@ -268,6 +268,7 @@ pub fn spawn_cast_worker(
                         &queue_service,
                         &cmd_tx,
                         &mut request_id,
+                        &bridge_state,
                     );
                 }
                 Ok(None) => {}
@@ -320,7 +321,11 @@ fn handle_message(
     queue_service: &QueueService,
     cmd_tx: &Sender<BridgeCommand>,
     request_id: &mut i64,
+    bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
 ) {
+    if !is_active_cast_output(bridge_state, &device.id) {
+        return;
+    }
     if msg.payload_type != proto::cast_message::PayloadType::String as i32 {
         return;
     }
@@ -385,6 +390,15 @@ fn handle_message(
         }
         _ => {}
     }
+}
+
+fn is_active_cast_output(
+    bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
+    device_id: &str,
+) -> bool {
+    let Ok(guard) = bridge_state.lock() else { return false };
+    let expected = format!("cast:{device_id}");
+    guard.active_output_id.as_deref() == Some(expected.as_str())
 }
 
 fn apply_media_status(

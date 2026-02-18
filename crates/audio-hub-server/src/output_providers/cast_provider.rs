@@ -194,6 +194,7 @@ impl OutputProvider for CastProvider {
             state.events.clone(),
             state.providers.bridge.public_base_url.clone(),
             Some(state.metadata.db.clone()),
+            state.providers.bridge.bridges.clone(),
         );
 
         if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
