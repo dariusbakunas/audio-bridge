@@ -3,7 +3,6 @@
 //! Manages connected browser receivers and provides helpers to send playback commands.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -15,6 +14,7 @@ use crate::bridge::BridgeCommand;
 use crate::events::EventBus;
 use crate::metadata_db::MetadataDb;
 use crate::status_store::StatusStore;
+use crate::stream_url::build_stream_url_for;
 
 /// Outbound messages to a browser websocket session.
 #[derive(Message)]
@@ -171,25 +171,4 @@ fn send_json(sender: &Recipient<BrowserOutbound>, msg: BrowserServerMessage) -> 
     let payload = serde_json::to_string(&msg).map_err(|_| ())?;
     sender.do_send(BrowserOutbound(payload));
     Ok(())
-}
-
-fn build_stream_url_for(
-    path: &PathBuf,
-    public_base_url: &str,
-    metadata: Option<&MetadataDb>,
-) -> String {
-    if let Some(track_id) = metadata
-        .and_then(|db| db.track_id_for_path(&path.to_string_lossy()).ok().flatten())
-    {
-        return format!(
-            "{}/stream/track/{track_id}",
-            public_base_url.trim_end_matches('/')
-        );
-    }
-    let path_str = path.to_string_lossy();
-    let encoded = urlencoding::encode(&path_str);
-    format!(
-        "{}/stream?path={encoded}",
-        public_base_url.trim_end_matches('/')
-    )
 }

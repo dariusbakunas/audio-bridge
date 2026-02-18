@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=proto/cast_channel.proto");
 
     let git_sha = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
@@ -28,4 +29,13 @@ fn main() {
 
     println!("cargo:rustc-env=GIT_SHA={}", git_sha);
     println!("cargo:rustc-env=BUILD_DATE={}", build_date);
+
+    if let Ok(protoc) = protoc_bin_vendored::protoc_bin_path() {
+        unsafe {
+            std::env::set_var("PROTOC", protoc);
+        }
+    }
+    if let Err(err) = prost_build::compile_protos(&["proto/cast_channel.proto"], &["proto"]) {
+        panic!("prost build failed: {err}");
+    }
 }

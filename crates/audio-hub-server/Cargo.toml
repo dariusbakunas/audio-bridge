@@ -41,9 +41,12 @@ async-trait = "0.1.86"
 uuid = { version = "1.10.0", features = ["v4"] }
 rustfft = "6.2.0"
 base64 = "0.22.1"
+prost = "0.12.6"
 audio-bridge-types = { path = "../audio-bridge-types", features = ["openapi"] }
 audio-player = { path = "../audio-player" }
 cpal = { workspace = true }
 
 [build-dependencies]
 time = { version = "0.3", features = ["formatting"] }
+prost-build = "0.12.6"
+protoc-bin-vendored = "3.0.0"

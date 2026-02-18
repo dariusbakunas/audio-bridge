@@ -10,6 +10,7 @@ mod bridge_transport;
 mod browser;
 mod config;
 mod cover_art;
+mod cast_v2;
 mod discovery;
 mod events;
 mod library;
@@ -30,6 +31,7 @@ mod startup;
 mod status_store;
 mod state;
 mod tag_writer;
+mod stream_url;
 
 use anyhow::Result;
 use clap::Parser;
