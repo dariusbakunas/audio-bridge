@@ -148,6 +148,7 @@ pub fn spawn_cast_worker(
         let mut pending_play: Option<(PathBuf, String, Option<u64>, bool)> = None;
         let mut request_id: i64 = 1;
         let mut last_ping = Instant::now();
+        let mut last_status_poll = Instant::now();
         let mut last_duration_ms: Option<u64> = None;
 
         let _ = conn.send_json(RECEIVER_ID, NAMESPACE_CONNECTION, &json!({ "type": "CONNECT" }));
@@ -240,6 +241,19 @@ pub fn spawn_cast_worker(
             if last_ping.elapsed() > Duration::from_secs(5) {
                 let _ = conn.send_json(RECEIVER_ID, NAMESPACE_HEARTBEAT, &json!({ "type": "PING" }));
                 last_ping = Instant::now();
+            }
+            if last_status_poll.elapsed() > Duration::from_millis(1000) {
+                if let Some(session) = session.as_ref() {
+                    let _ = conn.send_json(
+                        &session.transport_id,
+                        NAMESPACE_MEDIA,
+                        &json!({
+                            "type": "GET_STATUS",
+                            "requestId": next_request_id(&mut request_id),
+                        }),
+                    );
+                }
+                last_status_poll = Instant::now();
             }
 
             match conn.read_message() {

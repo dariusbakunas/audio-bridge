@@ -28,7 +28,6 @@ use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::cover_art::CoverArtFetcher;
 use crate::discovery::{
-    spawn_cast_health_watcher,
     spawn_cast_mdns_discovery,
     spawn_discovered_health_watcher,
     spawn_mdns_discovery,
@@ -123,7 +122,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     spawn_mdns_discovery(state.clone());
     spawn_discovered_health_watcher(state.clone());
     spawn_cast_mdns_discovery(state.clone());
-    spawn_cast_health_watcher(state.clone());
     spawn_bridge_device_streams_for_config(state.clone());
     spawn_bridge_status_streams_for_config(state.clone());
     let server = HttpServer::new(move || {
