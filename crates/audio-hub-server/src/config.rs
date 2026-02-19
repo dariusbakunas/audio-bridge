@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use std::net::SocketAddr;
 
@@ -36,6 +36,8 @@ pub struct ServerConfig {
     pub tls_cert: Option<String>,
     /// Optional TLS private key path (PEM).
     pub tls_key: Option<String>,
+    /// Output device settings (disabled devices, renames).
+    pub outputs: Option<OutputSettingsConfig>,
 }
 
 /// Bridge config from TOML.
@@ -60,6 +62,15 @@ pub struct MusicBrainzConfig {
     pub base_url: Option<String>,
     /// Minimum delay between requests in milliseconds (default: 1000).
     pub rate_limit_ms: Option<u64>,
+}
+
+/// Output settings persisted in config.
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct OutputSettingsConfig {
+    /// Disabled output ids (hidden from selection).
+    pub disabled: Option<Vec<String>>,
+    /// Output id -> display name overrides.
+    pub renames: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Resolved bridge config with parsed socket address.
@@ -144,6 +155,44 @@ pub fn public_base_url_from_config(
     Ok(format!("{}://{}", scheme, bind))
 }
 
+/// Update output settings in the config file on disk.
+pub fn update_output_settings(
+    path: &Path,
+    settings: &OutputSettingsConfig,
+) -> Result<()> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("read config {:?}", path))?;
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parse config {:?}", path))?;
+
+    let mut outputs = toml_edit::Table::new();
+    if let Some(disabled) = settings.disabled.as_ref().filter(|v| !v.is_empty()) {
+        let mut arr = toml_edit::Array::new();
+        for id in disabled {
+            arr.push(id.as_str());
+        }
+        outputs["disabled"] = toml_edit::value(arr);
+    }
+    if let Some(renames) = settings.renames.as_ref().filter(|m| !m.is_empty()) {
+        let mut renames_table = toml_edit::Table::new();
+        for (id, name) in renames {
+            renames_table[id.as_str()] = toml_edit::value(name.clone());
+        }
+        outputs["renames"] = toml_edit::Item::Table(renames_table);
+    }
+
+    if outputs.is_empty() {
+        doc.remove("outputs");
+    } else {
+        doc["outputs"] = toml_edit::Item::Table(outputs);
+    }
+
+    std::fs::write(path, doc.to_string())
+        .with_context(|| format!("write config {:?}", path))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +212,7 @@ mod tests {
             musicbrainz: None,
             tls_cert: None,
             tls_key: None,
+            outputs: None,
         };
         let bind: std::net::SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let url = public_base_url_from_config(&cfg, bind, false).unwrap();
@@ -184,6 +234,7 @@ mod tests {
             musicbrainz: None,
             tls_cert: None,
             tls_key: None,
+            outputs: None,
         };
         let bind: std::net::SocketAddr = "0.0.0.0:8080".parse().unwrap();
         assert!(public_base_url_from_config(&cfg, bind, false).is_err());
@@ -204,6 +255,7 @@ mod tests {
             musicbrainz: None,
             tls_cert: None,
             tls_key: None,
+            outputs: None,
         };
         let addr = bind_from_config(&cfg).unwrap().unwrap();
         assert_eq!(addr, "127.0.0.1:9000".parse().unwrap());

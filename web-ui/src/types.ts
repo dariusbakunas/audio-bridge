@@ -37,6 +37,35 @@ export interface OutputsResponse {
   outputs: OutputInfo[];
 }
 
+export interface OutputCapabilities {
+  device_select: boolean;
+  volume: boolean;
+}
+
+export interface ProviderInfo {
+  id: string;
+  kind: string;
+  name: string;
+  state: string;
+  capabilities: OutputCapabilities;
+}
+
+export interface OutputSettings {
+  disabled: string[];
+  renames: Record<string, string>;
+}
+
+export interface ProviderOutputs {
+  provider: ProviderInfo;
+  address?: string | null;
+  outputs: OutputInfo[];
+}
+
+export interface OutputSettingsResponse {
+  settings: OutputSettings;
+  providers: ProviderOutputs[];
+}
+
 export interface QueueItemTrack {
   kind: "track";
   id?: number | null;

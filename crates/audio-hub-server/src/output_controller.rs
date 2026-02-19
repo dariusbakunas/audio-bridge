@@ -95,9 +95,26 @@ impl OutputController {
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
 
+    /// List outputs for a provider without applying output settings.
+    pub(crate) async fn outputs_for_provider_raw(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<OutputsResponse, OutputControllerError> {
+        self.registry
+            .outputs_for_provider_raw(state, provider_id)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
+    }
+
     /// Return the list of known outputs (all providers).
     pub(crate) async fn list_outputs(&self, state: &AppState) -> OutputsResponse {
         self.registry.list_outputs(state).await
+    }
+
+    /// List outputs without applying output settings.
+    pub(crate) async fn list_outputs_raw(&self, state: &AppState) -> OutputsResponse {
+        self.registry.list_outputs_raw(state).await
     }
 
     /// Return the list of providers.
@@ -112,6 +129,18 @@ impl OutputController {
     ) -> Result<(), OutputControllerError> {
         self.registry
             .ensure_active_connected(state)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
+    }
+
+    /// Refresh outputs for a provider.
+    pub(crate) async fn refresh_provider(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<(), OutputControllerError> {
+        self.registry
+            .refresh_provider(state, provider_id)
             .await
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }
@@ -540,6 +569,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         )
     }
 
@@ -611,6 +642,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         );
         (state, root)
     }
@@ -769,6 +802,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         );
         let provider = MockProvider {
             active_output_id: "bridge:test:device".to_string(),

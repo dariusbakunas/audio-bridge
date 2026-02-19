@@ -527,6 +527,23 @@ impl OutputProvider for BridgeProvider {
             .await
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))
     }
+
+    async fn refresh_provider(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<(), ProviderError> {
+        let bridge_id = parse_provider_id(provider_id)
+            .map_err(|e| ProviderError::BadRequest(e))?;
+        if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+            cache.remove(&bridge_id);
+        }
+        if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+            cache.remove(&bridge_id);
+        }
+        state.events.outputs_changed();
+        Ok(())
+    }
 }
 
 /// Build output entries from bridges, tracking per-bridge failures.
@@ -1073,6 +1090,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         )
     }
 }

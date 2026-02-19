@@ -495,6 +495,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         )
     }
 

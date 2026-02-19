@@ -1,4 +1,4 @@
-import type { LogEvent, MetadataEvent } from "../types";
+import type { LogEvent, MetadataEvent, OutputSettings, ProviderOutputs } from "../types";
 import SettingsView from "../components/SettingsView";
 import { action } from "@storybook/addon-actions";
 import "../styles.css";
@@ -47,6 +47,60 @@ const logEvents = [
   }
 ];
 
+const outputSettings: OutputSettings = {
+  disabled: ["bridge:living-room:device-2"],
+  renames: {
+    "bridge:living-room:device-1": "Living Room DAC"
+  }
+};
+
+const outputProviders: ProviderOutputs[] = [
+  {
+    provider: {
+      id: "bridge:living-room",
+      kind: "bridge",
+      name: "Living Room Bridge",
+      state: "connected",
+      capabilities: { device_select: true, volume: false }
+    },
+    address: "192.168.1.50:5556",
+    outputs: [
+      {
+        id: "bridge:living-room:device-1",
+        kind: "bridge",
+        name: "Built-in Output",
+        state: "online",
+        provider_name: "Living Room Bridge"
+      },
+      {
+        id: "bridge:living-room:device-2",
+        kind: "bridge",
+        name: "USB DAC",
+        state: "online",
+        provider_name: "Living Room Bridge"
+      }
+    ]
+  },
+  {
+    provider: {
+      id: "local:host",
+      kind: "local",
+      name: "Local Host",
+      state: "available",
+      capabilities: { device_select: true, volume: false }
+    },
+    outputs: [
+      {
+        id: "local:host:default",
+        kind: "local",
+        name: "Built-in Audio",
+        state: "online",
+        provider_name: "Local Host"
+      }
+    ]
+  }
+];
+
 const describeMetadataEvent = (event: MetadataEvent) => {
   switch (event.kind) {
     case "music_brainz_lookup_start":
@@ -69,7 +123,7 @@ export default {
   title: "Settings/SettingsView",
   component: SettingsView,
   argTypes: {
-    section: { control: { type: "radio" }, options: ["metadata", "connection", "logs"] },
+    section: { control: { type: "radio" }, options: ["metadata", "connection", "outputs", "logs"] },
     logsError: { control: "text" },
     rescanBusy: { control: "boolean" },
     empty: { control: "boolean" }
@@ -77,7 +131,7 @@ export default {
 };
 
 type SettingsViewArgs = {
-  section: "metadata" | "connection" | "logs";
+  section: "metadata" | "connection" | "outputs" | "logs";
   logsError: string;
   rescanBusy: boolean;
   empty: boolean;
@@ -94,6 +148,14 @@ const Template = (args: SettingsViewArgs) => (
       onApiBaseChange={action("api-base-change")}
       onApiBaseReset={action("api-base-reset")}
       onReconnect={action("reconnect")}
+      outputsSettings={outputSettings}
+      outputsProviders={args.empty ? [] : outputProviders}
+      outputsLoading={false}
+      outputsError={null}
+      outputsLastRefresh={{}}
+      onRefreshProvider={action("refresh-provider")}
+      onToggleOutput={action("toggle-output")}
+      onRenameOutput={action("rename-output")}
       metadataEvents={args.empty ? [] : metadataEvents}
       logEvents={args.empty ? [] : logEvents}
       logsError={args.logsError || null}
@@ -137,4 +199,12 @@ Connection.args = {
   logsError: "",
   rescanBusy: false,
   empty: true
+};
+
+export const Outputs = Template.bind({});
+Outputs.args = {
+  section: "outputs",
+  logsError: "",
+  rescanBusy: false,
+  empty: false
 };

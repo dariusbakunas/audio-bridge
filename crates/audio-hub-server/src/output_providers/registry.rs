@@ -77,6 +77,14 @@ pub(crate) trait OutputProvider: Send + Sync {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError>;
+    /// Refresh provider devices (best-effort).
+    async fn refresh_provider(
+        &self,
+        _state: &AppState,
+        _provider_id: &str,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
 }
 
 pub(crate) struct OutputRegistry {
@@ -114,6 +122,17 @@ impl OutputRegistry {
         state: &AppState,
         provider_id: &str,
     ) -> Result<OutputsResponse, ProviderError> {
+        let mut resp = self.outputs_for_provider_raw(state, provider_id).await?;
+        apply_output_settings(&mut resp, state);
+        Ok(resp)
+    }
+
+    /// List outputs for a specific provider without applying settings.
+    pub(crate) async fn outputs_for_provider_raw(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<OutputsResponse, ProviderError> {
         for provider in &self.providers {
             if provider.can_handle_provider_id(state, provider_id) {
                 return provider.outputs_for_provider(state, provider_id).await;
@@ -124,6 +143,13 @@ impl OutputRegistry {
 
     /// List all outputs across providers and ensure active output is present.
     pub(crate) async fn list_outputs(&self, state: &AppState) -> OutputsResponse {
+        let mut resp = self.list_outputs_raw(state).await;
+        apply_output_settings(&mut resp, state);
+        resp
+    }
+
+    /// List all outputs across providers without applying settings.
+    pub(crate) async fn list_outputs_raw(&self, state: &AppState) -> OutputsResponse {
         let mut outputs = Vec::new();
         for provider in &self.providers {
             outputs.extend(provider.list_outputs(state).await);
@@ -148,6 +174,9 @@ impl OutputRegistry {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
+        if is_output_disabled(state, output_id) {
+            return Err(ProviderError::BadRequest("output is disabled".to_string()));
+        }
         let previous = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         if previous.as_deref() == Some(output_id) {
             return self.ensure_active_connected(state).await;
@@ -208,6 +237,45 @@ impl OutputRegistry {
         }
         Err(ProviderError::BadRequest("invalid output id".to_string()))
     }
+
+    /// Refresh devices for a provider (best-effort).
+    pub(crate) async fn refresh_provider(
+        &self,
+        state: &AppState,
+        provider_id: &str,
+    ) -> Result<(), ProviderError> {
+        for provider in &self.providers {
+            if provider.can_handle_provider_id(state, provider_id) {
+                return provider.refresh_provider(state, provider_id).await;
+            }
+        }
+        Err(ProviderError::BadRequest("unknown provider id".to_string()))
+    }
+}
+
+fn apply_output_settings(resp: &mut OutputsResponse, state: &AppState) {
+    let settings = state.output_settings.lock().unwrap_or_else(|err| err.into_inner());
+    let disabled = &settings.disabled;
+    let renames = &settings.renames;
+    resp.outputs.retain(|o| !disabled.contains(&o.id));
+    for output in &mut resp.outputs {
+        if let Some(name) = renames.get(&output.id) {
+            output.name = name.clone();
+        }
+    }
+    if let Some(active_id) = resp.active_id.as_ref() {
+        if disabled.contains(active_id) {
+            resp.active_id = None;
+        }
+    }
+}
+
+fn is_output_disabled(state: &AppState, output_id: &str) -> bool {
+    state
+        .output_settings
+        .lock()
+        .map(|s| s.disabled.contains(output_id))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -375,6 +443,8 @@ mod tests {
             device_selection,
             crate::events::EventBus::new(),
             Arc::new(crate::events::LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         )
     }
 

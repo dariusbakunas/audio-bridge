@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { LogEvent, MetadataEvent } from "../types";
+import { RefreshCw, Edit2, Circle } from "lucide-react";
+import { LogEvent, MetadataEvent, OutputSettings, ProviderOutputs } from "../types";
 
 interface MetadataEventEntry {
   id: number;
@@ -14,8 +15,8 @@ interface LogEventEntry {
 
 interface SettingsViewProps {
   active: boolean;
-  section: "metadata" | "logs" | "connection";
-  onSectionChange: (section: "metadata" | "logs" | "connection") => void;
+  section: "metadata" | "logs" | "connection" | "outputs";
+  onSectionChange: (section: "metadata" | "logs" | "connection" | "outputs") => void;
   apiBase: string;
   apiBaseDefault: string;
   onApiBaseChange: (value: string) => void;
@@ -30,6 +31,14 @@ interface SettingsViewProps {
   onClearLogs: () => void;
   describeMetadataEvent: (event: MetadataEvent) => { title: string; detail?: string };
   metadataDetailLines: (event: MetadataEvent) => string[];
+  outputsSettings: OutputSettings | null;
+  outputsProviders: ProviderOutputs[];
+  outputsLoading: boolean;
+  outputsError: string | null;
+  outputsLastRefresh: Record<string, string>;
+  onRefreshProvider: (providerId: string) => void;
+  onToggleOutput: (outputId: string, enabled: boolean) => void;
+  onRenameOutput: (outputId: string, name: string) => void;
 }
 
 export default function SettingsView({
@@ -49,12 +58,23 @@ export default function SettingsView({
   apiBaseDefault,
   onApiBaseChange,
   onApiBaseReset,
-  onReconnect
+  onReconnect,
+  outputsSettings,
+  outputsProviders,
+  outputsLoading,
+  outputsError,
+  outputsLastRefresh,
+  onRefreshProvider,
+  onToggleOutput,
+  onRenameOutput
 }: SettingsViewProps) {
   const isMetadata = section === "metadata";
   const isLogs = section === "logs";
   const isConnection = section === "connection";
+  const isOutputs = section === "outputs";
   const [apiBaseDraft, setApiBaseDraft] = useState(apiBase);
+  const [renamingOutput, setRenamingOutput] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   useEffect(() => {
     setApiBaseDraft(apiBase);
@@ -63,6 +83,41 @@ export default function SettingsView({
   const trimmedDraft = apiBaseDraft.trim();
   const isDirty = trimmedDraft !== apiBase.trim();
   const effectiveBase = apiBase.trim() || apiBaseDefault.trim();
+
+  const resolvedName = (outputId: string, fallback: string) => {
+    if (!outputsSettings) return fallback;
+    return outputsSettings.renames[outputId] ?? fallback;
+  };
+  const isEnabled = (outputId: string) => {
+    if (!outputsSettings) return true;
+    return !outputsSettings.disabled.includes(outputId);
+  };
+  const startRename = (outputId: string, currentName: string) => {
+    setRenamingOutput(outputId);
+    setRenameDraft(currentName);
+  };
+  const cancelRename = () => {
+    setRenamingOutput(null);
+    setRenameDraft("");
+  };
+  const saveRename = (outputId: string) => {
+    const value = renameDraft.trim();
+    onRenameOutput(outputId, value);
+    setRenamingOutput(null);
+    setRenameDraft("");
+  };
+
+  const providerStatus = (state: string) => {
+    const normalized = state.toLowerCase();
+    if (normalized === "available" || normalized === "connected" || normalized === "configured" || normalized === "online") {
+      return { label: normalized.toUpperCase(), color: "var(--accent-2)" };
+    }
+    if (normalized === "idle" || normalized === "discovered") {
+      return { label: normalized.toUpperCase(), color: "var(--muted-2)" };
+    }
+    return { label: normalized.toUpperCase(), color: "var(--accent)" };
+  };
+
   return (
     <section className={`settings-screen ${active ? "active" : ""}`}>
       <div className="settings-stack">
@@ -78,6 +133,12 @@ export default function SettingsView({
             onClick={() => onSectionChange("connection")}
           >
             Connection
+          </button>
+          <button
+            className={`settings-tab ${isOutputs ? "active" : ""}`}
+            onClick={() => onSectionChange("outputs")}
+          >
+            Outputs
           </button>
           <button
             className={`settings-tab ${isLogs ? "active" : ""}`}
@@ -167,6 +228,104 @@ export default function SettingsView({
                 {logEvents.length === 0 ? <div className="muted small">No logs yet.</div> : null}
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {isOutputs ? (
+          <div className="outputs-settings">
+            {outputsError ? <div className="muted small">{outputsError}</div> : null}
+            {outputsLoading ? <div className="muted small">Loading outputs...</div> : null}
+            {outputsProviders.map((providerEntry) => {
+              const { provider, outputs, address } = providerEntry;
+              const status = providerStatus(provider.state);
+              const lastRefresh = outputsLastRefresh[provider.id];
+              return (
+                <div key={provider.id} className="outputs-provider card">
+                  <div className="outputs-provider-header">
+                    <div className="outputs-provider-title">
+                      <div className="outputs-provider-name">{provider.name}</div>
+                      {provider.kind === "bridge" && address ? (
+                        <div className="outputs-provider-address muted small">{address}</div>
+                      ) : null}
+                      <div
+                        className="outputs-provider-status"
+                        style={{ borderColor: status.color, color: status.color }}
+                      >
+                        <Circle className="status-icon" fill={status.color} />
+                        {status.label}
+                      </div>
+                      {lastRefresh ? (
+                        <span className="outputs-provider-updated muted small">
+                          Updated {lastRefresh}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      className="btn ghost small outputs-refresh"
+                      onClick={() => onRefreshProvider(provider.id)}
+                    >
+                      <RefreshCw className="icon" />
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="outputs-provider-body">
+                    {outputs.length === 0 ? (
+                      <div className="outputs-empty muted small">
+                        No devices found. Refresh to scan again.
+                      </div>
+                    ) : (
+                      outputs.map((output) => {
+                        const enabled = isEnabled(output.id);
+                        const displayName = resolvedName(output.id, output.name);
+                        const isRenaming = renamingOutput === output.id;
+                        return (
+                          <div key={output.id} className="outputs-device-row">
+                            <div className="outputs-device-meta">
+                              {isRenaming ? (
+                                <input
+                                  className="settings-input outputs-rename-input"
+                                  value={renameDraft}
+                                  onChange={(event) => setRenameDraft(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") saveRename(output.id);
+                                    if (event.key === "Escape") cancelRename();
+                                  }}
+                                  onBlur={() => saveRename(output.id)}
+                                  autoFocus
+                                />
+                              ) : (
+                                <div className={`outputs-device-name ${enabled ? "" : "muted"}`}>
+                                  {displayName}
+                                  <button
+                                    className="icon-btn outputs-rename-btn"
+                                    onClick={() => startRename(output.id, displayName)}
+                                    aria-label="Rename device"
+                                  >
+                                    <Edit2 className="icon" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <label className="outputs-toggle">
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={(event) => onToggleOutput(output.id, event.target.checked)}
+                              />
+                              <span className="outputs-toggle-track" />
+                              <span className="outputs-toggle-thumb" />
+                            </label>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {!outputsLoading && outputsProviders.length === 0 ? (
+              <div className="muted small">No providers available.</div>
+            ) : null}
           </div>
         ) : null}
 

@@ -3,6 +3,7 @@
 //! Defines request/response structures for the hub server API.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use utoipa::ToSchema;
 use audio_bridge_types::PlaybackStatus;
 use crate::metadata_db::{AlbumSummary, ArtistSummary, TrackSummary};
@@ -581,6 +582,37 @@ pub struct OutputCapabilities {
 pub struct OutputSelectRequest {
     /// Output id to activate.
     pub id: String,
+}
+
+/// Output settings (disabled outputs and renames).
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, Default)]
+pub struct OutputSettings {
+    /// Disabled output ids (hidden from selection).
+    #[serde(default)]
+    pub disabled: Vec<String>,
+    /// Output id -> display name overrides.
+    #[serde(default)]
+    pub renames: HashMap<String, String>,
+}
+
+/// Provider outputs bundled with provider info.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct ProviderOutputs {
+    /// Provider summary.
+    pub provider: ProviderInfo,
+    /// Optional provider address (bridge HTTP addr).
+    pub address: Option<String>,
+    /// Outputs for the provider.
+    pub outputs: Vec<OutputInfo>,
+}
+
+/// Response payload for output settings.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputSettingsResponse {
+    /// Current output settings.
+    pub settings: OutputSettings,
+    /// Providers and their outputs.
+    pub providers: Vec<ProviderOutputs>,
 }
 
 /// Provider summary for output listings.

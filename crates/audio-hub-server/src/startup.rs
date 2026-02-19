@@ -42,7 +42,7 @@ use crate::state::{AppState, BridgeProviderState, BridgeState, CastProviderState
 
 /// Build server state and start the Actix HTTP server.
 pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> Result<()> {
-    let cfg = load_config(args.config.as_ref())?;
+    let (cfg, cfg_path) = load_config(args.config.as_ref())?;
     let bind = resolve_bind(args.bind, &cfg)?;
     let tls_config = resolve_tls_config(&args, &cfg)?;
     let public_base_url = config::public_base_url_from_config(&cfg, bind, tls_config.is_some())?;
@@ -87,6 +87,9 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let (local_state, device_selection) = build_local_state(&cfg);
     let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
     let cast_state = Arc::new(CastProviderState::new());
+    let output_settings = Arc::new(Mutex::new(
+        crate::state::OutputSettingsState::from_config(cfg.outputs.as_ref()),
+    ));
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -100,6 +103,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         device_selection,
         events,
         log_bus,
+        output_settings,
+        cfg_path,
     ));
     spawn_library_watcher(state.clone());
     if let Some(client) = state.metadata.musicbrainz.as_ref() {
@@ -193,12 +198,15 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::status_stream)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
+            .service(api::provider_refresh)
             .service(api::outputs_list)
             .service(api::outputs_stream)
             .service(api::metadata_stream)
             .service(api::albums_stream)
             .service(api::logs_stream)
-            .service(api::outputs_select);
+            .service(api::outputs_select)
+            .service(api::outputs_settings)
+            .service(api::outputs_settings_update);
 
         if let Some(dist) = web_ui_dist.clone() {
             let assets_dir = dist.join("assets");
@@ -426,16 +434,20 @@ where
 }
 
 /// Load server config from disk or return defaults.
-fn load_config(path: Option<&PathBuf>) -> Result<config::ServerConfig> {
+fn load_config(path: Option<&PathBuf>) -> Result<(config::ServerConfig, Option<PathBuf>)> {
     match path {
-        Some(path) => config::ServerConfig::load(path),
+        Some(path) => {
+            let cfg = config::ServerConfig::load(path)?;
+            Ok((cfg, Some(path.to_path_buf())))
+        }
         None => {
             let auto_path = std::env::current_exe()
                 .ok()
                 .and_then(|path| path.parent().map(|dir| dir.join("config.toml")));
             if let Some(path) = auto_path.as_ref() {
                 if path.exists() {
-                    config::ServerConfig::load(path)
+                    let cfg = config::ServerConfig::load(path)?;
+                    Ok((cfg, Some(path.to_path_buf())))
                 } else {
                     Err(anyhow::anyhow!(
                         "config file is required; use --config"
@@ -805,6 +817,7 @@ mod tests {
             musicbrainz: None,
             tls_cert: None,
             tls_key: None,
+            outputs: None,
         };
         let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
         assert_eq!(result.0, None);
@@ -829,6 +842,7 @@ mod tests {
             musicbrainz: None,
             tls_cert: None,
             tls_key: None,
+            outputs: None,
         };
         let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
         assert_eq!(result, (None, None));

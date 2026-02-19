@@ -9,6 +9,7 @@
 # local_outputs: enable local outputs on the hub host
 # local_id/name/device: optional overrides for local outputs
 # musicbrainz: optional metadata enrichment settings (requires user_agent)
+# outputs: optional output settings (disabled devices, renames)
 
 bind = "0.0.0.0:8443"
 public_base_url = "https://192.168.1.10:8443"
@@ -18,6 +19,11 @@ active_output = "bridge:living-room:Built-in Output"
 # local_id = "local"
 # local_name = "Local Host"
 # local_device = ""
+
+# [outputs]
+# disabled = ["bridge:living-room:Built-in Output"]
+# [outputs.renames]
+# "bridge:living-room:Built-in Output" = "Living Room DAC"
 
 # [musicbrainz]
 # enabled = true

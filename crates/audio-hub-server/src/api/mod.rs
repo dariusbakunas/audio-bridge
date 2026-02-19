@@ -50,7 +50,10 @@ pub use metadata::{
 pub use outputs::{
     outputs_list,
     outputs_select,
+    outputs_settings,
+    outputs_settings_update,
     provider_outputs_list,
+    provider_refresh,
     providers_list,
 };
 pub use playback::{
@@ -162,6 +165,8 @@ mod tests {
             device_selection,
             events,
             Arc::new(LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
         );
 
         actix_web::web::Data::new(state)

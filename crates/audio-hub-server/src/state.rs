@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::sync::{Condvar};
 use std::sync::atomic::AtomicBool;
+use std::collections::{HashMap, HashSet};
 
 use crossbeam_channel::Sender;
 
@@ -150,6 +151,10 @@ pub struct AppState {
     pub events: EventBus,
     /// Log stream for UI subscriptions.
     pub log_bus: Arc<LogBus>,
+    /// Output settings (disabled devices, renames).
+    pub output_settings: Arc<Mutex<OutputSettingsState>>,
+    /// Config file path for persisting settings.
+    pub config_path: Option<PathBuf>,
 }
 
 impl AppState {
@@ -166,6 +171,8 @@ impl AppState {
         device_selection: DeviceSelectionState,
         events: EventBus,
         log_bus: Arc<LogBus>,
+        output_settings: Arc<Mutex<OutputSettingsState>>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         Self {
             library: RwLock::new(library),
@@ -184,6 +191,8 @@ impl AppState {
             },
             events,
             log_bus,
+            output_settings,
+            config_path,
         }
     }
 
@@ -315,6 +324,57 @@ impl CastProviderState {
     pub fn new() -> Self {
         Self {
             discovered: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+}
+
+/// Output settings applied to provider listings.
+#[derive(Debug, Clone, Default)]
+pub struct OutputSettingsState {
+    pub disabled: HashSet<String>,
+    pub renames: HashMap<String, String>,
+}
+
+impl OutputSettingsState {
+    pub fn from_config(cfg: Option<&crate::config::OutputSettingsConfig>) -> Self {
+        let mut out = Self::default();
+        if let Some(cfg) = cfg {
+            if let Some(disabled) = cfg.disabled.as_ref() {
+                out.disabled.extend(disabled.iter().cloned());
+            }
+            if let Some(renames) = cfg.renames.as_ref() {
+                out.renames.extend(renames.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+        out
+    }
+
+    pub fn from_api(settings: &crate::models::OutputSettings) -> Self {
+        let mut out = Self::default();
+        out.disabled.extend(settings.disabled.iter().cloned());
+        out.renames.extend(settings.renames.iter().map(|(k, v)| (k.clone(), v.clone())));
+        out
+    }
+
+    pub fn to_api(&self) -> crate::models::OutputSettings {
+        crate::models::OutputSettings {
+            disabled: self.disabled.iter().cloned().collect(),
+            renames: self.renames.clone(),
+        }
+    }
+
+    pub fn to_config(&self) -> crate::config::OutputSettingsConfig {
+        crate::config::OutputSettingsConfig {
+            disabled: if self.disabled.is_empty() {
+                None
+            } else {
+                Some(self.disabled.iter().cloned().collect())
+            },
+            renames: if self.renames.is_empty() {
+                None
+            } else {
+                Some(self.renames.clone())
+            },
         }
     }
 }
