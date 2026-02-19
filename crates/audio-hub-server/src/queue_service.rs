@@ -352,17 +352,23 @@ impl QueueService {
 
     /// Clear the queue.
     pub(crate) fn clear(&self, clear_queue: bool, clear_history: bool) -> bool {
-        let mut queue = self.queue.lock().unwrap();
         let mut changed = false;
-        if clear_queue && !queue.items.is_empty() {
-            tracing::debug!(count = queue.items.len(), "queue cleared");
-            queue.items.clear();
-            changed = true;
+        let mut cleared_history = false;
+        {
+            let mut queue = self.queue.lock().unwrap();
+            if clear_queue && !queue.items.is_empty() {
+                tracing::debug!(count = queue.items.len(), "queue cleared");
+                queue.items.clear();
+                changed = true;
+            }
+            if clear_history && !queue.history.is_empty() {
+                tracing::debug!(count = queue.history.len(), "queue history cleared");
+                queue.history.clear();
+                changed = true;
+                cleared_history = true;
+            }
         }
-        if clear_history && !queue.history.is_empty() {
-            tracing::debug!(count = queue.history.len(), "queue history cleared");
-            queue.history.clear();
-            changed = true;
+        if cleared_history {
             self.status.set_has_previous(false);
         }
         if changed {
