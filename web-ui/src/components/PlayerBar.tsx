@@ -52,6 +52,11 @@ export default function PlayerBar({
   onSelectOutput
 }: PlayerBarProps) {
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
+  const outputBitDepth =
+    deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
+  const outputRate = status?.output_sample_rate ?? status?.sample_rate;
+  const sourceRate = status?.sample_rate;
+  const sourceBitDepth = status?.source_bit_depth;
   return (
     <div className="player-bar">
       <div className="player-progress">
@@ -151,9 +156,13 @@ export default function PlayerBar({
           >
             <Activity className="icon" aria-hidden="true" />
             <span className="player-action-label">
-              {status?.sample_rate && status?.source_bit_depth
-                ? `${Math.round(status.sample_rate / 1000)}/${status.source_bit_depth}`
-                : "--/--"}
+              {sourceRate && sourceBitDepth && outputRate && outputBitDepth
+                ? `SRC ${Math.round(sourceRate / 1000)}kHz/${sourceBitDepth} → OUT ${Math.round(
+                    outputRate / 1000
+                  )}kHz/${outputBitDepth}`
+                : outputRate && outputBitDepth
+                  ? `${Math.round(outputRate / 1000)}kHz/${outputBitDepth}`
+                  : "--/--"}
             </span>
           </button>
           <button className="player-action player-action-output" onClick={onSelectOutput}>
@@ -172,4 +181,17 @@ export default function PlayerBar({
       </div>
     </div>
   );
+}
+
+function deriveOutputBitDepth(format?: string | null): number | null {
+  if (!format) {
+    return null;
+  }
+  const upper = format.toUpperCase();
+  if (upper.includes("I16")) return 16;
+  if (upper.includes("I24")) return 24;
+  if (upper.includes("I32")) return 32;
+  if (upper.includes("F32")) return 32;
+  if (upper.includes("F64")) return 64;
+  return null;
 }
