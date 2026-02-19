@@ -4,6 +4,7 @@ type JsonObject = { [key: string]: JsonValue };
 // @ts-ignore
 const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const API_BASE_STORAGE_KEY = "audioHub.apiBase";
+const DEFAULT_FETCH_TIMEOUT_MS = 8000;
 
 export function getStoredApiBase(): string {
   try {
@@ -53,22 +54,36 @@ export function apiWsUrl(path: string): string {
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const url = apiUrl(path);
+  const controller = !init?.signal ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT_MS)
+    : null;
   let resp: Response;
   try {
     resp = await fetch(url, {
       ...init,
+      signal: init?.signal ?? controller?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers || {})
       }
     });
-  } catch {
+  } catch (err) {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`Request timed out after ${DEFAULT_FETCH_TIMEOUT_MS}ms (${url}).`);
+    }
     const base = getEffectiveApiBase();
     const target = base ? base : "current origin";
     const tlsHint = base.startsWith("https://")
       ? " If using HTTPS with a self-signed cert, trust it in Keychain or use mkcert."
       : "";
     throw new Error(`Network error connecting to ${target} (${url}).${tlsHint}`);
+  }
+  if (timeoutId !== null) {
+    window.clearTimeout(timeoutId);
   }
 
   if (!resp.ok) {

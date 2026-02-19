@@ -766,7 +766,7 @@ export default function App() {
   } = useQueueActions({ setError: reportError });
 
   useMetadataStream({
-    enabled: settingsOpen && serverConnected,
+    enabled: settingsOpen && serverConnected && settingsSection === "metadata",
     onEvent: (event) => {
       const entry: MetadataEventEntry = {
         id: (metadataIdRef.current += 1),
@@ -780,7 +780,7 @@ export default function App() {
   });
 
   useLogsStream({
-    enabled: settingsOpen && serverConnected,
+    enabled: settingsOpen && serverConnected && settingsSection === "logs",
     onSnapshot: (items) => {
       const entries = items
           .map((entry) => ({
