@@ -8,6 +8,7 @@ pub mod runtime;
 
 mod http_api;
 mod http_stream;
+mod exclusive;
 mod mdns;
 mod player;
 mod status;

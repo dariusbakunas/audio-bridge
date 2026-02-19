@@ -23,7 +23,7 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
     let device_name = normalize_device_name(config.device);
     let device = device::pick_device(&host, device_name.as_deref())?;
     tracing::info!(device = %device.description()?, "output device");
-    play_one_local(&device, &config.playback, &config.path)
+    play_one_local(&device, &config.playback, &config.path, config.exclusive_mode)
 }
 
 /// Run the bridge HTTP API and playback worker.
@@ -53,6 +53,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         status.clone(),
         config.playback.clone(),
         config.tls_insecure,
+        config.exclusive_mode,
     );
     let _http = http_api::spawn_http_server(
         config.http_bind,
@@ -96,9 +97,11 @@ fn play_one_local(
     device: &cpal::Device,
     playback: &PlaybackConfig,
     path: &std::path::PathBuf,
+    exclusive_mode: bool,
 ) -> Result<()> {
     let (src_spec, srcq, _duration_ms, _source_info) =
         decode::start_streaming_decode(path, playback.buffer_seconds)?;
+    let _exclusive = crate::exclusive::maybe_acquire(device, src_spec.rate, exclusive_mode);
     let config = device::pick_output_config(device, Some(src_spec.rate))?;
     let mut stream_config: cpal::StreamConfig = config.clone().into();
     if let Some(buf) = device::pick_buffer_size(&config) {

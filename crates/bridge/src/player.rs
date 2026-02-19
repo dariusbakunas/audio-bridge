@@ -57,9 +57,19 @@ pub(crate) fn spawn_player(
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
     tls_insecure: bool,
+    exclusive_mode: bool,
 ) -> PlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
-    std::thread::spawn(move || player_thread_main(device_selected, status, playback, tls_insecure, cmd_rx));
+    std::thread::spawn(move || {
+        player_thread_main(
+            device_selected,
+            status,
+            playback,
+            tls_insecure,
+            exclusive_mode,
+            cmd_rx,
+        )
+    });
     PlayerHandle { cmd_tx }
 }
 
@@ -69,6 +79,7 @@ fn player_thread_main(
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
     tls_insecure: bool,
+    exclusive_mode: bool,
     cmd_rx: Receiver<PlayerCommand>,
 ) {
     let session_id = Arc::new(AtomicU64::new(0));
@@ -111,6 +122,7 @@ fn player_thread_main(
                     &status,
                     &playback,
                     tls_insecure,
+                    exclusive_mode,
                     &session_id,
                     &mut session,
                     url,
@@ -145,6 +157,7 @@ fn player_thread_main(
                     &status,
                     &playback,
                     tls_insecure,
+                    exclusive_mode,
                     &session_id,
                     &mut session,
                     url,
@@ -195,6 +208,7 @@ fn start_new_session(
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
+    exclusive_mode: bool,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
     url: String,
@@ -229,6 +243,7 @@ fn start_new_session(
             &status,
             &playback,
             tls_insecure,
+            exclusive_mode,
             url,
             ext_hint,
             title,
@@ -257,6 +272,7 @@ fn play_one_http(
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
+    exclusive_mode: bool,
     url: String,
     ext_hint: Option<String>,
     title: Option<String>,
@@ -301,6 +317,8 @@ fn play_one_http(
 
     let selected = device_selected.lock().unwrap().clone();
     let device = device::pick_device(host, selected.as_deref())?;
+    let _exclusive = crate::exclusive::maybe_acquire(&device, src_spec.rate, exclusive_mode);
+    let nominal_rate = crate::exclusive::current_nominal_rate(&device);
     let config = device::pick_output_config(&device, Some(src_spec.rate))?;
     let mut stream_config: cpal::StreamConfig = config.clone().into();
     if let Some(buf) = device::pick_buffer_size(&config) {
@@ -328,7 +346,7 @@ fn play_one_http(
             s.end_reason = None;
             s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
             s.device = device.description().ok().map(|d| d.to_string());
-            s.sample_rate = Some(stream_config.sample_rate);
+            s.sample_rate = Some(nominal_rate.unwrap_or(stream_config.sample_rate));
             s.channels = Some(src_spec.channels.count() as u16);
             s.duration_ms = duration_ms;
             s.source_codec = source_info.codec.clone();

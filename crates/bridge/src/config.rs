@@ -15,6 +15,8 @@ pub struct BridgeListenConfig {
     pub playback: PlaybackConfig,
     /// Allow insecure TLS when streaming from the hub.
     pub tls_insecure: bool,
+    /// Enable exclusive (hog) mode on macOS.
+    pub exclusive_mode: bool,
 }
 
 /// Configuration for playing a local file once.
@@ -28,4 +30,6 @@ pub struct BridgePlayConfig {
     pub playback: PlaybackConfig,
     /// Allow insecure TLS when streaming from the hub.
     pub tls_insecure: bool,
+    /// Enable exclusive (hog) mode on macOS.
+    pub exclusive_mode: bool,
 }
