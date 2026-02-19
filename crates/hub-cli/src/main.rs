@@ -147,6 +147,7 @@ fn main() -> Result<()> {
             device: args.bridge_device.clone(),
             playback: PlaybackConfig::default(),
             tls_insecure: args.tls_insecure,
+            exclusive_mode: false,
         };
         std::thread::spawn(move || {
             if let Err(e) = runtime::run_listen(cfg, false) {
