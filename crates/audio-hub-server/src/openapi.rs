@@ -58,6 +58,7 @@ use crate::models;
         api::health::health,
         api::playback::status_for_output,
         api::streams::status_stream,
+        api::streams::active_status_stream,
         api::outputs::providers_list,
         api::outputs::provider_outputs_list,
         api::outputs::provider_refresh,

@@ -246,6 +246,15 @@ fn apply_remote_status(
         state.playback.manager.set_manual_advance_in_flight(true);
     }
 
+    tracing::debug!(
+        bridge_id = %bridge_id,
+        now_playing = %remote.now_playing.as_deref().unwrap_or("<none>"),
+        elapsed_ms = ?remote.elapsed_ms,
+        duration_ms = ?remote.duration_ms,
+        paused = remote.paused,
+        "bridge status snapshot received"
+    );
+
     let (inputs, changed) = state
         .playback
         .manager

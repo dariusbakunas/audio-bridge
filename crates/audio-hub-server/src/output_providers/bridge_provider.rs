@@ -128,13 +128,24 @@ impl BridgeProvider {
     }
 
     async fn list_outputs_internal(state: &AppState) -> Vec<OutputInfo> {
-        let (merged, active_bridge_id) = {
+        let (merged, active_bridge_id, active_output_id) = {
             let bridges_state = state.providers.bridge.bridges.lock().unwrap();
             let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
-            (merged, bridges_state.active_bridge_id.clone())
+            (
+                merged,
+                bridges_state.active_bridge_id.clone(),
+                bridges_state.active_output_id.clone(),
+            )
         };
-        let (outputs, failed) = build_outputs_from_bridges_with_failures(state, &merged).await;
+        let (mut outputs, failed) = build_outputs_from_bridges_with_failures(state, &merged).await;
+        if let Some(active_output_id) = active_output_id.as_deref() {
+            if let Ok((bridge_id, _)) = parse_output_id(active_output_id) {
+                if let Some(bridge) = merged.iter().find(|b| b.id == bridge_id) {
+                    inject_active_output_for_bridge(state, &mut outputs, Some(active_output_id), bridge);
+                }
+            }
+        }
         for id in failed {
             let is_active = active_bridge_id.as_deref() == Some(id.as_str());
             tracing::warn!(
@@ -256,6 +267,7 @@ impl OutputProvider for BridgeProvider {
         state: &AppState,
         output_id: &str,
     ) -> Result<(), ProviderError> {
+        tracing::info!(output_id = %output_id, "output select requested");
         state.providers.bridge
             .output_switch_in_flight
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -266,6 +278,12 @@ impl OutputProvider for BridgeProvider {
         let prior_active_output_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
         let (bridge_id, device_id) = parse_output_id(output_id)
             .map_err(|e| ProviderError::BadRequest(e))?;
+        tracing::info!(
+            bridge_id = %bridge_id,
+            device_id = %device_id,
+            prior_output = ?prior_active_output_id,
+            "output select parsed"
+        );
         let http_addr = {
             let bridges_state = state.providers.bridge.bridges.lock().unwrap();
             let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
@@ -333,10 +351,24 @@ impl OutputProvider for BridgeProvider {
                 status.user_paused,
             )
         };
+        tracing::info!(
+            has_now_playing = resume_info.0.is_some(),
+            elapsed_ms = ?resume_info.1,
+            paused = resume_info.2,
+            user_paused = resume_info.3,
+            "output select captured resume info"
+        );
 
-        {
+        let prior_bridge_id = prior_active_output_id
+            .as_deref()
+            .and_then(|id| parse_output_id(id).ok())
+            .map(|(id, _)| id);
+        if prior_bridge_id.as_deref() != Some(bridge_id.as_str()) {
             let cmd_tx = state.providers.bridge.player.lock().unwrap().cmd_tx.clone();
-            let _ = cmd_tx.send(crate::bridge::BridgeCommand::Stop);
+            let _ = cmd_tx.send(crate::bridge::BridgeCommand::StopSilent);
+            tracing::debug!("output select sent StopSilent to bridge worker");
+        } else {
+            tracing::debug!("output select skipped StopSilent (same bridge)");
         }
 
         if let Err(e) = switch_active_bridge(state, &bridge_id, http_addr) {
@@ -387,6 +419,11 @@ impl OutputProvider for BridgeProvider {
         }
 
         Self::ensure_active_connected(state).await?;
+        tracing::info!(
+            bridge_id = %bridge_id,
+            device = %device_name,
+            "output select ensured active connection"
+        );
 
         if let Some(path) = resume_info.0 {
             let ext_hint = path
@@ -406,6 +443,13 @@ impl OutputProvider for BridgeProvider {
                     seek_ms: resume_info.1,
                     start_paused,
                 },
+            );
+            tracing::info!(
+                bridge_id = %bridge_id,
+                device = %device_name,
+                seek_ms = ?resume_info.1,
+                start_paused,
+                "output select resumed playback"
             );
         }
         Ok(())
@@ -513,6 +557,11 @@ impl OutputProvider for BridgeProvider {
     ) -> Result<(), ProviderError> {
         let (bridge_id, _device_id) =
             parse_output_id(output_id).map_err(|e| ProviderError::BadRequest(e))?;
+        tracing::info!(
+            output_id = %output_id,
+            bridge_id = %bridge_id,
+            "output stop requested"
+        );
         let http_addr = {
             let bridges_state = state.providers.bridge.bridges.lock().unwrap();
             let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
@@ -871,17 +920,16 @@ fn inject_active_output_for_bridge(
     if bridge_id != bridge.id {
         return;
     }
-    let status = match get_cached_status(state, &bridge.id) {
-        Some(status) => status,
-        None => return,
-    };
+    let status = get_cached_status(state, &bridge.id);
     let device_name = status
-        .device
+        .as_ref()
+        .and_then(|status| status.device.clone())
         .unwrap_or_else(|| format!("active device ({device_id})"));
     let suffix = short_device_id(&device_id);
     let name = format!("{device_name} ({suffix})");
     let supported_rates = status
-        .sample_rate
+        .as_ref()
+        .and_then(|status| status.sample_rate)
         .map(|sr| SupportedRates { min_hz: sr, max_hz: sr });
     outputs.push(OutputInfo {
         id: active_output_id.to_string(),
@@ -1116,6 +1164,9 @@ fn switch_active_bridge(
 
     state.providers.bridge
         .bridge_online
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    state.providers.bridge
+        .worker_running
         .store(false, std::sync::atomic::Ordering::Relaxed);
     {
         let player = state.providers.bridge.player.lock().unwrap();

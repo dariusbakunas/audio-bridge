@@ -892,7 +892,6 @@ export default function App() {
   useStatusStream({
     enabled: serverConnected,
     sourceKey: streamKey,
-    activeOutputId,
     onEvent: (data: SetStateAction<StatusResponse | null>) => {
       setStatus(data);
       setUpdatedAt(new Date());
@@ -901,7 +900,7 @@ export default function App() {
     onError: () => {
       const message = connectionError(
         "Live status disconnected",
-        activeOutputId ? `/outputs/${encodeURIComponent(activeOutputId)}/status/stream` : undefined
+        "/status/stream"
       );
       reportError(message, "warn");
     }

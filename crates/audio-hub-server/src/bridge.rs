@@ -24,6 +24,8 @@ pub enum BridgeCommand {
     PauseToggle,
     /// Stop playback immediately.
     Stop,
+    /// Stop playback without clearing UI status.
+    StopSilent,
     /// Seek to an absolute position (milliseconds).
     Seek { ms: u64 },
     /// Quit the bridge worker loop.
@@ -56,18 +58,33 @@ pub fn spawn_bridge_worker(
                 Ok(cmd) => match cmd {
                     BridgeCommand::Quit => break,
                     BridgeCommand::PauseToggle => {
+                        tracing::info!(bridge_id = %bridge_id, "bridge command: pause toggle");
                         let _ = client.pause_toggle().await;
                         status.on_pause_toggle();
                     }
                     BridgeCommand::Stop => {
+                        tracing::info!(bridge_id = %bridge_id, "bridge command: stop");
                         let _ = client.stop().await;
                         status.on_stop();
                     }
+                    BridgeCommand::StopSilent => {
+                        tracing::info!(bridge_id = %bridge_id, "bridge command: stop silent");
+                        let _ = client.stop().await;
+                    }
                     BridgeCommand::Seek { ms } => {
+                        tracing::info!(bridge_id = %bridge_id, ms, "bridge command: seek");
                         let _ = client.seek(ms).await;
                         status.mark_seek_in_flight();
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
+                        tracing::info!(
+                            bridge_id = %bridge_id,
+                            path = %path.to_string_lossy(),
+                            seek_ms = ?seek_ms,
+                            start_paused,
+                            ext_hint = %ext_hint,
+                            "bridge command: play"
+                        );
                         let title = title_from_path(&path);
                         let _ = client.play_path(
                             &path,

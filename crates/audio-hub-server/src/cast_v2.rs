@@ -191,6 +191,21 @@ pub fn spawn_cast_worker(
                             }
                         }
                     }
+                    BridgeCommand::StopSilent => {
+                        if let Some(session) = session.as_ref() {
+                            if let Some(media_session_id) = session.media_session_id {
+                                let _ = conn.send_json(
+                                    &session.transport_id,
+                                    NAMESPACE_MEDIA,
+                                    &json!({
+                                        "type": "STOP",
+                                        "requestId": next_request_id(&mut request_id),
+                                        "mediaSessionId": media_session_id,
+                                    }),
+                                );
+                            }
+                        }
+                    }
                     BridgeCommand::Seek { ms } => {
                         if let Some(session) = session.as_ref() {
                             if let Some(media_session_id) = session.media_session_id {

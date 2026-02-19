@@ -7,6 +7,7 @@
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::{Mutex, OnceLock};
+use std::collections::HashSet;
 
 /// Pick a CPAL output device.
 ///
@@ -215,13 +216,18 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
         }
 
         if min_rate == 0 || max_rate == 0 || max_rate < min_rate {
-            tracing::warn!(
-                device = %name,
-                id = %cache_key,
-                min_rate = min_rate,
-                max_rate = max_rate,
-                "skipping device with invalid sample rate range"
-            );
+            if min_rate == u32::MAX {
+                min_rate = 0;
+            }
+            if should_warn_invalid_device(&cache_key) {
+                tracing::warn!(
+                    device = %name,
+                    id = %cache_key,
+                    min_rate = min_rate,
+                    max_rate = max_rate,
+                    "skipping device with invalid sample rate range"
+                );
+            }
             continue;
         }
 
@@ -259,6 +265,18 @@ fn update_cached_rates(key: &str, min_rate: u32, max_rate: u32) {
     if let Ok(mut m) = rates_cache().lock() {
         m.insert(key.to_string(), (min_rate, max_rate));
     }
+}
+
+fn invalid_warned() -> &'static Mutex<HashSet<String>> {
+    static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    WARNED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn should_warn_invalid_device(key: &str) -> bool {
+    if let Ok(mut warned) = invalid_warned().lock() {
+        return warned.insert(key.to_string());
+    }
+    true
 }
 
 fn hash_device_id(name: &str, min_rate: u32, max_rate: u32) -> String {

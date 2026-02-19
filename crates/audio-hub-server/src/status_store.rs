@@ -267,6 +267,11 @@ impl StatusStore {
             );
         }
         let was_playing = state.now_playing.is_some();
+        if state.now_playing.is_none() {
+            if let Some(now_playing) = remote.now_playing.as_ref() {
+                state.now_playing = Some(PathBuf::from(now_playing));
+            }
+        }
         let should_clear = should_clear_now_playing(state, remote);
         if should_clear {
             state.now_playing = None;
@@ -625,6 +630,21 @@ mod tests {
         store.apply_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(status.now_playing.is_some());
+    }
+
+    #[test]
+    fn apply_remote_and_inputs_sets_now_playing_from_remote_when_missing() {
+        let store = make_store();
+        let remote = BridgeStatus {
+            now_playing: Some("/music/remote.flac".to_string()),
+            elapsed_ms: Some(500),
+            duration_ms: Some(1500),
+            ..make_bridge_status()
+        };
+
+        store.apply_remote_and_inputs(&remote, None);
+        let status = store.inner().lock().unwrap();
+        assert_eq!(status.now_playing, Some(PathBuf::from("/music/remote.flac")));
     }
 
     #[test]

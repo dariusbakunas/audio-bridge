@@ -144,6 +144,9 @@ pub fn spawn_browser_worker(
                     let _ = send_json(&sender, BrowserServerMessage::Stop);
                     status.on_stop();
                 }
+                BridgeCommand::StopSilent => {
+                    let _ = send_json(&sender, BrowserServerMessage::Stop);
+                }
                 BridgeCommand::Seek { ms } => {
                     let _ = send_json(&sender, BrowserServerMessage::Seek { ms });
                     status.mark_seek_in_flight();

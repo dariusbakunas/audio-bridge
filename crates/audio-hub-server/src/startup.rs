@@ -196,6 +196,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::health::health)
             .service(api::status_for_output)
             .service(api::status_stream)
+            .service(api::active_status_stream)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::provider_refresh)

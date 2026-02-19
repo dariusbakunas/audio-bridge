@@ -78,6 +78,7 @@ pub use streams::{
     albums_stream,
     logs_stream,
     metadata_stream,
+    active_status_stream,
     outputs_stream,
     queue_stream,
     status_stream,

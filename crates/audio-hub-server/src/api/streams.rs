@@ -12,6 +12,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Duration, Interval, MissedTickBehavior};
 
 use crate::events::{HubEvent, LogEvent};
+use crate::models::StatusResponse;
 use crate::state::AppState;
 
 use super::outputs::normalize_outputs_response;
@@ -95,6 +96,15 @@ struct OutputsStreamState {
     interval: Interval,
     pending: VecDeque<Bytes>,
     last_outputs: Option<String>,
+    last_ping: Instant,
+}
+
+struct ActiveStatusStreamState {
+    state: web::Data<AppState>,
+    receiver: broadcast::Receiver<HubEvent>,
+    interval: Interval,
+    pending: VecDeque<Bytes>,
+    last_status: Option<String>,
     last_ping: Instant,
 }
 
@@ -197,6 +207,160 @@ pub async fn status_stream(
     );
 
     sse_response(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/status/stream",
+    responses(
+        (status = 200, description = "Active status event stream")
+    )
+)]
+#[get("/status/stream")]
+/// Stream status updates for the active output via server-sent events.
+pub async fn active_status_stream(state: web::Data<AppState>) -> impl Responder {
+    let initial = status_snapshot_for_active(&state).await;
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
+    let mut pending = VecDeque::new();
+    pending.push_back(sse_event("status", &initial_json));
+
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let receiver = state.events.subscribe();
+
+    let stream = unfold(
+        ActiveStatusStreamState {
+            state: state.clone(),
+            receiver,
+            interval,
+            pending,
+            last_status: Some(initial_json),
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+
+                let mut refresh = false;
+                match recv_signal(&mut ctx.receiver, Some(&mut ctx.interval)).await {
+                    StreamSignal::Tick => {}
+                    StreamSignal::Event(result) => match result {
+                        Ok(HubEvent::StatusChanged) => refresh = true,
+                        Ok(HubEvent::OutputsChanged) => refresh = true,
+                        Ok(HubEvent::QueueChanged) => {}
+                        Ok(HubEvent::Metadata(_)) => {}
+                        Ok(HubEvent::LibraryChanged) => {}
+                        Err(RecvError::Lagged(_)) => refresh = true,
+                        Err(RecvError::Closed) => return None,
+                    },
+                }
+
+                if refresh {
+                    let status = status_snapshot_for_active(&ctx.state).await;
+                    let json = serde_json::to_string(&status)
+                        .unwrap_or_else(|_| "null".to_string());
+                    if ctx.last_status.as_deref() != Some(json.as_str()) {
+                        ctx.last_status = Some(json.clone());
+                        ctx.pending.push_back(sse_event("status", &json));
+                    }
+                }
+
+                push_ping_if_needed(&mut ctx.pending, &mut ctx.last_ping);
+            }
+        },
+    );
+
+    sse_response(stream)
+}
+
+async fn status_snapshot_for_active(state: &AppState) -> StatusResponse {
+    let active_output_id = state
+        .providers
+        .bridge
+        .bridges
+        .lock()
+        .ok()
+        .and_then(|bridges| bridges.active_output_id.clone());
+    if let Some(output_id) = active_output_id.as_deref() {
+        match state.output.controller.status_for_output(state, output_id).await {
+            Ok(status) => return status,
+            Err(err) => {
+                tracing::warn!(
+                    output_id = %output_id,
+                    error = ?err,
+                    "active status stream falling back to cached status"
+                );
+            }
+        }
+    }
+    status_from_store(state, active_output_id)
+}
+
+fn status_from_store(state: &AppState, output_id: Option<String>) -> StatusResponse {
+    let status = state.playback.manager.status().inner().lock().unwrap();
+    let (title, artist, album, format, sample_rate) =
+        match status.now_playing.as_ref() {
+            Some(path) => {
+                let lib = state.library.read().unwrap();
+                match lib.find_track_by_path(path) {
+                    Some(crate::models::LibraryEntry::Track {
+                        file_name,
+                        sample_rate,
+                        artist,
+                        album,
+                        format,
+                        ..
+                    }) => {
+                        let title = state
+                            .metadata
+                            .db
+                            .track_record_by_path(&path.to_string_lossy())
+                            .ok()
+                            .flatten()
+                            .and_then(|record| record.title)
+                            .or_else(|| Some(file_name));
+                        (title, artist, album, Some(format), sample_rate)
+                    }
+                    _ => (None, None, None, None, None),
+                }
+            }
+            None => (None, None, None, None, None),
+        };
+    let bridge_online = state.providers.bridge
+        .bridge_online
+        .load(std::sync::atomic::Ordering::Relaxed);
+    StatusResponse {
+        now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
+        paused: status.paused,
+        bridge_online,
+        elapsed_ms: status.elapsed_ms,
+        duration_ms: status.duration_ms,
+        source_codec: status.source_codec.clone(),
+        source_bit_depth: status.source_bit_depth,
+        container: status.container.clone(),
+        output_sample_format: status.output_sample_format.clone(),
+        resampling: status.resampling,
+        resample_from_hz: status.resample_from_hz,
+        resample_to_hz: status.resample_to_hz,
+        sample_rate,
+        channels: status.channels,
+        output_sample_rate: status.sample_rate,
+        output_device: status.output_device.clone(),
+        title,
+        artist,
+        album,
+        format,
+        output_id,
+        bitrate_kbps: None,
+        underrun_frames: None,
+        underrun_events: None,
+        buffer_size_frames: status.buffer_size_frames,
+        buffered_frames: status.buffered_frames,
+        buffer_capacity_frames: status.buffer_capacity_frames,
+        has_previous: status.has_previous,
+    }
 }
 
 #[utoipa::path(

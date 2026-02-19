@@ -178,11 +178,17 @@ impl OutputRegistry {
             return Err(ProviderError::BadRequest("output is disabled".to_string()));
         }
         let previous = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        tracing::info!(
+            from_output = ?previous,
+            to_output = %output_id,
+            "outputs: select output"
+        );
         if previous.as_deref() == Some(output_id) {
             return self.ensure_active_connected(state).await;
         }
         if previous.as_deref() != Some(output_id) {
             if let Some(prev_id) = previous.as_deref() {
+                tracing::info!(output_id = %prev_id, "outputs: stopping previous output");
                 for provider in &self.providers {
                     if provider.can_handle_output_id(prev_id) {
                         if let Err(err) = provider.stop_output(state, prev_id).await {

@@ -68,6 +68,11 @@ fn player_thread_main(
                 paused = false;
                 status.on_stop();
             }
+            BridgeCommand::StopSilent => {
+                cancel_session(&mut session);
+                current = None;
+                paused = false;
+            }
             BridgeCommand::PauseToggle => {
                 paused = !paused;
                 if let Some(sess) = session.as_ref() {
