@@ -333,6 +333,7 @@ impl CastProviderState {
 pub struct OutputSettingsState {
     pub disabled: HashSet<String>,
     pub renames: HashMap<String, String>,
+    pub exclusive: HashSet<String>,
 }
 
 impl OutputSettingsState {
@@ -345,6 +346,9 @@ impl OutputSettingsState {
             if let Some(renames) = cfg.renames.as_ref() {
                 out.renames.extend(renames.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
+            if let Some(exclusive) = cfg.exclusive.as_ref() {
+                out.exclusive.extend(exclusive.iter().cloned());
+            }
         }
         out
     }
@@ -353,6 +357,7 @@ impl OutputSettingsState {
         let mut out = Self::default();
         out.disabled.extend(settings.disabled.iter().cloned());
         out.renames.extend(settings.renames.iter().map(|(k, v)| (k.clone(), v.clone())));
+        out.exclusive.extend(settings.exclusive.iter().cloned());
         out
     }
 
@@ -360,6 +365,7 @@ impl OutputSettingsState {
         crate::models::OutputSettings {
             disabled: self.disabled.iter().cloned().collect(),
             renames: self.renames.clone(),
+            exclusive: self.exclusive.iter().cloned().collect(),
         }
     }
 
@@ -375,7 +381,16 @@ impl OutputSettingsState {
             } else {
                 Some(self.renames.clone())
             },
+            exclusive: if self.exclusive.is_empty() {
+                None
+            } else {
+                Some(self.exclusive.iter().cloned().collect())
+            },
         }
+    }
+
+    pub fn is_exclusive(&self, output_id: &str) -> bool {
+        self.exclusive.contains(output_id)
     }
 }
 

@@ -385,8 +385,13 @@ impl OutputProvider for BridgeProvider {
             );
             return Err(ProviderError::Internal(format!("{e:#}")));
         }
+        let exclusive = state
+            .output_settings
+            .lock()
+            .map(|s| s.is_exclusive(output_id))
+            .unwrap_or(false);
         if let Err(e) = BridgeTransportClient::new(http_addr)
-            .set_device(&device_name)
+            .set_device(&device_name, Some(exclusive))
             .await
         {
             state.providers.bridge

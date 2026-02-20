@@ -51,7 +51,8 @@ const outputSettings: OutputSettings = {
   disabled: ["bridge:living-room:device-2"],
   renames: {
     "bridge:living-room:device-1": "Living Room DAC"
-  }
+  },
+  exclusive: ["bridge:living-room:device-1"]
 };
 
 const outputProviders: ProviderOutputs[] = [
@@ -156,6 +157,7 @@ const Template = (args: SettingsViewArgs) => (
       onRefreshProvider={action("refresh-provider")}
       onToggleOutput={action("toggle-output")}
       onRenameOutput={action("rename-output")}
+      onToggleExclusive={action("toggle-exclusive")}
       metadataEvents={args.empty ? [] : metadataEvents}
       logEvents={args.empty ? [] : logEvents}
       logsError={args.logsError || null}

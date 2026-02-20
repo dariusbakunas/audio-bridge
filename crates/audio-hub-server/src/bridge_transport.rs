@@ -119,9 +119,12 @@ impl BridgeTransportClient {
     }
 
     /// Select an output device by name on the bridge.
-    pub async fn set_device(&self, name: &str) -> Result<()> {
+    pub async fn set_device(&self, name: &str, exclusive: Option<bool>) -> Result<()> {
         let url = format!("http://{}/devices/select", self.http_addr);
-        let payload = serde_json::json!({ "name": name });
+        let mut payload = serde_json::json!({ "name": name });
+        if let Some(exclusive) = exclusive {
+            payload["exclusive"] = serde_json::json!(exclusive);
+        }
         self.client
             .post(&url)
             .timeout(Duration::from_secs(2))

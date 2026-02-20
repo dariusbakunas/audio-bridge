@@ -32,7 +32,6 @@ fn main() -> Result<()> {
         version = VERSION,
         http_bind = %args.http_bind,
         device = ?args.device,
-        exclusive_mode = args.exclusive_mode,
         "bridge starting"
     );
 
@@ -49,7 +48,6 @@ fn main() -> Result<()> {
                 device: args.device.clone(),
                 playback,
                 tls_insecure: args.tls_insecure,
-                exclusive_mode: args.exclusive_mode,
             };
             runtime::run_play(cfg)?;
         }
@@ -59,7 +57,6 @@ fn main() -> Result<()> {
                 device: args.device.clone(),
                 playback,
                 tls_insecure: args.tls_insecure,
-                exclusive_mode: args.exclusive_mode,
             };
             runtime::run_listen(cfg, true)?;
         }

@@ -81,15 +81,24 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .map(|b| b.http_addr)
     });
 
-    apply_active_bridge_device(device_to_set, active_http_addr, &public_base_url).await;
+    let output_settings_state = crate::state::OutputSettingsState::from_config(cfg.outputs.as_ref());
+    let active_exclusive = active_output_id
+        .as_deref()
+        .map(|id| output_settings_state.is_exclusive(id))
+        .unwrap_or(false);
+    apply_active_bridge_device(
+        device_to_set,
+        active_http_addr,
+        &public_base_url,
+        active_exclusive,
+    )
+    .await;
     let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
     let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
     let cast_state = Arc::new(CastProviderState::new());
-    let output_settings = Arc::new(Mutex::new(
-        crate::state::OutputSettingsState::from_config(cfg.outputs.as_ref()),
-    ));
+    let output_settings = Arc::new(Mutex::new(output_settings_state));
     let state = web::Data::new(AppState::new(
         library,
         metadata_db,
@@ -578,6 +587,7 @@ async fn apply_active_bridge_device(
     device_to_set: Option<String>,
     active_http_addr: Option<std::net::SocketAddr>,
     public_base_url: &str,
+    exclusive: bool,
 ) {
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
         let _ = BridgeTransportClient::new_with_base(
@@ -585,7 +595,7 @@ async fn apply_active_bridge_device(
             public_base_url.to_string(),
             None,
         )
-        .set_device(&device_name)
+        .set_device(&device_name, Some(exclusive))
         .await;
     }
 }

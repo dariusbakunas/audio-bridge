@@ -53,6 +53,7 @@ export interface ProviderInfo {
 export interface OutputSettings {
   disabled: string[];
   renames: Record<string, string>;
+  exclusive: string[];
 }
 
 export interface ProviderOutputs {

@@ -54,19 +54,19 @@ struct SessionHandle {
 /// Spawn the playback worker thread.
 pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
+    exclusive_selected: Arc<Mutex<bool>>,
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
     tls_insecure: bool,
-    exclusive_mode: bool,
 ) -> PlayerHandle {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
         player_thread_main(
             device_selected,
+            exclusive_selected,
             status,
             playback,
             tls_insecure,
-            exclusive_mode,
             cmd_rx,
         )
     });
@@ -76,10 +76,10 @@ pub(crate) fn spawn_player(
 /// Main loop for the playback worker.
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
+    exclusive_selected: Arc<Mutex<bool>>,
     status: Arc<Mutex<BridgeStatusState>>,
     playback: PlaybackConfig,
     tls_insecure: bool,
-    exclusive_mode: bool,
     cmd_rx: Receiver<PlayerCommand>,
 ) {
     let session_id = Arc::new(AtomicU64::new(0));
@@ -119,10 +119,10 @@ fn player_thread_main(
                 let title = track.title.clone();
                 start_new_session(
                     &device_selected,
+                    &exclusive_selected,
                     &status,
                     &playback,
                     tls_insecure,
-                    exclusive_mode,
                     &session_id,
                     &mut session,
                     url,
@@ -154,10 +154,10 @@ fn player_thread_main(
                 paused = false;
                 start_new_session(
                     &device_selected,
+                    &exclusive_selected,
                     &status,
                     &playback,
                     tls_insecure,
-                    exclusive_mode,
                     &session_id,
                     &mut session,
                     url,
@@ -205,10 +205,10 @@ fn cancel_session_async(session: &mut Option<SessionHandle>) {
 /// Start a new playback session for the current URL.
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
+    exclusive_selected: &Arc<Mutex<bool>>,
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
-    exclusive_mode: bool,
     session_id: &Arc<AtomicU64>,
     session: &mut Option<SessionHandle>,
     url: String,
@@ -229,6 +229,7 @@ fn start_new_session(
     let my_id = session_id.fetch_add(1, Ordering::Relaxed).saturating_add(1);
 
     let device_selected = device_selected.clone();
+    let exclusive_selected = exclusive_selected.clone();
     let status = status.clone();
     let playback = playback.clone();
     let session_id = session_id.clone();
@@ -240,10 +241,10 @@ fn start_new_session(
         if let Err(e) = play_one_http(
             &host,
             &device_selected,
+            &exclusive_selected,
             &status,
             &playback,
             tls_insecure,
-            exclusive_mode,
             url,
             ext_hint,
             title,
@@ -269,10 +270,10 @@ fn start_new_session(
 fn play_one_http(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
+    exclusive_selected: &Arc<Mutex<bool>>,
     status: &Arc<Mutex<BridgeStatusState>>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
-    exclusive_mode: bool,
     url: String,
     ext_hint: Option<String>,
     title: Option<String>,
@@ -317,6 +318,7 @@ fn play_one_http(
 
     let selected = device_selected.lock().unwrap().clone();
     let device = device::pick_device(host, selected.as_deref())?;
+    let exclusive_mode = exclusive_selected.lock().map(|g| *g).unwrap_or(false);
     let _exclusive = crate::exclusive::maybe_acquire(&device, src_spec.rate, exclusive_mode);
     let nominal_rate = crate::exclusive::current_nominal_rate(&device);
     let config = device::pick_output_config(&device, Some(src_spec.rate))?;

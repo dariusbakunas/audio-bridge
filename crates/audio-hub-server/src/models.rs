@@ -593,6 +593,9 @@ pub struct OutputSettings {
     /// Output id -> display name overrides.
     #[serde(default)]
     pub renames: HashMap<String, String>,
+    /// Output ids that should use exclusive mode (bridge-only).
+    #[serde(default)]
+    pub exclusive: Vec<String>,
 }
 
 /// Provider outputs bundled with provider info.

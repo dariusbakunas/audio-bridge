@@ -22,6 +22,7 @@ active_output = "bridge:living-room:Built-in Output"
 
 # [outputs]
 # disabled = ["bridge:living-room:Built-in Output"]
+# exclusive = ["bridge:living-room:USB DAC"]
 # [outputs.renames]
 # "bridge:living-room:Built-in Output" = "Living Room DAC"
 

@@ -49,6 +49,8 @@ struct DeviceSelectRequest {
     id: Option<String>,
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    exclusive: Option<bool>,
 }
 
 /// Request body for playback.
@@ -77,6 +79,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(15);
 struct AppState {
     status: Arc<Mutex<BridgeStatusState>>,
     device_selected: Arc<Mutex<Option<String>>>,
+    exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
 }
 
@@ -85,12 +88,14 @@ pub(crate) fn spawn_http_server(
     bind: SocketAddr,
     status: Arc<Mutex<BridgeStatusState>>,
     device_selected: Arc<Mutex<Option<String>>>,
+    exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let state = AppState {
             status,
             device_selected,
+            exclusive_selected,
             player_tx,
         };
         let runner = match HttpServer::new(move || {
@@ -221,6 +226,11 @@ async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResp
                 *g = None;
             } else {
                 *g = Some(selected_name);
+            }
+        }
+        if let Some(exclusive) = req.exclusive {
+            if let Ok(mut g) = state.exclusive_selected.lock() {
+                *g = exclusive;
             }
         }
         HttpResponse::NoContent().finish()

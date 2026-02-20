@@ -288,6 +288,18 @@
   min-width: 0;
 }
 
+.outputs-device-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.outputs-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .outputs-device-name {
   display: flex;
   align-items: center;
@@ -324,6 +336,13 @@
   position: relative;
   width: 46px;
   height: 24px;
+}
+
+.outputs-toggle-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
 }
 
 .outputs-toggle input {

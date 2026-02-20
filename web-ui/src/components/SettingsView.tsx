@@ -39,6 +39,7 @@ interface SettingsViewProps {
   onRefreshProvider: (providerId: string) => void;
   onToggleOutput: (outputId: string, enabled: boolean) => void;
   onRenameOutput: (outputId: string, name: string) => void;
+  onToggleExclusive: (outputId: string, enabled: boolean) => void;
 }
 
 export default function SettingsView({
@@ -66,7 +67,8 @@ export default function SettingsView({
   outputsLastRefresh,
   onRefreshProvider,
   onToggleOutput,
-  onRenameOutput
+  onRenameOutput,
+  onToggleExclusive
 }: SettingsViewProps) {
   const isMetadata = section === "metadata";
   const isLogs = section === "logs";
@@ -91,6 +93,10 @@ export default function SettingsView({
   const isEnabled = (outputId: string) => {
     if (!outputsSettings) return true;
     return !outputsSettings.disabled.includes(outputId);
+  };
+  const isExclusive = (outputId: string) => {
+    if (!outputsSettings) return false;
+    return outputsSettings.exclusive.includes(outputId);
   };
   const startRename = (outputId: string, currentName: string) => {
     setRenamingOutput(outputId);
@@ -306,15 +312,31 @@ export default function SettingsView({
                                 </div>
                               )}
                             </div>
-                            <label className="outputs-toggle">
-                              <input
-                                type="checkbox"
-                                checked={enabled}
-                                onChange={(event) => onToggleOutput(output.id, event.target.checked)}
-                              />
-                              <span className="outputs-toggle-track" />
-                              <span className="outputs-toggle-thumb" />
-                            </label>
+                            <div className="outputs-device-actions">
+                              <label className="outputs-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={enabled}
+                                  onChange={(event) => onToggleOutput(output.id, event.target.checked)}
+                                />
+                                <span className="outputs-toggle-track" />
+                                <span className="outputs-toggle-thumb" />
+                              </label>
+                              {provider.kind === "bridge" ? (
+                                <label className="outputs-toggle-group">
+                                  <span className="outputs-toggle-label">Exclusive</span>
+                                  <span className="outputs-toggle">
+                                    <input
+                                      type="checkbox"
+                                      checked={isExclusive(output.id)}
+                                      onChange={(event) => onToggleExclusive(output.id, event.target.checked)}
+                                    />
+                                    <span className="outputs-toggle-track" />
+                                    <span className="outputs-toggle-thumb" />
+                                  </span>
+                                </label>
+                              ) : null}
+                            </div>
                           </div>
                         );
                       })

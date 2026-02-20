@@ -71,6 +71,8 @@ pub struct OutputSettingsConfig {
     pub disabled: Option<Vec<String>>,
     /// Output id -> display name overrides.
     pub renames: Option<std::collections::HashMap<String, String>>,
+    /// Output ids that should use exclusive mode (bridge-only).
+    pub exclusive: Option<Vec<String>>,
 }
 
 /// Resolved bridge config with parsed socket address.
@@ -180,6 +182,13 @@ pub fn update_output_settings(
             renames_table[id.as_str()] = toml_edit::value(name.clone());
         }
         outputs["renames"] = toml_edit::Item::Table(renames_table);
+    }
+    if let Some(exclusive) = settings.exclusive.as_ref().filter(|v| !v.is_empty()) {
+        let mut arr = toml_edit::Array::new();
+        for id in exclusive {
+            arr.push(id.as_str());
+        }
+        outputs["exclusive"] = toml_edit::value(arr);
     }
 
     if outputs.is_empty() {

@@ -47,9 +47,6 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub tls_insecure: bool,
 
-    /// Enable exclusive (hog) mode on macOS for the selected output device.
-    #[arg(long, default_value_t = false)]
-    pub exclusive_mode: bool,
 }
 
 /// Bridge subcommands.

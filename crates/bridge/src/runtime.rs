@@ -23,7 +23,7 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
     let device_name = normalize_device_name(config.device);
     let device = device::pick_device(&host, device_name.as_deref())?;
     tracing::info!(device = %device.description()?, "output device");
-    play_one_local(&device, &config.playback, &config.path, config.exclusive_mode)
+    play_one_local(&device, &config.playback, &config.path)
 }
 
 /// Run the bridge HTTP API and playback worker.
@@ -31,6 +31,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     let device_selected = std::sync::Arc::new(std::sync::Mutex::new(
         normalize_device_name(config.device.clone()),
     ));
+    let exclusive_selected = std::sync::Arc::new(std::sync::Mutex::new(false));
     let status = PlayerStatusState::shared();
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
@@ -50,15 +51,16 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
 
     let player_handle = player::spawn_player(
         device_selected.clone(),
+        exclusive_selected.clone(),
         status.clone(),
         config.playback.clone(),
         config.tls_insecure,
-        config.exclusive_mode,
     );
     let _http = http_api::spawn_http_server(
         config.http_bind,
         status.clone(),
         device_selected.clone(),
+        exclusive_selected.clone(),
         player_handle.cmd_tx,
     );
     if let Ok(mut g) = mdns_handle.lock() {
@@ -97,11 +99,9 @@ fn play_one_local(
     device: &cpal::Device,
     playback: &PlaybackConfig,
     path: &std::path::PathBuf,
-    exclusive_mode: bool,
 ) -> Result<()> {
     let (src_spec, srcq, _duration_ms, _source_info) =
         decode::start_streaming_decode(path, playback.buffer_seconds)?;
-    let _exclusive = crate::exclusive::maybe_acquire(device, src_spec.rate, exclusive_mode);
     let config = device::pick_output_config(device, Some(src_spec.rate))?;
     let mut stream_config: cpal::StreamConfig = config.clone().into();
     if let Some(buf) = device::pick_buffer_size(&config) {

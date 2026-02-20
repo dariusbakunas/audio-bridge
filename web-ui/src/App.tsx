@@ -875,6 +875,27 @@ export default function App() {
     }
   }, [outputsSettings, updateOutputSettings]);
 
+  const handleToggleExclusiveSetting = useCallback(async (outputId: string, enabled: boolean) => {
+    if (!outputsSettings) return;
+    const exclusive = new Set(outputsSettings.exclusive);
+    if (enabled) {
+      exclusive.add(outputId);
+    } else {
+      exclusive.delete(outputId);
+    }
+    const next: OutputSettings = {
+      ...outputsSettings,
+      exclusive: Array.from(exclusive)
+    };
+    setOutputsSettings(next);
+    try {
+      await updateOutputSettings(next);
+    } catch (error) {
+      setOutputsSettings(outputsSettings);
+      setOutputsError(error instanceof Error ? error.message : "Failed to update outputs");
+    }
+  }, [outputsSettings, updateOutputSettings]);
+
   const handleRefreshProvider = useCallback(async (providerId: string) => {
     try {
       await postJson(`/providers/${encodeURIComponent(providerId)}/refresh`);
@@ -1590,6 +1611,7 @@ export default function App() {
             onRefreshProvider={handleRefreshProvider}
             onToggleOutput={handleToggleOutputSetting}
             onRenameOutput={handleRenameOutputSetting}
+            onToggleExclusive={handleToggleExclusiveSetting}
             metadataEvents={metadataEvents}
             logEvents={logEvents}
             logsError={logsError}
