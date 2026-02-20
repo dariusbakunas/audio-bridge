@@ -21,6 +21,7 @@ import {
   getEffectiveApiBase,
   getStoredApiBase,
   postJson,
+  safeMediaUrl,
   setStoredApiBase
 } from "./api";
 import {
@@ -1018,6 +1019,11 @@ export default function App() {
           case "play": {
             const url = payload.url as string | undefined;
             if (!url) return;
+            const safeUrl = safeMediaUrl(url);
+            if (!safeUrl) {
+              console.warn("browser: rejected media url", url);
+              return;
+            }
             const startPaused = Boolean(payload.start_paused);
             const seekMs = typeof payload.seek_ms === "number" ? payload.seek_ms : null;
             browserPathRef.current = typeof payload.path === "string" ? payload.path : null;
@@ -1032,7 +1038,7 @@ export default function App() {
               }
               sendBrowserStatus(true);
             };
-            audio.src = url;
+            audio.src = safeUrl;
             audio.load();
             if (seekMs === null) {
               applyStart();

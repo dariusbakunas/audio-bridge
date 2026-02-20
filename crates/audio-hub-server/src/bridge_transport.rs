@@ -3,7 +3,6 @@
 //! Wraps the bridge HTTP API with timeouts and JSON parsing.
 
 use std::net::SocketAddr;
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
 

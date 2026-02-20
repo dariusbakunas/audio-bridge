@@ -52,6 +52,31 @@ export function apiWsUrl(path: string): string {
   return `${scheme}://${window.location.host}${url}`;
 }
 
+function getApiBaseOrigin(): string {
+  const base = getEffectiveApiBase().trim();
+  const resolved = new URL(base || window.location.origin, window.location.origin);
+  return resolved.origin;
+}
+
+export function safeMediaUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let resolved: URL;
+  try {
+    const base = getEffectiveApiBase().trim();
+    resolved = new URL(trimmed, base || window.location.origin);
+  } catch {
+    return null;
+  }
+  if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
+    return null;
+  }
+  if (resolved.origin !== getApiBaseOrigin()) {
+    return null;
+  }
+  return resolved.toString();
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const url = apiUrl(path);
   const controller = !init?.signal ? new AbortController() : null;

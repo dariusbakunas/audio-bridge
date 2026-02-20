@@ -11,7 +11,6 @@ use actix_web::web;
 use crate::bridge_transport::{BridgeTransportClient, HttpDevicesSnapshot, HttpStatusResponse};
 use crate::bridge::update_online_and_should_emit;
 use crate::playback_transport::ChannelTransport;
-use crate::queue_service::QueueService;
 use crate::state::AppState;
 
 const MAX_DISCOVERED_FAILURES: usize = 5;

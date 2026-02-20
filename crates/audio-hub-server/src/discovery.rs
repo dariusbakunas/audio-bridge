@@ -183,29 +183,6 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
     });
 }
 
-pub(crate) fn spawn_cast_health_watcher(state: web::Data<AppState>) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(20));
-        let snapshot = match state.providers.cast.discovered.lock() {
-            Ok(map) => map
-                .iter()
-                .map(|(id, entry)| (id.clone(), entry.last_seen))
-                .collect::<Vec<_>>(),
-            Err(_) => continue,
-        };
-        let now = std::time::Instant::now();
-        for (id, last_seen) in snapshot {
-            if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
-                if let Ok(mut map) = state.providers.cast.discovered.lock() {
-                    map.remove(&id);
-                }
-                state.events.outputs_changed();
-                tracing::info!(cast_id = %id, "mdns: cast removed (stale)");
-            }
-        }
-    });
-}
-
 pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(15));

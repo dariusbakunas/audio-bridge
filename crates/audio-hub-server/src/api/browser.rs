@@ -221,6 +221,14 @@ pub async fn browser_ws(
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     let conn = req.connection_info();
-    let base_url = Some(format!("{}://{}", conn.scheme(), conn.host()));
+    let scheme = conn.scheme();
+    if !matches!(scheme, "http" | "https") {
+        return Err(actix_web::error::ErrorBadRequest("invalid scheme"));
+    }
+    let host = conn.host();
+    if host.len() > 255 {
+        return Err(actix_web::error::ErrorBadRequest("host too long"));
+    }
+    let base_url = Some(format!("{}://{}", scheme, host));
     ws::start(BrowserWs::new(state, base_url), &req, stream)
 }
