@@ -311,6 +311,16 @@ export default function SettingsView({
                                   </button>
                                 </div>
                               )}
+                              {provider.kind === "bridge" ? (
+                                <label className="outputs-exclusive-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={isExclusive(output.id)}
+                                    onChange={(event) => onToggleExclusive(output.id, event.target.checked)}
+                                  />
+                                  <span>Exclusive mode</span>
+                                </label>
+                              ) : null}
                             </div>
                             <div className="outputs-device-actions">
                               <label className="outputs-toggle">
@@ -322,20 +332,6 @@ export default function SettingsView({
                                 <span className="outputs-toggle-track" />
                                 <span className="outputs-toggle-thumb" />
                               </label>
-                              {provider.kind === "bridge" ? (
-                                <label className="outputs-toggle-group">
-                                  <span className="outputs-toggle-label">Exclusive</span>
-                                  <span className="outputs-toggle">
-                                    <input
-                                      type="checkbox"
-                                      checked={isExclusive(output.id)}
-                                      onChange={(event) => onToggleExclusive(output.id, event.target.checked)}
-                                    />
-                                    <span className="outputs-toggle-track" />
-                                    <span className="outputs-toggle-thumb" />
-                                  </span>
-                                </label>
-                              ) : null}
                             </div>
                           </div>
                         );

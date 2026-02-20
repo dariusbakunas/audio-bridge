@@ -332,6 +332,20 @@
   max-width: 360px;
 }
 
+.outputs-exclusive-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--muted-2);
+}
+
+.outputs-exclusive-row input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
 .outputs-toggle {
   position: relative;
   width: 46px;
