@@ -1,6 +1,6 @@
 import type { AlbumSummary } from "../types";
 import AlbumsView from "../components/AlbumsView";
-import { action } from "@storybook/addon-actions";
+import { action } from "storybook/actions";
 // @ts-ignore
 import cover1 from "./covers/cover-1.png";
 // @ts-ignore

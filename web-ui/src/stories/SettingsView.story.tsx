@@ -1,6 +1,6 @@
 import type { LogEvent, MetadataEvent, OutputSettings, ProviderOutputs } from "../types";
 import SettingsView from "../components/SettingsView";
-import { action } from "@storybook/addon-actions";
+import { action } from "storybook/actions";
 import "../styles.css";
 
 const metadataEvents = [

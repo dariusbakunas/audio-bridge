@@ -1,6 +1,6 @@
 import type { OutputInfo } from "../types";
 import OutputsModal from "../components/OutputsModal";
-import { action } from "@storybook/addon-actions";
+import { action } from "storybook/actions";
 import "../styles.css";
 
 const outputs: OutputInfo[] = [

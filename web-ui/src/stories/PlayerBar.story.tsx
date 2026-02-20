@@ -1,6 +1,6 @@
 import type { OutputInfo, StatusResponse } from "../types";
 import PlayerBar from "../components/PlayerBar";
-import { action } from "@storybook/addon-actions";
+import { action } from "storybook/actions";
 import "../styles.css";
 
 const status: StatusResponse = {
