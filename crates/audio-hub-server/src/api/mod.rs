@@ -4,6 +4,7 @@
 
 pub mod library;
 pub mod logs;
+pub mod local_playback;
 pub mod metadata;
 pub mod outputs;
 pub mod playback;
@@ -21,6 +22,11 @@ pub use library::{
     transcode_track,
 };
 pub use logs::{logs_clear, LogsClearResponse};
+pub use local_playback::{
+    local_playback_play,
+    local_playback_register,
+    local_playback_sessions,
+};
 pub use metadata::{
     album_image_clear,
     album_image_set,
@@ -224,4 +230,5 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
     }
+
 }

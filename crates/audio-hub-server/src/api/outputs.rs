@@ -65,6 +65,7 @@ pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
     ))
 }
 
+
 #[utoipa::path(
     get,
     path = "/outputs/settings",

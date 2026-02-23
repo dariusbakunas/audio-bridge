@@ -27,6 +27,7 @@ mod playback_transport;
 mod playback_manager;
 mod queue_service;
 mod local_player;
+mod local_playback_sessions;
 mod startup;
 mod status_store;
 mod state;

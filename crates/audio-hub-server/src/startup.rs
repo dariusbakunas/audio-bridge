@@ -201,6 +201,9 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::track_cover)
             .service(api::album_cover)
             .service(api::logs_clear)
+            .service(api::local_playback_register)
+            .service(api::local_playback_play)
+            .service(api::local_playback_sessions)
             .service(api::browser_ws)
             .service(api::health::health)
             .service(api::status_for_output)
@@ -363,6 +366,7 @@ fn should_log_path(path: &str) -> bool {
         || path == "/queue/stream"
         || path == "/logs/stream"
         || path == "/logs/clear"
+        || path == "/local-playback/sessions"
         || path == "/health"
         || path.ends_with("/status/stream")
         || path.starts_with("/stream/track/")

@@ -584,6 +584,57 @@ pub struct OutputSelectRequest {
     pub id: String,
 }
 
+/// Request payload for starting or refreshing a local playback session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackRegisterRequest {
+    pub kind: String,
+    pub name: String,
+    pub client_id: String,
+    pub app_version: String,
+}
+
+/// Response payload for local playback session registration.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackRegisterResponse {
+    pub session_id: String,
+    pub play_url: String,
+}
+
+/// Resolve-stream request for local playback.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackPlayRequest {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub track_id: Option<i64>,
+}
+
+/// Resolved stream URL for local playback.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackPlayResponse {
+    pub url: String,
+    pub path: String,
+    #[serde(default)]
+    pub track_id: Option<i64>,
+}
+
+/// Session summary for local playback sessions.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackSessionInfo {
+    pub session_id: String,
+    pub kind: String,
+    pub name: String,
+    pub app_version: String,
+    pub created_age_ms: u64,
+    pub last_seen_age_ms: u64,
+}
+
+/// Local playback session list.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalPlaybackSessionsResponse {
+    pub sessions: Vec<LocalPlaybackSessionInfo>,
+}
+
 /// Output settings (disabled outputs and renames).
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, Default)]
 pub struct OutputSettings {
