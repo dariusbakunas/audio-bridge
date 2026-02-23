@@ -635,6 +635,66 @@ pub struct LocalPlaybackSessionsResponse {
     pub sessions: Vec<LocalPlaybackSessionInfo>,
 }
 
+/// Session mode determines how playback is executed.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    /// Hub-managed transport/output playback.
+    Remote,
+    /// Client-managed local playback with hub URL resolution.
+    Local,
+}
+
+/// Request payload for creating or refreshing a session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionCreateRequest {
+    pub name: String,
+    pub mode: SessionMode,
+    pub client_id: String,
+    pub app_version: String,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub lease_ttl_sec: Option<u64>,
+}
+
+/// Response payload for session create/refresh.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionCreateResponse {
+    pub session_id: String,
+    pub lease_ttl_sec: u64,
+}
+
+/// Session heartbeat payload.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionHeartbeatRequest {
+    pub state: String,
+    #[serde(default)]
+    pub battery: Option<f32>,
+}
+
+/// Session list item.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionSummary {
+    pub id: String,
+    pub name: String,
+    pub mode: SessionMode,
+    pub client_id: String,
+    pub app_version: String,
+    #[serde(default)]
+    pub owner: Option<String>,
+    pub active_output_id: Option<String>,
+    pub queue_len: usize,
+    pub created_age_ms: u64,
+    pub last_seen_age_ms: u64,
+}
+
+/// Response payload for listing sessions.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionsListResponse {
+    pub sessions: Vec<SessionSummary>,
+}
+
 /// Output settings (disabled outputs and renames).
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, Default)]
 pub struct OutputSettings {

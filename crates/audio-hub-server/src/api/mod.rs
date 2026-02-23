@@ -9,6 +9,7 @@ pub mod metadata;
 pub mod outputs;
 pub mod playback;
 pub mod queue;
+pub mod sessions;
 pub mod streams;
 pub mod browser;
 pub mod health;
@@ -79,6 +80,11 @@ pub use queue::{
     queue_play_from,
     queue_previous,
     queue_remove,
+};
+pub use sessions::{
+    sessions_create,
+    sessions_heartbeat,
+    sessions_list,
 };
 pub use streams::{
     albums_stream,
