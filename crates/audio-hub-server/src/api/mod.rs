@@ -83,8 +83,12 @@ pub use queue::{
 };
 pub use sessions::{
     sessions_create,
+    sessions_delete,
+    sessions_get,
     sessions_heartbeat,
     sessions_list,
+    sessions_release_output,
+    sessions_select_output,
 };
 pub use streams::{
     albums_stream,

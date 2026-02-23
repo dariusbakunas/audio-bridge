@@ -695,6 +695,67 @@ pub struct SessionsListResponse {
     pub sessions: Vec<SessionSummary>,
 }
 
+/// Detailed session snapshot.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionDetailResponse {
+    pub id: String,
+    pub name: String,
+    pub mode: SessionMode,
+    pub client_id: String,
+    pub app_version: String,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub active_output_id: Option<String>,
+    pub queue_len: usize,
+    pub created_age_ms: u64,
+    pub last_seen_age_ms: u64,
+    pub lease_ttl_sec: u64,
+    #[serde(default)]
+    pub heartbeat_state: Option<String>,
+    #[serde(default)]
+    pub battery: Option<f32>,
+}
+
+/// Request payload to bind an output to a session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionSelectOutputRequest {
+    pub output_id: String,
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Response payload after binding an output to a session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionSelectOutputResponse {
+    pub session_id: String,
+    pub output_id: String,
+}
+
+/// Conflict response when an output is already bound by another session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct OutputInUseError {
+    pub error: String,
+    pub output_id: String,
+    pub held_by_session_id: String,
+}
+
+/// Response after releasing an output lock from a session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionReleaseOutputResponse {
+    pub session_id: String,
+    #[serde(default)]
+    pub released_output_id: Option<String>,
+}
+
+/// Response after deleting a session.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionDeleteResponse {
+    pub session_id: String,
+    #[serde(default)]
+    pub released_output_id: Option<String>,
+}
+
 /// Output settings (disabled outputs and renames).
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, Default)]
 pub struct OutputSettings {
