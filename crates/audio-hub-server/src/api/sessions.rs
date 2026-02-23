@@ -1,9 +1,16 @@
 //! Session management API handlers.
 
 use actix_web::{get, post, web, HttpResponse, Responder};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 use crate::models::{
     OutputInUseError,
+    QueueAddRequest,
+    QueueClearRequest,
+    QueuePlayFromRequest,
+    QueueRemoveRequest,
+    QueueResponse,
     SessionCreateRequest,
     SessionCreateResponse,
     SessionDetailResponse,
@@ -272,4 +279,444 @@ pub async fn sessions_delete(
         session_id,
         released_output_id,
     })
+}
+
+fn require_session(session_id: &str) -> Result<(), HttpResponse> {
+    if crate::session_registry::touch_session(session_id) {
+        Ok(())
+    } else {
+        Err(HttpResponse::NotFound().body("session not found"))
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}/queue",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Queue contents", body = QueueResponse),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[get("/sessions/{id}/queue")]
+/// Return queue for a session.
+pub async fn sessions_queue_list(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let snapshot = match crate::session_registry::queue_snapshot(&session_id) {
+        Ok(snapshot) => snapshot,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    };
+    HttpResponse::Ok().json(build_queue_response(&state, snapshot))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = QueueAddRequest,
+    responses(
+        (status = 200, description = "Queue updated"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue")]
+/// Add paths to a session queue.
+pub async fn sessions_queue_add(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<QueueAddRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let mut resolved = Vec::new();
+    for path_str in &body.paths {
+        let candidate = PathBuf::from(path_str);
+        let path = match state.output.controller.canonicalize_under_root(&state, &candidate) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        resolved.push(path);
+    }
+    let added = match crate::session_registry::queue_add_paths(&session_id, resolved) {
+        Ok(added) => added,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    };
+    HttpResponse::Ok().body(format!("added {added}"))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/next/add",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = QueueAddRequest,
+    responses(
+        (status = 200, description = "Queue updated"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue/next/add")]
+/// Insert paths at the front of a session queue.
+pub async fn sessions_queue_add_next(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<QueueAddRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let mut resolved = Vec::new();
+    for path_str in &body.paths {
+        let candidate = PathBuf::from(path_str);
+        let path = match state.output.controller.canonicalize_under_root(&state, &candidate) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        resolved.push(path);
+    }
+    let added = match crate::session_registry::queue_add_next_paths(&session_id, resolved) {
+        Ok(added) => added,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    };
+    HttpResponse::Ok().body(format!("added {added}"))
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/remove",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = QueueRemoveRequest,
+    responses(
+        (status = 200, description = "Queue updated"),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue/remove")]
+/// Remove an item from a session queue.
+pub async fn sessions_queue_remove(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<QueueRemoveRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let candidate = PathBuf::from(&body.path);
+    let path = match state.output.controller.canonicalize_under_root(&state, &candidate) {
+        Ok(path) => path,
+        Err(err) => return err.into_response(),
+    };
+    match crate::session_registry::queue_remove_path(&session_id, &path) {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(()) => HttpResponse::NotFound().body("session not found"),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/play_from",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = QueuePlayFromRequest,
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 404, description = "Session or queue item not found"),
+        (status = 500, description = "Player offline")
+    )
+)]
+#[post("/sessions/{id}/queue/play_from")]
+/// Play from a queued item in a session.
+pub async fn sessions_queue_play_from(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<QueuePlayFromRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+
+    let path = if let Some(track_id) = body.track_id {
+        match state.metadata.db.track_path_for_id(track_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => return HttpResponse::NotFound().finish(),
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else if let Some(path) = body.path.as_ref() {
+        path.clone()
+    } else {
+        return HttpResponse::BadRequest().body("path or track_id is required");
+    };
+
+    let canonical = {
+        let candidate = PathBuf::from(&path);
+        match state.output.controller.canonicalize_under_root(&state, &candidate) {
+            Ok(path) => path,
+            Err(err) => return err.into_response(),
+        }
+    };
+
+    let found = match crate::session_registry::queue_play_from(&session_id, &canonical) {
+        Ok(found) => found,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    };
+    if !found {
+        return HttpResponse::NotFound().finish();
+    }
+
+    match state
+        .output
+        .session_playback
+        .play_path(&state, &session_id, canonical)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/clear",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = QueueClearRequest,
+    responses(
+        (status = 200, description = "Queue cleared"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue/clear")]
+/// Clear a session queue.
+pub async fn sessions_queue_clear(
+    _state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: Option<web::Json<QueueClearRequest>>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let clear_history = body.as_ref().map(|req| req.clear_history).unwrap_or(false);
+    let clear_queue = body.as_ref().map(|req| req.clear_queue).unwrap_or(true);
+    match crate::session_registry::queue_clear(&session_id, clear_queue, clear_history) {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(()) => HttpResponse::NotFound().body("session not found"),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/next",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Advanced to next"),
+        (status = 204, description = "End of queue"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue/next")]
+/// Skip to the next track in a session queue.
+pub async fn sessions_queue_next(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let Some(next_path) = (match crate::session_registry::queue_next_path(&session_id) {
+        Ok(path) => path,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    }) else {
+        return HttpResponse::NoContent().finish();
+    };
+    match state
+        .output
+        .session_playback
+        .play_path(&state, &session_id, next_path)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/queue/previous",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Playback started"),
+        (status = 204, description = "No previous track"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[post("/sessions/{id}/queue/previous")]
+/// Skip to previous track in a session queue.
+pub async fn sessions_queue_previous(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+    let Some(prev_path) = (match crate::session_registry::queue_previous_path(&session_id) {
+        Ok(path) => path,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    }) else {
+        return HttpResponse::NoContent().finish();
+    };
+    match state
+        .output
+        .session_playback
+        .play_path(&state, &session_id, prev_path)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+fn build_queue_response(
+    state: &AppState,
+    snapshot: crate::session_registry::SessionQueueSnapshot,
+) -> QueueResponse {
+    let mut items: Vec<crate::models::QueueItem> = snapshot
+        .queue_items
+        .iter()
+        .map(|path| build_queue_item(state, path, false, false))
+        .collect();
+
+    if let Some(current_path) = snapshot.now_playing.as_ref() {
+        let current_str = current_path.to_string_lossy();
+        let index = items.iter().position(|item| match item {
+            crate::models::QueueItem::Track { path, .. } => path == current_str.as_ref(),
+            crate::models::QueueItem::Missing { path } => path == current_str.as_ref(),
+        });
+        if let Some(index) = index {
+            if index != 0 {
+                let current = items.remove(index);
+                items.insert(0, current);
+            }
+            if let Some(crate::models::QueueItem::Track { now_playing, .. }) = items.get_mut(0) {
+                *now_playing = true;
+            }
+        } else {
+            items.insert(0, build_queue_item(state, current_path, true, false));
+        }
+    }
+
+    let mut played_paths = Vec::new();
+    for path in snapshot.history.iter().rev() {
+        if snapshot.now_playing.as_deref() == Some(path.as_path()) {
+            continue;
+        }
+        played_paths.push(path.clone());
+        if played_paths.len() >= 10 {
+            break;
+        }
+    }
+
+    if !played_paths.is_empty() {
+        played_paths.reverse();
+        let mut seen = HashSet::new();
+        for item in &items {
+            match item {
+                crate::models::QueueItem::Track { path, .. } => {
+                    seen.insert(path.clone());
+                }
+                crate::models::QueueItem::Missing { path } => {
+                    seen.insert(path.clone());
+                }
+            }
+        }
+
+        let mut played_items = Vec::new();
+        for path in played_paths {
+            let path_str = path.to_string_lossy().to_string();
+            if seen.contains(&path_str) {
+                continue;
+            }
+            played_items.push(build_queue_item(state, &path, false, true));
+        }
+
+        if !played_items.is_empty() {
+            played_items.append(&mut items);
+            items = played_items;
+        }
+    }
+
+    QueueResponse { items }
+}
+
+fn build_queue_item(
+    state: &AppState,
+    path: &PathBuf,
+    now_playing: bool,
+    played: bool,
+) -> crate::models::QueueItem {
+    let lib = state.library.read().unwrap();
+    if let Some(crate::models::LibraryEntry::Track {
+        file_name,
+        sample_rate,
+        album,
+        artist,
+        format,
+        ..
+    }) = lib.find_track_by_path(path)
+    {
+        let path_str = path.to_string_lossy().to_string();
+        let track_id = state.metadata.db.track_id_for_path(&path_str).ok().flatten();
+        let title = state
+            .metadata
+            .db
+            .track_record_by_path(&path_str)
+            .ok()
+            .flatten()
+            .and_then(|record| record.title);
+        let duration_ms = state
+            .metadata
+            .db
+            .track_record_by_path(&path_str)
+            .ok()
+            .flatten()
+            .and_then(|record| record.duration_ms);
+        crate::models::QueueItem::Track {
+            id: track_id,
+            path: path_str,
+            file_name,
+            title,
+            duration_ms,
+            sample_rate,
+            album,
+            artist,
+            format,
+            now_playing,
+            played,
+        }
+    } else {
+        crate::models::QueueItem::Missing {
+            path: path.to_string_lossy().to_string(),
+        }
+    }
 }

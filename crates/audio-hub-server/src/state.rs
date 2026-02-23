@@ -20,6 +20,7 @@ use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
 use crate::metadata_db::MetadataDb;
 use crate::musicbrainz::MusicBrainzClient;
+use crate::session_playback_manager::SessionPlaybackManager;
 
 #[derive(Clone)]
 pub struct MetadataWake {
@@ -133,6 +134,8 @@ pub struct ProviderState {
 pub struct OutputState {
     /// Output controller facade.
     pub controller: OutputController,
+    /// Session-scoped playback dispatch helper.
+    pub session_playback: SessionPlaybackManager,
 }
 
 /// Shared application state for Actix handlers and background workers.
@@ -188,6 +191,7 @@ impl AppState {
             },
             output: OutputState {
                 controller: OutputController::default(),
+                session_playback: SessionPlaybackManager::new(),
             },
             events,
             log_bus,

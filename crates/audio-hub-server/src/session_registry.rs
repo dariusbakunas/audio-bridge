@@ -4,6 +4,8 @@
 //! per-session transport is handled separately.
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -23,6 +25,9 @@ pub struct SessionRecord {
     pub owner: Option<String>,
     pub active_output_id: Option<String>,
     pub queue_len: usize,
+    pub now_playing: Option<PathBuf>,
+    pub queue_items: Vec<PathBuf>,
+    pub history: VecDeque<PathBuf>,
     pub created_at: Instant,
     pub last_seen: Instant,
     pub lease_ttl: Duration,
@@ -87,6 +92,9 @@ pub fn create_or_refresh(
             owner,
             active_output_id: None,
             queue_len: 0,
+            now_playing: None,
+            queue_items: Vec::new(),
+            history: VecDeque::new(),
             created_at: now,
             last_seen: now,
             lease_ttl: ttl_dur,
@@ -118,6 +126,196 @@ pub fn get_session(session_id: &str) -> Option<SessionRecord> {
         .lock()
         .ok()
         .and_then(|s| s.by_id.get(session_id).cloned())
+}
+
+pub fn touch_session(session_id: &str) -> bool {
+    let mut store = match store().lock() {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+    let Some(session) = store.by_id.get_mut(session_id) else {
+        return false;
+    };
+    session.last_seen = Instant::now();
+    true
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionQueueSnapshot {
+    pub now_playing: Option<PathBuf>,
+    pub queue_items: Vec<PathBuf>,
+    pub history: VecDeque<PathBuf>,
+}
+
+pub fn queue_snapshot(session_id: &str) -> Result<SessionQueueSnapshot, ()> {
+    let store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get(session_id).ok_or(())?;
+    Ok(SessionQueueSnapshot {
+        now_playing: session.now_playing.clone(),
+        queue_items: session.queue_items.clone(),
+        history: session.history.clone(),
+    })
+}
+
+pub fn queue_add_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usize, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let mut added = 0usize;
+    for path in paths {
+        if session.queue_items.iter().any(|p| p == &path) {
+            continue;
+        }
+        session.queue_items.push(path);
+        added += 1;
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(added)
+}
+
+pub fn queue_add_next_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usize, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let mut added = 0usize;
+    for path in paths {
+        if session.queue_items.iter().any(|p| p == &path) {
+            continue;
+        }
+        session.queue_items.insert(added, path);
+        added += 1;
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(added)
+}
+
+pub fn queue_remove_path(session_id: &str, path: &Path) -> Result<bool, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let removed = if let Some(pos) = session.queue_items.iter().position(|p| p == path) {
+        session.queue_items.remove(pos);
+        true
+    } else {
+        false
+    };
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(removed)
+}
+
+pub fn queue_clear(session_id: &str, clear_queue: bool, clear_history: bool) -> Result<(), ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    if clear_queue {
+        session.queue_items.clear();
+    }
+    if clear_history {
+        session.history.clear();
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(())
+}
+
+pub fn queue_play_from(session_id: &str, path: &Path) -> Result<bool, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let Some(pos) = session.queue_items.iter().position(|p| p == path) else {
+        return Ok(false);
+    };
+    if let Some(current) = session.now_playing.take() {
+        if session.history.back().map(|last| last != &current).unwrap_or(true) {
+            session.history.push_back(current);
+        }
+    }
+    let selected = session.queue_items[pos].clone();
+    session.queue_items.drain(0..=pos);
+    session.now_playing = Some(selected);
+    if session.history.len() > 100 {
+        let _ = session.history.pop_front();
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(true)
+}
+
+pub fn queue_next_path(session_id: &str) -> Result<Option<PathBuf>, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let next = if session.queue_items.is_empty() {
+        None
+    } else {
+        let path = session.queue_items.remove(0);
+        if let Some(current) = session.now_playing.take() {
+            if session.history.back().map(|last| last != &current).unwrap_or(true) {
+                session.history.push_back(current);
+            }
+        }
+        session.now_playing = Some(path.clone());
+        if session.history.len() > 100 {
+            let _ = session.history.pop_front();
+        }
+        Some(path)
+    };
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(next)
+}
+
+pub fn queue_previous_path(session_id: &str) -> Result<Option<PathBuf>, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    while let Some(prev) = session.history.pop_back() {
+        if let Some(current) = session.now_playing.take() {
+            if current != prev {
+                session.queue_items.insert(0, current);
+            }
+        }
+        session.now_playing = Some(prev.clone());
+        session.queue_len = session.queue_items.len();
+        session.last_seen = Instant::now();
+        return Ok(Some(prev));
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(None)
+}
+
+#[derive(Clone, Debug)]
+pub enum BoundOutputError {
+    SessionNotFound,
+    NoOutputSelected,
+    OutputLockMissing { output_id: String },
+    OutputInUse {
+        output_id: String,
+        held_by_session_id: String,
+    },
+}
+
+pub fn require_bound_output(session_id: &str) -> Result<String, BoundOutputError> {
+    let mut store = store()
+        .lock()
+        .map_err(|_| BoundOutputError::SessionNotFound)?;
+    let output_id = store
+        .by_id
+        .get(session_id)
+        .ok_or(BoundOutputError::SessionNotFound)?
+        .active_output_id
+        .clone()
+        .ok_or(BoundOutputError::NoOutputSelected)?;
+    match store.output_locks.get(&output_id) {
+        Some(holder) if holder == session_id => {
+            if let Some(session) = store.by_id.get_mut(session_id) {
+                session.last_seen = Instant::now();
+            }
+            Ok(output_id)
+        }
+        Some(holder) => Err(BoundOutputError::OutputInUse {
+            output_id,
+            held_by_session_id: holder.clone(),
+        }),
+        None => Err(BoundOutputError::OutputLockMissing { output_id }),
+    }
 }
 
 #[derive(Clone, Debug)]

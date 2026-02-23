@@ -32,6 +32,7 @@ mod startup;
 mod status_store;
 mod state;
 mod session_registry;
+mod session_playback_manager;
 mod tag_writer;
 mod stream_url;
 
