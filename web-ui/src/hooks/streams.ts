@@ -25,6 +25,7 @@ interface LogsStreamOptions {
 interface QueueStreamOptions {
   enabled?: boolean;
   sourceKey?: string;
+  sessionId?: string | null;
   onEvent: (items: QueueResponse["items"]) => void;
   onError: () => void;
 }
@@ -32,6 +33,7 @@ interface QueueStreamOptions {
 interface StatusStreamOptions {
   enabled?: boolean;
   sourceKey?: string;
+  sessionId?: string | null;
   onEvent: (data: StatusResponse) => void;
   onError: () => void;
 }
@@ -127,7 +129,7 @@ export function useLogsStream({ enabled, onSnapshot, onEvent, onError }: LogsStr
   }, [enabled]);
 }
 
-export function useQueueStream({ enabled = true, sourceKey, onEvent, onError }: QueueStreamOptions) {
+export function useQueueStream({ enabled = true, sourceKey, sessionId, onEvent, onError }: QueueStreamOptions) {
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -136,9 +138,11 @@ export function useQueueStream({ enabled = true, sourceKey, onEvent, onError }: 
   }, [onEvent, onError]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !sessionId) return;
     let mounted = true;
-    const stream = new EventSource(apiUrl("/queue/stream"));
+    const stream = new EventSource(
+      apiUrl(`/sessions/${encodeURIComponent(sessionId)}/queue/stream`)
+    );
     stream.addEventListener("queue", (event) => {
       if (!mounted) return;
       const data = JSON.parse((event as MessageEvent).data) as QueueResponse;
@@ -152,10 +156,10 @@ export function useQueueStream({ enabled = true, sourceKey, onEvent, onError }: 
       mounted = false;
       stream.close();
     };
-  }, [enabled, sourceKey]);
+  }, [enabled, sourceKey, sessionId]);
 }
 
-export function useStatusStream({ enabled = true, sourceKey, onEvent, onError }: StatusStreamOptions) {
+export function useStatusStream({ enabled = true, sourceKey, sessionId, onEvent, onError }: StatusStreamOptions) {
   const onEventRef = useRef(onEvent);
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -164,9 +168,11 @@ export function useStatusStream({ enabled = true, sourceKey, onEvent, onError }:
   }, [onEvent, onError]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !sessionId) return;
     let mounted = true;
-    const stream = new EventSource(apiUrl("/status/stream"));
+    const stream = new EventSource(
+      apiUrl(`/sessions/${encodeURIComponent(sessionId)}/status/stream`)
+    );
     stream.addEventListener("status", (event) => {
       if (!mounted) return;
       const data = JSON.parse((event as MessageEvent).data) as StatusResponse;
@@ -180,5 +186,5 @@ export function useStatusStream({ enabled = true, sourceKey, onEvent, onError }:
       mounted = false;
       stream.close();
     };
-  }, [enabled, sourceKey]);
+  }, [enabled, sourceKey, sessionId]);
 }

@@ -67,6 +67,36 @@ export interface OutputSettingsResponse {
   providers: ProviderOutputs[];
 }
 
+export type SessionMode = "remote" | "local";
+
+export interface SessionCreateResponse {
+  session_id: string;
+  lease_ttl_sec: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  name: string;
+  mode: SessionMode;
+  client_id: string;
+  app_version: string;
+  owner?: string | null;
+  active_output_id?: string | null;
+  queue_len: number;
+  created_age_ms: number;
+  last_seen_age_ms: number;
+}
+
+export interface SessionsListResponse {
+  sessions: SessionSummary[];
+}
+
+export interface SessionDetailResponse extends SessionSummary {
+  lease_ttl_sec: number;
+  heartbeat_state?: string | null;
+  battery?: number | null;
+}
+
 export interface QueueItemTrack {
   kind: "track";
   id?: number | null;

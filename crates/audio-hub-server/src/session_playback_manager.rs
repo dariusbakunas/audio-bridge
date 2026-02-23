@@ -31,6 +31,16 @@ pub enum SessionPlaybackError {
         output_id: String,
         reason: String,
     },
+    StatusFailed {
+        session_id: String,
+        output_id: String,
+        reason: String,
+    },
+    CommandFailed {
+        session_id: String,
+        output_id: String,
+        reason: String,
+    },
 }
 
 impl SessionPlaybackError {
@@ -67,6 +77,20 @@ impl SessionPlaybackError {
             } => HttpResponse::ServiceUnavailable().body(format!(
                 "failed to dispatch playback for session: session_id={session_id} output_id={output_id} reason={reason}"
             )),
+            SessionPlaybackError::StatusFailed {
+                session_id,
+                output_id,
+                reason,
+            } => HttpResponse::ServiceUnavailable().body(format!(
+                "failed to fetch status for session: session_id={session_id} output_id={output_id} reason={reason}"
+            )),
+            SessionPlaybackError::CommandFailed {
+                session_id,
+                output_id,
+                reason,
+            } => HttpResponse::ServiceUnavailable().body(format!(
+                "failed to execute session command: session_id={session_id} output_id={output_id} reason={reason}"
+            )),
         }
     }
 }
@@ -92,39 +116,37 @@ impl SessionPlaybackManager {
         Self
     }
 
+    fn bound_output_id(&self, session_id: &str) -> Result<String, SessionPlaybackError> {
+        match crate::session_registry::require_bound_output(session_id) {
+            Ok(output_id) => Ok(output_id),
+            Err(BoundOutputError::SessionNotFound) => Err(SessionPlaybackError::SessionNotFound),
+            Err(BoundOutputError::NoOutputSelected) => Err(SessionPlaybackError::NoOutputSelected {
+                session_id: session_id.to_string(),
+            }),
+            Err(BoundOutputError::OutputLockMissing { output_id }) => {
+                Err(SessionPlaybackError::OutputLockMissing {
+                    session_id: session_id.to_string(),
+                    output_id,
+                })
+            }
+            Err(BoundOutputError::OutputInUse {
+                output_id,
+                held_by_session_id,
+            }) => Err(SessionPlaybackError::OutputInUse {
+                session_id: session_id.to_string(),
+                output_id,
+                held_by_session_id,
+            }),
+        }
+    }
+
     pub async fn play_path(
         &self,
         state: &AppState,
         session_id: &str,
         path: PathBuf,
     ) -> Result<String, SessionPlaybackError> {
-        let output_id = match crate::session_registry::require_bound_output(session_id) {
-            Ok(output_id) => output_id,
-            Err(BoundOutputError::SessionNotFound) => {
-                return Err(SessionPlaybackError::SessionNotFound);
-            }
-            Err(BoundOutputError::NoOutputSelected) => {
-                return Err(SessionPlaybackError::NoOutputSelected {
-                    session_id: session_id.to_string(),
-                });
-            }
-            Err(BoundOutputError::OutputLockMissing { output_id }) => {
-                return Err(SessionPlaybackError::OutputLockMissing {
-                    session_id: session_id.to_string(),
-                    output_id,
-                });
-            }
-            Err(BoundOutputError::OutputInUse {
-                output_id,
-                held_by_session_id,
-            }) => {
-                return Err(SessionPlaybackError::OutputInUse {
-                    session_id: session_id.to_string(),
-                    output_id,
-                    held_by_session_id,
-                });
-            }
-        };
+        let output_id = self.bound_output_id(session_id)?;
 
         if let Err(err) = state.output.controller.select_output(state, &output_id).await {
             return Err(SessionPlaybackError::SelectFailed {
@@ -147,5 +169,99 @@ impl SessionPlaybackManager {
                 reason: controller_error_reason(&err),
             }),
         }
+    }
+
+    pub async fn status(
+        &self,
+        state: &AppState,
+        session_id: &str,
+    ) -> Result<crate::models::StatusResponse, SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        state
+            .output
+            .controller
+            .status_for_output(state, &output_id)
+            .await
+            .map_err(|err| SessionPlaybackError::StatusFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
+    pub async fn pause_toggle(
+        &self,
+        state: &AppState,
+        session_id: &str,
+    ) -> Result<(), SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+            return Err(SessionPlaybackError::SelectFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            });
+        }
+        state
+            .output
+            .controller
+            .pause_toggle(state)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
+    pub async fn seek(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        ms: u64,
+    ) -> Result<(), SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+            return Err(SessionPlaybackError::SelectFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            });
+        }
+        state
+            .output
+            .controller
+            .seek(state, ms)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
+    pub async fn stop(
+        &self,
+        state: &AppState,
+        session_id: &str,
+    ) -> Result<(), SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+            return Err(SessionPlaybackError::SelectFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            });
+        }
+        state
+            .output
+            .controller
+            .stop(state)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
     }
 }

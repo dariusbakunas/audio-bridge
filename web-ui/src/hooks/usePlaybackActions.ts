@@ -1,8 +1,9 @@
 import { useCallback } from "react";
-import { postJson } from "../api";
-import { TrackSummary } from "../types";
+import { fetchJson, postJson } from "../api";
+import { TrackListResponse, TrackSummary } from "../types";
 
 interface PlaybackActionsOptions {
+  sessionId: string | null;
   activeOutputId: string | null;
   rescanBusy: boolean;
   setError: (message: string | null) => void;
@@ -11,12 +12,20 @@ interface PlaybackActionsOptions {
 }
 
 export function usePlaybackActions({
+  sessionId,
   activeOutputId,
   rescanBusy,
   setError,
   setActiveOutputId,
   setRescanBusy
 }: PlaybackActionsOptions) {
+  const requireSessionId = () => {
+    if (!sessionId) {
+      throw new Error("No active session. Reconnect and try again.");
+    }
+    return sessionId;
+  };
+
   const handleRescanLibrary = useCallback(async () => {
     if (rescanBusy) return;
     setRescanBusy(true);
@@ -48,11 +57,12 @@ export function usePlaybackActions({
 
   const handlePause = useCallback(async () => {
     try {
-      await postJson("/pause");
+      const sid = requireSessionId();
+      await postJson(`/sessions/${encodeURIComponent(sid)}/pause`);
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [setError]);
+  }, [sessionId, setError]);
 
   const handleRescan = useCallback(async () => {
     try {
@@ -65,24 +75,28 @@ export function usePlaybackActions({
   const handleSelectOutput = useCallback(
     async (id: string) => {
       try {
-        await postJson("/outputs/select", { id });
+        const sid = requireSessionId();
+        await postJson(`/sessions/${encodeURIComponent(sid)}/select-output`, { output_id: id });
         setActiveOutputId(id);
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [setActiveOutputId, setError]
+    [sessionId, setActiveOutputId, setError]
   );
 
   const handlePlay = useCallback(
     async (path: string) => {
       try {
-        await postJson("/play", { path, queue_mode: "keep" });
+        const sid = requireSessionId();
+        const base = `/sessions/${encodeURIComponent(sid)}/queue`;
+        await postJson(`${base}/next/add`, { paths: [path] });
+        await postJson(`${base}/next`);
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [setError]
+    [sessionId, setError]
   );
 
   const handlePlayAlbumTrack = useCallback(
@@ -97,16 +111,28 @@ export function usePlaybackActions({
     async (albumId: number) => {
       if (!activeOutputId) return;
       try {
-        await postJson("/play/album", {
-          album_id: albumId,
-          queue_mode: "replace",
-          output_id: activeOutputId
+        const sid = requireSessionId();
+        const tracks = await fetchJson<TrackListResponse>(
+          `/tracks?album_id=${albumId}&limit=500`
+        );
+        const paths = (tracks.items ?? [])
+          .map((track) => track.path)
+          .filter((path): path is string => Boolean(path));
+        if (!paths.length) {
+          throw new Error("Album has no playable tracks.");
+        }
+        const base = `/sessions/${encodeURIComponent(sid)}/queue`;
+        await postJson(`${base}/clear`, {
+          clear_queue: true,
+          clear_history: false
         });
+        await postJson(base, { paths });
+        await postJson(`${base}/next`);
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [activeOutputId, setError]
+    [sessionId, activeOutputId, setError]
   );
 
   return {

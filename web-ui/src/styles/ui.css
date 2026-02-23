@@ -76,6 +76,21 @@
   gap: 12px;
 }
 
+.header-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-session-select {
+  height: 36px;
+  min-width: 180px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--ink);
+}
+
 .header-search {
   display: flex;
   align-items: center;

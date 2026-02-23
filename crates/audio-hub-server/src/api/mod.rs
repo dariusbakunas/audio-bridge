@@ -87,6 +87,7 @@ pub use sessions::{
     sessions_get,
     sessions_heartbeat,
     sessions_list,
+    sessions_pause,
     sessions_queue_add,
     sessions_queue_add_next,
     sessions_queue_clear,
@@ -95,8 +96,13 @@ pub use sessions::{
     sessions_queue_play_from,
     sessions_queue_previous,
     sessions_queue_remove,
+    sessions_queue_stream,
     sessions_release_output,
+    sessions_seek,
     sessions_select_output,
+    sessions_status,
+    sessions_status_stream,
+    sessions_stop,
 };
 pub use streams::{
     albums_stream,

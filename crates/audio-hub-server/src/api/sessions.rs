@@ -1,9 +1,20 @@
 //! Session management API handlers.
 
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{get, post, web, Error, HttpResponse, Responder};
+use actix_web::http::header;
+use actix_web::web::Bytes;
+use futures_util::{Stream, stream::unfold};
+use serde::Deserialize;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::Instant;
+use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::time::{Duration, Interval, MissedTickBehavior};
+use utoipa::ToSchema;
 
+use crate::events::HubEvent;
 use crate::models::{
     OutputInUseError,
     QueueAddRequest,
@@ -21,8 +32,85 @@ use crate::models::{
     SessionSelectOutputResponse,
     SessionSummary,
     SessionsListResponse,
+    StatusResponse,
 };
 use crate::state::AppState;
+
+/// Session seek request payload (milliseconds).
+#[derive(Deserialize, ToSchema)]
+pub struct SessionSeekBody {
+    /// Absolute seek position in milliseconds.
+    pub ms: u64,
+}
+
+const SESSION_STATUS_PING_INTERVAL: Duration = Duration::from_secs(15);
+
+struct SessionStatusStreamState {
+    state: web::Data<AppState>,
+    session_id: String,
+    receiver: broadcast::Receiver<HubEvent>,
+    interval: Interval,
+    pending: VecDeque<Bytes>,
+    last_status: Option<String>,
+    last_ping: Instant,
+}
+
+struct SessionQueueStreamState {
+    state: web::Data<AppState>,
+    session_id: String,
+    receiver: broadcast::Receiver<HubEvent>,
+    interval: Interval,
+    pending: VecDeque<Bytes>,
+    last_queue: Option<String>,
+    last_ping: Instant,
+}
+
+enum SessionStreamSignal {
+    Tick,
+    Event(Result<HubEvent, RecvError>),
+}
+
+fn session_sse_event(event: &str, data: &str) -> Bytes {
+    let mut payload = String::new();
+    payload.push_str("event: ");
+    payload.push_str(event);
+    payload.push('\n');
+    for line in data.lines() {
+        payload.push_str("data: ");
+        payload.push_str(line);
+        payload.push('\n');
+    }
+    payload.push('\n');
+    Bytes::from(payload)
+}
+
+fn push_session_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
+    if pending.is_empty() && last_ping.elapsed() >= SESSION_STATUS_PING_INTERVAL {
+        *last_ping = Instant::now();
+        pending.push_back(Bytes::from(": ping\n\n"));
+    }
+}
+
+async fn recv_session_signal(
+    receiver: &mut broadcast::Receiver<HubEvent>,
+    interval: &mut Interval,
+) -> SessionStreamSignal {
+    tokio::select! {
+        _ = interval.tick() => SessionStreamSignal::Tick,
+        result = receiver.recv() => SessionStreamSignal::Event(result),
+    }
+}
+
+fn session_sse_response<S>(stream: S) -> HttpResponse
+where
+    S: Stream<Item = Result<Bytes, Error>> + 'static,
+{
+    HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream)
+}
 
 #[utoipa::path(
     post,
@@ -279,6 +367,289 @@ pub async fn sessions_delete(
         session_id,
         released_output_id,
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}/status",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Playback status for session output", body = StatusResponse),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[get("/sessions/{id}/status")]
+/// Return playback status for the output bound to this session.
+pub async fn sessions_status(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    match state.output.session_playback.status(&state, &session_id).await {
+        Ok(resp) => HttpResponse::Ok().json(resp),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}/status/stream",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Session status event stream"),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[get("/sessions/{id}/status/stream")]
+/// Stream status updates for a specific session via server-sent events.
+pub async fn sessions_status_stream(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    let initial = match state.output.session_playback.status(&state, &session_id).await {
+        Ok(resp) => resp,
+        Err(err) => return err.into_response(),
+    };
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
+    let mut pending = VecDeque::new();
+    pending.push_back(session_sse_event("status", &initial_json));
+
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let receiver = state.events.subscribe();
+
+    let stream = unfold(
+        SessionStatusStreamState {
+            state: state.clone(),
+            session_id,
+            receiver,
+            interval,
+            pending,
+            last_status: Some(initial_json),
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+
+                let mut refresh = false;
+                match recv_session_signal(&mut ctx.receiver, &mut ctx.interval).await {
+                    SessionStreamSignal::Tick => {}
+                    SessionStreamSignal::Event(result) => match result {
+                        Ok(HubEvent::StatusChanged) => refresh = true,
+                        Ok(HubEvent::OutputsChanged) => refresh = true,
+                        Ok(HubEvent::QueueChanged) => {}
+                        Ok(HubEvent::Metadata(_)) => {}
+                        Ok(HubEvent::LibraryChanged) => {}
+                        Err(RecvError::Lagged(_)) => refresh = true,
+                        Err(RecvError::Closed) => return None,
+                    },
+                }
+
+                if refresh {
+                    if let Ok(status) = ctx
+                        .state
+                        .output
+                        .session_playback
+                        .status(&ctx.state, &ctx.session_id)
+                        .await
+                    {
+                        let json = serde_json::to_string(&status)
+                            .unwrap_or_else(|_| "null".to_string());
+                        if ctx.last_status.as_deref() != Some(json.as_str()) {
+                            ctx.last_status = Some(json.clone());
+                            ctx.pending.push_back(session_sse_event("status", &json));
+                        }
+                    }
+                }
+
+                push_session_ping_if_needed(&mut ctx.pending, &mut ctx.last_ping);
+            }
+        },
+    );
+
+    session_sse_response(stream)
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}/queue/stream",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Session queue event stream"),
+        (status = 404, description = "Session not found")
+    )
+)]
+#[get("/sessions/{id}/queue/stream")]
+/// Stream queue updates for a specific session via server-sent events.
+pub async fn sessions_queue_stream(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    if let Err(resp) = require_session(&session_id) {
+        return resp;
+    }
+
+    let initial_snapshot = match crate::session_registry::queue_snapshot(&session_id) {
+        Ok(snapshot) => snapshot,
+        Err(()) => return HttpResponse::NotFound().body("session not found"),
+    };
+    let initial = build_queue_response(&state, initial_snapshot);
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
+    let mut pending = VecDeque::new();
+    pending.push_back(session_sse_event("queue", &initial_json));
+
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let receiver = state.events.subscribe();
+
+    let stream = unfold(
+        SessionQueueStreamState {
+            state: state.clone(),
+            session_id,
+            receiver,
+            interval,
+            pending,
+            last_queue: Some(initial_json),
+            last_ping: Instant::now(),
+        },
+        |mut ctx| async move {
+            loop {
+                if let Some(bytes) = ctx.pending.pop_front() {
+                    return Some((Ok::<Bytes, Error>(bytes), ctx));
+                }
+
+                let mut refresh = false;
+                match recv_session_signal(&mut ctx.receiver, &mut ctx.interval).await {
+                    SessionStreamSignal::Tick => {}
+                    SessionStreamSignal::Event(result) => match result {
+                        Ok(HubEvent::QueueChanged) => refresh = true,
+                        Ok(HubEvent::StatusChanged) => refresh = true,
+                        Ok(HubEvent::OutputsChanged) => {}
+                        Ok(HubEvent::Metadata(_)) => {}
+                        Ok(HubEvent::LibraryChanged) => {}
+                        Err(RecvError::Lagged(_)) => refresh = true,
+                        Err(RecvError::Closed) => return None,
+                    },
+                }
+
+                if refresh {
+                    if let Ok(snapshot) = crate::session_registry::queue_snapshot(&ctx.session_id) {
+                        let queue = build_queue_response(&ctx.state, snapshot);
+                        let json = serde_json::to_string(&queue)
+                            .unwrap_or_else(|_| "null".to_string());
+                        if ctx.last_queue.as_deref() != Some(json.as_str()) {
+                            ctx.last_queue = Some(json.clone());
+                            ctx.pending.push_back(session_sse_event("queue", &json));
+                        }
+                    }
+                }
+
+                push_session_ping_if_needed(&mut ctx.pending, &mut ctx.last_ping);
+            }
+        },
+    );
+
+    session_sse_response(stream)
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/pause",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Pause toggled"),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[post("/sessions/{id}/pause")]
+/// Toggle pause/resume for the session output.
+pub async fn sessions_pause(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    match state.output.session_playback.pause_toggle(&state, &session_id).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/seek",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = SessionSeekBody,
+    responses(
+        (status = 200, description = "Seek requested"),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[post("/sessions/{id}/seek")]
+/// Seek the session output to an absolute position (milliseconds).
+pub async fn sessions_seek(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<SessionSeekBody>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    match state
+        .output
+        .session_playback
+        .seek(&state, &session_id, body.ms)
+        .await
+    {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/stop",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Playback stopped"),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[post("/sessions/{id}/stop")]
+/// Stop playback for the session output.
+pub async fn sessions_stop(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    match state.output.session_playback.stop(&state, &session_id).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(err) => err.into_response(),
+    }
 }
 
 fn require_session(session_id: &str) -> Result<(), HttpResponse> {
