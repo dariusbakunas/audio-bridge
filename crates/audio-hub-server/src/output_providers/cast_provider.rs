@@ -60,6 +60,39 @@ impl CastProvider {
             },
         }
     }
+
+    fn idle_status(output_id: &str, device_name: Option<String>, bridge_online: bool) -> StatusResponse {
+        StatusResponse {
+            now_playing: None,
+            paused: true,
+            bridge_online,
+            elapsed_ms: None,
+            duration_ms: None,
+            source_codec: None,
+            source_bit_depth: None,
+            container: None,
+            output_sample_format: None,
+            resampling: None,
+            resample_from_hz: None,
+            resample_to_hz: None,
+            sample_rate: None,
+            channels: None,
+            output_sample_rate: None,
+            output_device: device_name,
+            title: None,
+            artist: None,
+            album: None,
+            format: None,
+            output_id: Some(output_id.to_string()),
+            bitrate_kbps: None,
+            underrun_frames: None,
+            underrun_events: None,
+            buffer_size_frames: None,
+            buffered_frames: None,
+            buffer_capacity_frames: None,
+            has_previous: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -221,22 +254,24 @@ impl OutputProvider for CastProvider {
         state: &AppState,
         output_id: &str,
     ) -> Result<StatusResponse, ProviderError> {
-        if Self::parse_output_id(output_id).is_none() {
+        let Some(device_id) = Self::parse_output_id(output_id) else {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
-        }
-        let active_output_id = Self::active_output_id(state);
-        if active_output_id.as_deref() != Some(output_id) {
-            return Err(ProviderError::BadRequest("output is not active".to_string()));
-        }
-        let device_id = Self::parse_output_id(output_id).unwrap_or_default();
-        let device_name = state
+        };
+        let found = state
             .providers
             .cast
             .discovered
             .lock()
             .ok()
-            .and_then(|map| map.get(&device_id).cloned())
-            .map(|d| d.name);
+            .and_then(|map| map.get(&device_id).cloned());
+        let Some(found) = found else {
+            return Ok(Self::idle_status(output_id, None, false));
+        };
+        let device_name = Some(found.name.clone());
+        let active_output_id = Self::active_output_id(state);
+        if active_output_id.as_deref() != Some(output_id) {
+            return Ok(Self::idle_status(output_id, device_name, true));
+        }
 
         let status = state.playback.manager.status().inner().lock().unwrap();
         let (title, artist, album, format, sample_rate) =

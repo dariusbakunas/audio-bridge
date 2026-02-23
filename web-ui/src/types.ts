@@ -97,6 +97,16 @@ export interface SessionDetailResponse extends SessionSummary {
   battery?: number | null;
 }
 
+export interface SessionLockInfo {
+  key: string;
+  session_id: string;
+}
+
+export interface SessionLocksResponse {
+  output_locks: SessionLockInfo[];
+  bridge_locks: SessionLockInfo[];
+}
+
 export interface QueueItemTrack {
   kind: "track";
   id?: number | null;

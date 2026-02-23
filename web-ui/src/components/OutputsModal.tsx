@@ -1,9 +1,13 @@
-import { OutputInfo } from "../types";
+import { OutputInfo, SessionLockInfo, SessionSummary } from "../types";
 import Modal from "./Modal";
 
 interface OutputsModalProps {
   open: boolean;
   outputs: OutputInfo[];
+  sessions: SessionSummary[];
+  outputLocks: SessionLockInfo[];
+  bridgeLocks: SessionLockInfo[];
+  currentSessionId: string | null;
   activeOutputId: string | null;
   onClose: () => void;
   onSelectOutput: (id: string) => void;
@@ -13,11 +17,34 @@ interface OutputsModalProps {
 export default function OutputsModal({
   open,
   outputs,
+  sessions,
+  outputLocks,
+  bridgeLocks,
+  currentSessionId,
   activeOutputId,
   onClose,
   onSelectOutput,
   formatRateRange
 }: OutputsModalProps) {
+  const sessionsById = new Map<string, SessionSummary>();
+  for (const session of sessions) {
+    sessionsById.set(session.id, session);
+  }
+  const outputOwners = new Map<string, string>();
+  const bridgeOwners = new Map<string, string>();
+  const parseBridgeId = (outputId: string): string | null => {
+    const parts = outputId.split(":");
+    if (parts.length < 3) return null;
+    if (parts[0] !== "bridge") return null;
+    return parts[1] || null;
+  };
+  for (const lock of outputLocks) {
+    outputOwners.set(lock.key, lock.session_id);
+  }
+  for (const lock of bridgeLocks) {
+    bridgeOwners.set(lock.key, lock.session_id);
+  }
+
   return (
     <Modal
       open={open}
@@ -30,17 +57,32 @@ export default function OutputsModal({
           {outputs.map((output) => {
             const isActive = output.id === activeOutputId;
             const state = output.state?.toLowerCase() ?? "unknown";
+            const exactOwnerId = outputOwners.get(output.id);
+            const bridgeId = parseBridgeId(output.id);
+            const ownerId = exactOwnerId ?? (bridgeId ? bridgeOwners.get(bridgeId) : undefined);
+            const owner = ownerId ? sessionsById.get(ownerId) : undefined;
+            const heldByOther = Boolean(ownerId && ownerId !== currentSessionId);
             return (
               <button
                 key={output.id}
-                className={`output-row ${isActive ? "active" : ""}`}
+                className={`output-row ${isActive ? "active" : ""} ${heldByOther ? "locked" : ""}`}
                 onClick={() => onSelectOutput(output.id)}
+                disabled={heldByOther}
               >
                 <div className="output-main">
                   <div className="output-title">{output.name}</div>
                   <div className="muted small">
                     {output.provider_name ?? output.kind} • {formatRateRange(output)}
                   </div>
+                  {owner ? (
+                    <div className="muted small">
+                      in use by {owner.name} ({owner.id === currentSessionId ? "this session" : owner.id})
+                    </div>
+                  ) : ownerId ? (
+                    <div className="muted small">
+                      in use by session {ownerId}
+                    </div>
+                  ) : null}
                   <div className="muted small">{output.id}</div>
                 </div>
                 <div className="output-meta">
@@ -48,7 +90,9 @@ export default function OutputsModal({
                     <span className="status-dot" aria-hidden="true" />
                     {output.state}
                   </span>
-                  <span className="chip">{isActive ? "active" : "select"}</span>
+                  <span className="chip">
+                    {heldByOther ? "in use" : isActive ? "active" : "select"}
+                  </span>
                 </div>
               </button>
             );

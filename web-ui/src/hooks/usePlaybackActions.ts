@@ -73,13 +73,17 @@ export function usePlaybackActions({
   }, [setError]);
 
   const handleSelectOutput = useCallback(
-    async (id: string) => {
+    async (id: string, force = false) => {
       try {
         const sid = requireSessionId();
-        await postJson(`/sessions/${encodeURIComponent(sid)}/select-output`, { output_id: id });
+        await postJson(`/sessions/${encodeURIComponent(sid)}/select-output`, {
+          output_id: id,
+          force
+        });
         setActiveOutputId(id);
       } catch (err) {
-        setError((err as Error).message);
+        const message = (err as Error).message;
+        setError(parseConflictMessage(message) ?? message);
       }
     },
     [sessionId, setActiveOutputId, setError]
@@ -146,3 +150,25 @@ export function usePlaybackActions({
     handlePlayAlbumById
   };
 }
+  const parseConflictMessage = (message: string): string | null => {
+    try {
+      const parsed = JSON.parse(message) as {
+        error?: string;
+        output_id?: string;
+        held_by_session_id?: string;
+      };
+      if (parsed?.error === "output_in_use" && parsed.output_id && parsed.held_by_session_id) {
+        return `Output is already in use (${parsed.output_id}) by session ${parsed.held_by_session_id}. Use Force to take it.`;
+      }
+    } catch {
+      // ignore parse failures
+    }
+    if (message.includes("bridge_in_use")) {
+      const bridgeId = /bridge_id=([^\s]+)/.exec(message)?.[1];
+      const holder = /held_by_session_id=([^\s]+)/.exec(message)?.[1];
+      if (bridgeId && holder) {
+        return `Bridge ${bridgeId} is already in use by session ${holder}.`;
+      }
+    }
+    return null;
+  };

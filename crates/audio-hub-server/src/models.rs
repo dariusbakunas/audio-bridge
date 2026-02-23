@@ -695,6 +695,20 @@ pub struct SessionsListResponse {
     pub sessions: Vec<SessionSummary>,
 }
 
+/// Single lock record for output/bridge ownership.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionLockInfo {
+    pub key: String,
+    pub session_id: String,
+}
+
+/// Snapshot of active session locks.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionLocksResponse {
+    pub output_locks: Vec<SessionLockInfo>,
+    pub bridge_locks: Vec<SessionLockInfo>,
+}
+
 /// Detailed session snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SessionDetailResponse {

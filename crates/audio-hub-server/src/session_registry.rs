@@ -40,6 +40,7 @@ struct SessionStore {
     by_id: HashMap<String, SessionRecord>,
     by_key: HashMap<(String, String), String>,
     output_locks: HashMap<String, String>,
+    bridge_locks: HashMap<String, String>,
 }
 
 fn store() -> &'static Mutex<SessionStore> {
@@ -119,6 +120,26 @@ pub fn list_sessions() -> Vec<SessionRecord> {
         .lock()
         .map(|s| s.by_id.values().cloned().collect())
         .unwrap_or_default()
+}
+
+pub fn lock_snapshot() -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let store = match store().lock() {
+        Ok(guard) => guard,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+    let mut output_locks: Vec<(String, String)> = store
+        .output_locks
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    output_locks.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut bridge_locks: Vec<(String, String)> = store
+        .bridge_locks
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    bridge_locks.sort_by(|a, b| a.0.cmp(&b.0));
+    (output_locks, bridge_locks)
 }
 
 pub fn get_session(session_id: &str) -> Option<SessionRecord> {
@@ -328,6 +349,7 @@ pub struct BindTransition {
 pub enum BindError {
     SessionNotFound,
     OutputInUse { output_id: String, held_by_session_id: String },
+    BridgeInUse { bridge_id: String, held_by_session_id: String },
 }
 
 pub fn bind_output(
@@ -341,6 +363,21 @@ pub fn bind_output(
     }
 
     let mut displaced_session_id = None;
+    let requested_bridge_id = parse_bridge_id(output_id);
+    if let Some(bridge_id) = requested_bridge_id.as_deref() {
+        if let Some(holder) = store.bridge_locks.get(bridge_id).cloned() {
+            if holder != session_id {
+                if !force {
+                    return Err(BindError::BridgeInUse {
+                        bridge_id: bridge_id.to_string(),
+                        held_by_session_id: holder,
+                    });
+                }
+                displaced_session_id = Some(holder);
+            }
+        }
+    }
+
     if let Some(holder) = store.output_locks.get(output_id).cloned() {
         if holder != session_id {
             if !force {
@@ -349,7 +386,9 @@ pub fn bind_output(
                     held_by_session_id: holder,
                 });
             }
-            displaced_session_id = Some(holder);
+            if displaced_session_id.is_none() {
+                displaced_session_id = Some(holder);
+            }
         }
     }
 
@@ -361,6 +400,11 @@ pub fn bind_output(
     if let Some(prev) = previous_output.as_deref() {
         if prev != output_id {
             store.output_locks.remove(prev);
+            if let Some(prev_bridge_id) = parse_bridge_id(prev) {
+                if store.bridge_locks.get(&prev_bridge_id).map(|id| id.as_str()) == Some(session_id) {
+                    store.bridge_locks.remove(&prev_bridge_id);
+                }
+            }
         }
     }
 
@@ -374,6 +418,9 @@ pub fn bind_output(
     store
         .output_locks
         .insert(output_id.to_string(), session_id.to_string());
+    if let Some(bridge_id) = requested_bridge_id {
+        store.bridge_locks.insert(bridge_id, session_id.to_string());
+    }
     if let Some(session) = store.by_id.get_mut(session_id) {
         session.active_output_id = Some(output_id.to_string());
         session.last_seen = Instant::now();
@@ -395,6 +442,11 @@ pub fn rollback_bind(
         Err(_) => return,
     };
     store.output_locks.remove(attempted_output_id);
+    if let Some(bridge_id) = parse_bridge_id(attempted_output_id) {
+        if store.bridge_locks.get(&bridge_id).map(|id| id.as_str()) == Some(session_id) {
+            store.bridge_locks.remove(&bridge_id);
+        }
+    }
 
     if let Some(session) = store.by_id.get_mut(session_id) {
         session.active_output_id = transition.previous_output.clone();
@@ -402,7 +454,10 @@ pub fn rollback_bind(
     }
 
     if let Some(prev) = transition.previous_output {
-        store.output_locks.insert(prev, session_id.to_string());
+        store.output_locks.insert(prev.clone(), session_id.to_string());
+        if let Some(bridge_id) = parse_bridge_id(&prev) {
+            store.bridge_locks.insert(bridge_id, session_id.to_string());
+        }
     }
 
     if let Some(displaced) = transition.displaced_session_id {
@@ -412,7 +467,10 @@ pub fn rollback_bind(
         }
         store
             .output_locks
-            .insert(attempted_output_id.to_string(), displaced);
+            .insert(attempted_output_id.to_string(), displaced.clone());
+        if let Some(bridge_id) = parse_bridge_id(attempted_output_id) {
+            store.bridge_locks.insert(bridge_id, displaced);
+        }
     }
 }
 
@@ -426,6 +484,11 @@ pub fn release_output(session_id: &str) -> Result<Option<String>, ()> {
     };
     if let Some(output_id) = released.as_deref() {
         store.output_locks.remove(output_id);
+        if let Some(bridge_id) = parse_bridge_id(output_id) {
+            if store.bridge_locks.get(&bridge_id).map(|id| id.as_str()) == Some(session_id) {
+                store.bridge_locks.remove(&bridge_id);
+            }
+        }
     }
     Ok(released)
 }
@@ -443,6 +506,119 @@ pub fn delete_session(session_id: &str) -> Result<Option<String>, ()> {
         if store.output_locks.get(output_id).map(|id| id.as_str()) == Some(session_id) {
             store.output_locks.remove(output_id);
         }
+        if let Some(bridge_id) = parse_bridge_id(output_id) {
+            if store.bridge_locks.get(&bridge_id).map(|id| id.as_str()) == Some(session_id) {
+                store.bridge_locks.remove(&bridge_id);
+            }
+        }
     }
     Ok(removed.active_output_id)
+}
+
+fn parse_bridge_id(output_id: &str) -> Option<String> {
+    let mut parts = output_id.splitn(3, ':');
+    let kind = parts.next().unwrap_or("");
+    let bridge_id = parts.next().unwrap_or("");
+    let device_id = parts.next().unwrap_or("");
+    if kind == "bridge" && !bridge_id.is_empty() && !device_id.is_empty() {
+        Some(bridge_id.to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+pub fn reset_for_tests() {
+    if let Ok(mut store) = store().lock() {
+        *store = SessionStore::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(name: &str, client_id: &str) -> String {
+        create_or_refresh(
+            name.to_string(),
+            SessionMode::Remote,
+            client_id.to_string(),
+            "test".to_string(),
+            None,
+            None,
+        )
+        .0
+    }
+
+    #[test]
+    fn bind_output_rejects_bridge_in_use() {
+        reset_for_tests();
+        let a = make_session("A", "a");
+        let b = make_session("B", "b");
+
+        bind_output(&a, "bridge:living:dev1", false).expect("bind a");
+        let err = bind_output(&b, "bridge:living:dev2", false).expect_err("bind b should fail");
+        match err {
+            BindError::BridgeInUse {
+                bridge_id,
+                held_by_session_id,
+            } => {
+                assert_eq!(bridge_id, "living");
+                assert_eq!(held_by_session_id, a);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bind_output_rejects_output_in_use_non_bridge() {
+        reset_for_tests();
+        let a = make_session("A", "a");
+        let b = make_session("B", "b");
+
+        bind_output(&a, "local:host:device-1", false).expect("bind a");
+        let err = bind_output(&b, "local:host:device-1", false).expect_err("bind b should fail");
+        match err {
+            BindError::OutputInUse {
+                output_id,
+                held_by_session_id,
+            } => {
+                assert_eq!(output_id, "local:host:device-1");
+                assert_eq!(held_by_session_id, a);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn release_output_clears_output_and_bridge_locks() {
+        reset_for_tests();
+        let a = make_session("A", "a");
+        bind_output(&a, "bridge:living:dev1", false).expect("bind");
+
+        let (output_locks, bridge_locks) = lock_snapshot();
+        assert_eq!(output_locks.len(), 1);
+        assert_eq!(bridge_locks.len(), 1);
+
+        let released = release_output(&a).expect("release");
+        assert_eq!(released.as_deref(), Some("bridge:living:dev1"));
+
+        let (output_locks, bridge_locks) = lock_snapshot();
+        assert!(output_locks.is_empty());
+        assert!(bridge_locks.is_empty());
+    }
+
+    #[test]
+    fn delete_session_clears_output_and_bridge_locks() {
+        reset_for_tests();
+        let a = make_session("A", "a");
+        bind_output(&a, "bridge:living:dev1", false).expect("bind");
+
+        let released = delete_session(&a).expect("delete");
+        assert_eq!(released.as_deref(), Some("bridge:living:dev1"));
+
+        let (output_locks, bridge_locks) = lock_snapshot();
+        assert!(output_locks.is_empty());
+        assert!(bridge_locks.is_empty());
+    }
 }

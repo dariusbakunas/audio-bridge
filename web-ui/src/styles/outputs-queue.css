@@ -17,6 +17,16 @@
   background: var(--bg-overlay);
 }
 
+.output-row.locked {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.output-row.locked:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+}
+
 .output-row.active {
   border-color: var(--accent);
   background: var(--bg-overlay);

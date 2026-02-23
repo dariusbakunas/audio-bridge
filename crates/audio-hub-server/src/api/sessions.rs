@@ -27,6 +27,8 @@ use crate::models::{
     SessionDetailResponse,
     SessionDeleteResponse,
     SessionHeartbeatRequest,
+    SessionLockInfo,
+    SessionLocksResponse,
     SessionReleaseOutputResponse,
     SessionSelectOutputRequest,
     SessionSelectOutputResponse,
@@ -175,6 +177,29 @@ pub async fn sessions_list() -> impl Responder {
 
 #[utoipa::path(
     get,
+    path = "/sessions/locks",
+    responses(
+        (status = 200, description = "Active output/bridge locks", body = SessionLocksResponse)
+    )
+)]
+#[get("/sessions/locks")]
+/// Return active output and bridge lock ownership.
+pub async fn sessions_locks() -> impl Responder {
+    let (output_locks, bridge_locks) = crate::session_registry::lock_snapshot();
+    HttpResponse::Ok().json(SessionLocksResponse {
+        output_locks: output_locks
+            .into_iter()
+            .map(|(key, session_id)| SessionLockInfo { key, session_id })
+            .collect(),
+        bridge_locks: bridge_locks
+            .into_iter()
+            .map(|(key, session_id)| SessionLockInfo { key, session_id })
+            .collect(),
+    })
+}
+
+#[utoipa::path(
+    get,
     path = "/sessions/{id}",
     params(
         ("id" = String, Path, description = "Session id")
@@ -265,8 +290,8 @@ pub async fn sessions_select_output(
         return HttpResponse::BadRequest().body("output_id is required");
     }
 
-    let transition = match crate::session_registry::bind_output(&session_id, &output_id, payload.force) {
-        Ok(transition) => transition,
+    match crate::session_registry::bind_output(&session_id, &output_id, payload.force) {
+        Ok(_) => {}
         Err(crate::session_registry::BindError::SessionNotFound) => {
             return HttpResponse::NotFound().body("session not found");
         }
@@ -280,11 +305,14 @@ pub async fn sessions_select_output(
                 held_by_session_id,
             });
         }
-    };
-
-    if let Err(err) = state.output.controller.select_output(&state, &output_id).await {
-        crate::session_registry::rollback_bind(&session_id, &output_id, transition);
-        return err.into_response();
+        Err(crate::session_registry::BindError::BridgeInUse {
+            bridge_id,
+            held_by_session_id,
+        }) => {
+            return HttpResponse::Conflict().body(format!(
+                "bridge_in_use bridge_id={bridge_id} held_by_session_id={held_by_session_id}"
+            ));
+        }
     }
 
     state.events.outputs_changed();
@@ -316,15 +344,6 @@ pub async fn sessions_release_output(
         Ok(released) => released,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
-
-    if let Some(output_id) = released_output_id.as_deref() {
-        if let Ok(mut bridges) = state.providers.bridge.bridges.lock() {
-            if bridges.active_output_id.as_deref() == Some(output_id) {
-                bridges.active_output_id = None;
-                bridges.active_bridge_id = None;
-            }
-        }
-    }
     state.events.outputs_changed();
     HttpResponse::Ok().json(SessionReleaseOutputResponse {
         session_id,
@@ -354,14 +373,6 @@ pub async fn sessions_delete(
         Ok(released) => released,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
-    if let Some(output_id) = released_output_id.as_deref() {
-        if let Ok(mut bridges) = state.providers.bridge.bridges.lock() {
-            if bridges.active_output_id.as_deref() == Some(output_id) {
-                bridges.active_output_id = None;
-                bridges.active_bridge_id = None;
-            }
-        }
-    }
     state.events.outputs_changed();
     HttpResponse::Ok().json(SessionDeleteResponse {
         session_id,

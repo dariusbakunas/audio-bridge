@@ -206,6 +206,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::local_playback_sessions)
             .service(api::sessions_create)
             .service(api::sessions_list)
+            .service(api::sessions_locks)
             .service(api::sessions_get)
             .service(api::sessions_heartbeat)
             .service(api::sessions_select_output)

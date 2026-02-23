@@ -86,6 +86,7 @@ pub use sessions::{
     sessions_delete,
     sessions_get,
     sessions_heartbeat,
+    sessions_locks,
     sessions_list,
     sessions_pause,
     sessions_queue_add,

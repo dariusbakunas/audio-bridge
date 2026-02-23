@@ -36,6 +36,7 @@ import {
   ProviderOutputs,
   SessionCreateResponse,
   SessionDetailResponse,
+  SessionLocksResponse,
   SessionsListResponse,
   SessionSummary,
   StatusResponse,
@@ -270,6 +271,12 @@ export default function App() {
     }
   });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionOutputLocks, setSessionOutputLocks] = useState<
+    SessionLocksResponse["output_locks"]
+  >([]);
+  const [sessionBridgeLocks, setSessionBridgeLocks] = useState<
+    SessionLocksResponse["bridge_locks"]
+  >([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
@@ -756,6 +763,12 @@ export default function App() {
     setSessions(response.sessions ?? []);
   }, []);
 
+  const refreshSessionLocks = useCallback(async () => {
+    const response = await fetchJson<SessionLocksResponse>("/sessions/locks");
+    setSessionOutputLocks(response.output_locks ?? []);
+    setSessionBridgeLocks(response.bridge_locks ?? []);
+  }, []);
+
   const refreshSessionDetail = useCallback(async (id: string) => {
     const detail = await fetchJson<SessionDetailResponse>(`/sessions/${encodeURIComponent(id)}`);
     setActiveOutputId(detail.active_output_id ?? null);
@@ -777,8 +790,8 @@ export default function App() {
     } catch {
       // ignore storage failures
     }
-    await Promise.all([refreshSessions(), refreshSessionDetail(nextSessionId)]);
-  }, [refreshSessionDetail, refreshSessions]);
+    await Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(nextSessionId)]);
+  }, [refreshSessionDetail, refreshSessionLocks, refreshSessions]);
 
   const handleSessionChange = useCallback(
     async (nextSessionId: string) => {
@@ -808,12 +821,12 @@ export default function App() {
         app_version: __APP_VERSION__,
         owner: "web-ui"
       });
-      await refreshSessions();
+      await Promise.all([refreshSessions(), refreshSessionLocks()]);
       await handleSessionChange(response.session_id);
     } catch (err) {
       reportError((err as Error).message);
     }
-  }, [refreshSessions, handleSessionChange, reportError]);
+  }, [refreshSessionLocks, refreshSessions, handleSessionChange, reportError]);
 
   useEffect(() => {
     if (!serverConnected) return;
@@ -857,9 +870,14 @@ export default function App() {
     let mounted = true;
     const poll = async () => {
       try {
-        const response = await fetchJson<SessionsListResponse>("/sessions");
+        const [sessionsResponse, locksResponse] = await Promise.all([
+          fetchJson<SessionsListResponse>("/sessions"),
+          fetchJson<SessionLocksResponse>("/sessions/locks")
+        ]);
         if (!mounted) return;
-        setSessions(response.sessions ?? []);
+        setSessions(sessionsResponse.sessions ?? []);
+        setSessionOutputLocks(locksResponse.output_locks ?? []);
+        setSessionBridgeLocks(locksResponse.bridge_locks ?? []);
       } catch {
         // Best-effort list refresh.
       }
@@ -914,6 +932,19 @@ export default function App() {
     handleQueueClear,
     handleQueuePlayFrom
   } = useQueueActions({ sessionId, setError: reportError });
+
+  const handleSelectOutputForSession = useCallback(
+    async (id: string) => {
+      await handleSelectOutput(id, false);
+      if (!sessionId) return;
+      try {
+        await Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(sessionId)]);
+      } catch {
+        // best-effort refresh
+      }
+    },
+    [handleSelectOutput, refreshSessionDetail, refreshSessionLocks, refreshSessions, sessionId]
+  );
 
   useMetadataStream({
     enabled: settingsOpen && serverConnected && settingsSection === "metadata",
@@ -1902,9 +1933,13 @@ export default function App() {
         <OutputsModal
         open={outputsOpen}
         outputs={outputs}
+        sessions={sessions}
+        outputLocks={sessionOutputLocks}
+        bridgeLocks={sessionBridgeLocks}
+        currentSessionId={sessionId}
         activeOutputId={activeOutputId}
         onClose={() => setOutputsOpen(false)}
-        onSelectOutput={handleSelectOutput}
+        onSelectOutput={handleSelectOutputForSession}
         formatRateRange={formatRateRange}
         />
       ) : null}
