@@ -334,6 +334,33 @@ pub async fn sessions_select_output(
             return HttpResponse::BadRequest().body("browser outputs can only be selected by local sessions");
         }
     }
+    let previous_output_id = crate::session_registry::get_session(&session_id)
+        .and_then(|session| session.active_output_id);
+    let pre_switch_status = state.output.session_playback.status(&state, &session_id).await.ok();
+    let resume_path = pre_switch_status
+        .as_ref()
+        .and_then(|status| status.now_playing.as_ref())
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate::session_registry::queue_snapshot(&session_id)
+                .ok()
+                .and_then(|snapshot| snapshot.now_playing)
+        });
+    let resume_elapsed_ms = pre_switch_status.as_ref().and_then(|status| status.elapsed_ms);
+    let resume_paused = pre_switch_status
+        .as_ref()
+        .map(|status| status.paused)
+        .unwrap_or(false);
+    if previous_output_id.as_deref() != Some(output_id.as_str()) && resume_path.is_some() {
+        if let Err(err) = state.output.session_playback.stop(&state, &session_id).await {
+            tracing::warn!(
+                session_id = %session_id,
+                previous_output_id = ?previous_output_id,
+                error = ?err,
+                "session output switch pre-stop failed"
+            );
+        }
+    }
 
     match crate::session_registry::bind_output(&session_id, &output_id, payload.force) {
         Ok(_) => {}
@@ -360,6 +387,48 @@ pub async fn sessions_select_output(
         }
     }
 
+    if let Some(path) = resume_path {
+        if let Err(err) = state
+            .output
+            .session_playback
+            .play_path(&state, &session_id, path)
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                output_id = %output_id,
+                error = ?err,
+                "session output switch playback migration failed"
+            );
+        } else {
+            if let Some(ms) = resume_elapsed_ms.filter(|ms| *ms > 0) {
+                if let Err(err) = state.output.session_playback.seek(&state, &session_id, ms).await
+                {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        output_id = %output_id,
+                        elapsed_ms = ms,
+                        error = ?err,
+                        "session output switch seek restore failed"
+                    );
+                }
+            }
+            if resume_paused {
+                if let Err(err) = state.output.session_playback.pause_toggle(&state, &session_id).await
+                {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        output_id = %output_id,
+                        error = ?err,
+                        "session output switch pause restore failed"
+                    );
+                }
+            }
+        }
+    }
+
+    state.events.status_changed();
+    state.events.queue_changed();
     state.events.outputs_changed();
     HttpResponse::Ok().json(SessionSelectOutputResponse {
         session_id,
@@ -1246,5 +1315,206 @@ fn build_queue_item(
         crate::models::QueueItem::Missing {
             path: path.to_string_lossy().to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crate::bridge::BridgeCommand;
+    use crate::events::{EventBus, LogBus};
+    use crate::models::{SessionMode, SessionSelectOutputRequest};
+    use crate::state::{
+        BridgeProviderState, BridgeState, CastProviderState, DeviceSelectionState, LocalProviderState,
+        MetadataWake, PlayerStatus, QueueState,
+    };
+
+    fn make_state() -> web::Data<AppState> {
+        let root = std::env::temp_dir().join(format!(
+            "audio-hub-server-sessions-switch-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp dir");
+        let library = crate::library::scan_library(&root).expect("scan library");
+        let metadata_db = crate::metadata_db::MetadataDb::new(&root).expect("metadata db");
+
+        let (bridge_cmd_tx, _bridge_cmd_rx) = crossbeam_channel::unbounded();
+        let bridges_state = Arc::new(Mutex::new(BridgeState {
+            bridges: Vec::new(),
+            active_bridge_id: None,
+            active_output_id: None,
+        }));
+        let bridge_state = Arc::new(BridgeProviderState::new(
+            bridge_cmd_tx,
+            bridges_state,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(Mutex::new(HashMap::new())),
+            "http://localhost".to_string(),
+        ));
+
+        let (local_cmd_tx, _local_cmd_rx) = crossbeam_channel::unbounded();
+        let local_state = Arc::new(LocalProviderState {
+            enabled: false,
+            id: "local".to_string(),
+            name: "Local Host".to_string(),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+            running: Arc::new(AtomicBool::new(false)),
+        });
+
+        let status = Arc::new(Mutex::new(PlayerStatus::default()));
+        let events = EventBus::new();
+        let status_store = crate::status_store::StatusStore::new(status, events.clone());
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
+        let playback_manager = crate::playback_manager::PlaybackManager::new(
+            bridge_state.player.clone(),
+            status_store,
+            queue_service,
+        );
+        let device_selection = DeviceSelectionState {
+            local: Arc::new(Mutex::new(None)),
+            bridge: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let cast_state = Arc::new(CastProviderState::new());
+
+        web::Data::new(AppState::new(
+            library,
+            metadata_db,
+            None,
+            MetadataWake::new(),
+            bridge_state,
+            local_state,
+            cast_state,
+            playback_manager,
+            device_selection,
+            events,
+            Arc::new(LogBus::new(64)),
+            Arc::new(Mutex::new(crate::state::OutputSettingsState::default())),
+            None,
+        ))
+    }
+
+    #[actix_web::test]
+    async fn select_output_while_playing_stops_previous_output_and_starts_new_output() {
+        let state = make_state();
+        let unique = uuid::Uuid::new_v4().to_string();
+        let old_device_id = format!("old-{unique}");
+        let new_device_id = format!("new-{unique}");
+        let old_output_id = format!("cast:{old_device_id}");
+        let new_output_id = format!("cast:{new_device_id}");
+
+        let (old_tx, old_rx) = crossbeam_channel::unbounded::<BridgeCommand>();
+        let (new_tx, new_rx) = crossbeam_channel::unbounded::<BridgeCommand>();
+        {
+            let mut workers = state
+                .providers
+                .cast
+                .workers
+                .lock()
+                .expect("cast workers lock");
+            workers.insert(old_output_id.clone(), old_tx);
+            workers.insert(new_output_id.clone(), new_tx);
+        }
+        {
+            let mut discovered = state
+                .providers
+                .cast
+                .discovered
+                .lock()
+                .expect("cast discovered lock");
+            discovered.insert(
+                old_device_id.clone(),
+                crate::state::DiscoveredCast {
+                    id: old_device_id.clone(),
+                    name: "Old Cast".to_string(),
+                    host: Some("127.0.0.1".to_string()),
+                    port: 8009,
+                    last_seen: std::time::Instant::now(),
+                },
+            );
+            discovered.insert(
+                new_device_id.clone(),
+                crate::state::DiscoveredCast {
+                    id: new_device_id.clone(),
+                    name: "New Cast".to_string(),
+                    host: Some("127.0.0.1".to_string()),
+                    port: 8009,
+                    last_seen: std::time::Instant::now(),
+                },
+            );
+        }
+        {
+            let mut status_by_output = state
+                .providers
+                .cast
+                .status_by_output
+                .lock()
+                .expect("cast status lock");
+            status_by_output.insert(
+                old_output_id.clone(),
+                audio_bridge_types::BridgeStatus {
+                    now_playing: Some("/tmp/test-track.flac".to_string()),
+                    paused: false,
+                    elapsed_ms: Some(12_345),
+                    duration_ms: Some(180_000),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let session_name = format!("switch-test-{unique}");
+        let client_id = format!("client-{unique}");
+        let (session_id, _) = crate::session_registry::create_or_refresh(
+            session_name,
+            SessionMode::Remote,
+            client_id,
+            "test".to_string(),
+            Some("test".to_string()),
+            Some(30),
+        );
+        crate::session_registry::bind_output(&session_id, &old_output_id, false)
+            .expect("bind old output");
+
+        let app = actix_web::test::init_service(
+            actix_web::App::new()
+                .app_data(state.clone())
+                .service(crate::api::sessions_select_output),
+        )
+        .await;
+        let req = actix_web::test::TestRequest::post()
+            .uri(&format!("/sessions/{}/select-output", urlencoding::encode(&session_id)))
+            .set_json(SessionSelectOutputRequest {
+                output_id: new_output_id.clone(),
+                force: false,
+            })
+            .to_request();
+        let response = actix_web::test::call_service(&app, req).await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+
+        let stopped_old = old_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("old output should receive stop");
+        assert!(matches!(stopped_old, BridgeCommand::Stop));
+
+        let mut saw_new_play = false;
+        for _ in 0..3 {
+            let cmd = new_rx
+                .recv_timeout(Duration::from_millis(500))
+                .expect("new output should receive command");
+            if matches!(cmd, BridgeCommand::Play { .. }) {
+                saw_new_play = true;
+                break;
+            }
+        }
+        assert!(saw_new_play, "new output did not receive play command");
     }
 }
