@@ -41,7 +41,10 @@ use crate::metadata_db::{MediaAssetRecord, TextEntry};
 use crate::track_analysis::{analyze_track, AnalysisOptions};
 use base64::{engine::general_purpose, Engine as _};
 use crate::state::AppState;
-use crate::tag_writer::{supported_track_fields, tag_type_label, write_track_tags, TrackTagUpdate};
+use crate::tag_writer::{
+    read_editable_vorbis_tags, supported_track_fields, tag_type_label, write_track_tags,
+    TrackTagUpdate,
+};
 
 #[derive(Deserialize, ToSchema)]
 pub struct ListQuery {
@@ -189,6 +192,7 @@ pub async fn tracks_metadata(
     state: web::Data<AppState>,
     query: web::Query<TrackMetadataQuery>,
 ) -> impl Responder {
+    let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
     let record = if let Some(track_id) = query.track_id {
         metadata_service.track_record_by_id(track_id)
@@ -198,16 +202,30 @@ pub async fn tracks_metadata(
         return HttpResponse::BadRequest().body("track_id or path is required");
     };
     match record {
-        Ok(Some(record)) => HttpResponse::Ok().json(TrackMetadataResponse {
-            path: record.path,
-            title: record.title,
-            artist: record.artist,
-            album: record.album,
-            album_artist: record.album_artist,
-            year: record.year,
-            track_number: record.track_number,
-            disc_number: record.disc_number,
-        }),
+        Ok(Some(record)) => {
+            let mut extra_tags = std::collections::BTreeMap::new();
+            if let Ok(full_path) =
+                crate::metadata_service::MetadataService::resolve_track_path(&root, &record.path)
+            {
+                match read_editable_vorbis_tags(&full_path) {
+                    Ok(tags) => extra_tags = tags,
+                    Err(err) => {
+                        tracing::warn!(error = %err, path = %record.path, "read vorbis tags failed");
+                    }
+                }
+            }
+            HttpResponse::Ok().json(TrackMetadataResponse {
+                path: record.path,
+                title: record.title,
+                artist: record.artist,
+                album: record.album,
+                album_artist: record.album_artist,
+                year: record.year,
+                track_number: record.track_number,
+                disc_number: record.disc_number,
+                extra_tags,
+            })
+        }
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => HttpResponse::InternalServerError().body(err),
     }
@@ -249,7 +267,7 @@ pub async fn tracks_metadata_fields(
     let tag_label = tag_type.map(tag_type_label).map(|s| s.to_string());
     HttpResponse::Ok().json(TrackMetadataFieldsResponse {
         tag_type: tag_label,
-        fields: fields.into_iter().map(|s| s.to_string()).collect(),
+        fields,
     })
 }
 
@@ -299,6 +317,41 @@ pub async fn tracks_metadata_update(
     let year = request.year.filter(|value| *value > 0);
     let track_number = request.track_number.filter(|value| *value > 0);
     let disc_number = request.disc_number.filter(|value| *value > 0);
+    let clear_fields = request
+        .clear_fields
+        .unwrap_or_default()
+        .into_iter()
+        .map(|field| field.trim().to_ascii_lowercase())
+        .filter(|field| !field.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    let clear_title = clear_fields.contains("title");
+    let clear_artist = clear_fields.contains("artist");
+    let clear_album = clear_fields.contains("album");
+    let clear_album_artist = clear_fields.contains("album_artist");
+    let clear_year = clear_fields.contains("year");
+    let clear_track_number = clear_fields.contains("track_number");
+    let clear_disc_number = clear_fields.contains("disc_number");
+    let extra_tags = request
+        .extra_tags
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let key = key.trim().to_ascii_uppercase();
+            let value = value.trim().to_string();
+            if key.is_empty() || value.is_empty() {
+                None
+            } else {
+                Some((key, value))
+            }
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let clear_extra_tags = request
+        .clear_extra_tags
+        .unwrap_or_default()
+        .into_iter()
+        .map(|key| key.trim().to_ascii_uppercase())
+        .filter(|key| !key.is_empty())
+        .collect::<std::collections::HashSet<_>>();
 
     if title.is_none()
         && artist.is_none()
@@ -307,6 +360,15 @@ pub async fn tracks_metadata_update(
         && year.is_none()
         && track_number.is_none()
         && disc_number.is_none()
+        && extra_tags.is_empty()
+        && !clear_title
+        && !clear_artist
+        && !clear_album
+        && !clear_album_artist
+        && !clear_year
+        && !clear_track_number
+        && !clear_disc_number
+        && clear_extra_tags.is_empty()
     {
         return HttpResponse::BadRequest().body("no metadata fields provided");
     }
@@ -321,6 +383,15 @@ pub async fn tracks_metadata_update(
             year,
             track_number,
             disc_number,
+            extra_tags: Some(&extra_tags),
+            clear_title,
+            clear_artist,
+            clear_album,
+            clear_album_artist,
+            clear_year,
+            clear_track_number,
+            clear_disc_number,
+            clear_extra_tags: Some(&clear_extra_tags),
         },
     ) {
         tracing::warn!(error = %err, path = %path, "track metadata update failed");
@@ -503,6 +574,15 @@ pub async fn albums_metadata_update(
                 year,
                 track_number: None,
                 disc_number: None,
+                extra_tags: None,
+                clear_title: false,
+                clear_artist: false,
+                clear_album: false,
+                clear_album_artist: false,
+                clear_year: false,
+                clear_track_number: false,
+                clear_disc_number: false,
+                clear_extra_tags: None,
             },
         ) {
             let message = format!("album metadata update failed for {path}: {err}");

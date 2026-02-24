@@ -204,6 +204,8 @@ pub struct TrackMetadataResponse {
     pub year: Option<i32>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
+    #[serde(default)]
+    pub extra_tags: std::collections::BTreeMap<String, String>,
 }
 
 /// Update request for writing tag metadata to a track file.
@@ -229,6 +231,12 @@ pub struct TrackMetadataUpdateRequest {
     pub track_number: Option<u32>,
     #[serde(default)]
     pub disc_number: Option<u32>,
+    #[serde(default)]
+    pub extra_tags: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
+    pub clear_fields: Option<Vec<String>>,
+    #[serde(default)]
+    pub clear_extra_tags: Option<Vec<String>>,
 }
 
 /// Supported metadata fields for a track file.

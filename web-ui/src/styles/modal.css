@@ -259,6 +259,20 @@
   gap: 6px;
 }
 
+.track-meta-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.track-meta-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
 .track-meta-input {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -266,6 +280,13 @@
   font: inherit;
   background: var(--bg-overlay);
   color: var(--ink);
+}
+
+.track-meta-input:disabled {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg-overlay) 70%, var(--panel) 30%);
+  border-color: color-mix(in srgb, var(--border) 80%, var(--panel) 20%);
+  cursor: not-allowed;
 }
 
 .track-meta-actions {

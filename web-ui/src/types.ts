@@ -212,6 +212,7 @@ export interface TrackMetadataResponse {
   year?: number | null;
   track_number?: number | null;
   disc_number?: number | null;
+  extra_tags?: Record<string, string> | null;
 }
 
 export interface TrackMetadataFieldsResponse {
