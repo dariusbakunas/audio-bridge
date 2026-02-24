@@ -2,7 +2,7 @@
 
 ## Project summary
 - Rust workspace for a networked audio hub + receiver.
-- Main binaries: `bridge` (receiver), `audio-hub-server` (server), `hub-cli` (TUI client).
+- Main binaries: `bridge` (receiver), `audio-hub-server` (server).
 - Experimental web UI in `web-ui` (Vite + React).
 - Browser playback is supported via a browser output provider + WebSocket receiver (`/browser/ws`).
 
@@ -10,13 +10,12 @@
 - `crates/audio-hub-server`: HTTP API, library scan, output management, stream source.
 - `crates/bridge`: HTTP-controlled receiver, playback pipeline.
 - `crates/audio-player`: shared decode/resample/playback building blocks.
-- `crates/hub-cli`: terminal UI client.
 - `crates/audio-bridge-types`: shared types.
 - `web-ui`: experimental dashboard (built to `web-ui/dist`).
 - `docs`: screenshots, docs.
 
 ## Common commands
-- Build all binaries (host): `make build` or `cargo build --release -p bridge -p audio-hub-server -p hub-cli`
+- Build all binaries (host): `make build` or `cargo build --release -p bridge -p audio-hub-server`
 - Tests (workspace): `cargo test`
 - Clean: `make clean`
 - Live integration tests (MusicBrainz + Cover Art Archive): `cargo test -p audio-hub-server live_ -- --ignored --nocapture`
@@ -24,7 +23,6 @@
 ## Run (quick start)
 - Receiver (Pi/target): `cargo run --release -p bridge -- --http-bind 0.0.0.0:5556 listen`
 - Server (host): `cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml`
-- TUI client: `cargo run --release -p hub-cli -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>`
 
 ## Web UI
 - Dev: `cd web-ui && npm install && npm run dev`

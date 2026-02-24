@@ -11,7 +11,7 @@ DOCKER_DEFAULT_PLATFORM ?= linux/amd64
 export DOCKER_DEFAULT_PLATFORM
 PROFILE ?= --release
 
-CRATES := bridge audio-hub-server hub-cli
+CRATES := bridge audio-hub-server
 LINUX_X64_TARGET := x86_64-unknown-linux-gnu
 LINUX_ARM64_TARGET := aarch64-unknown-linux-gnu
 

@@ -9,7 +9,6 @@ This repo is a Rust workspace with two main apps:
 
 - **`bridge`** (receiver): runs on the target machine (e.g. RPi). Exposes an HTTP control API, pulls audio via HTTP, decodes and plays through the selected output device.
 - **`audio-hub-server`** (server): runs on the media rack. Scans your library and exposes an HTTP API for control + streaming.
-- **`hub-cli`** (client): runs on your machine. A small TUI that connects to the server to browse and control playback.
 
 Each binary supports `--version`, which includes the crate version, git SHA, and build date.
 
@@ -18,11 +17,10 @@ Each binary supports `--version`, which includes the crate version, git SHA, and
 - `audio-player`: shared decode/resample/queue/playback building blocks
 - `bridge`: thin HTTP-controlled receiver that uses `audio-player`
 - `audio-hub-server`: scans the library, manages outputs, and streams audio to the bridge
-- `hub-cli`: TUI client that talks to the server and renders UI from a view-model layer
 
 ### Playback flow
 
-1. `hub-cli` or `web-ui` sends play/seek/queue commands to `audio-hub-server` using track/album ids.
+1. `web-ui` sends play/seek/queue commands to `audio-hub-server` using track/album ids.
 2. `audio-hub-server` resolves the selected output and exposes `/stream/track/{id}` for the current track.
 3. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
 4. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
@@ -30,19 +28,19 @@ Each binary supports `--version`, which includes the crate version, git SHA, and
 
 ```mermaid
 sequenceDiagram
-    participant CLI as hub-cli
+    participant UI as web-ui
     participant HUB as audio-hub-server
     participant BR as bridge
     participant AP as audio-player
 
-    CLI->>HUB: POST /play/album (album_id)
-    HUB-->>CLI: 200 OK
+    UI->>HUB: POST /sessions/{id}/play/album (album_id)
+    HUB-->>UI: 200 OK
     BR->>HUB: GET /stream/track/{id}
     HUB-->>BR: 206 Partial Content (audio)
     BR->>AP: decode + resample + playback
     AP-->>BR: status/metrics
     BR->>HUB: GET /status/stream (SSE)
-    HUB-->>CLI: SSE /status/stream + /queue/stream
+    HUB-->>UI: SSE /sessions/{id}/status/stream + /sessions/{id}/queue/stream
 ```
 
 ### audio-player pipeline (conceptual)
@@ -78,7 +76,7 @@ flowchart LR
     META -->|cover art hints| CA[CoverArtResolver]
     CA -->|store paths| DB
     DB -->|albums/tracks| API[HTTP API]
-    API -->|UI queries| UI[web-ui / hub-cli]
+    API -->|UI queries| UI[web-ui]
 ```
 
 Notes:
@@ -113,7 +111,6 @@ sequenceDiagram
 ### Status + UI
 
 - The bridge reports playback + signal data; the hub caches it and proxies via `/outputs/{id}/status`.
-- `hub-cli` renders a view-model so UI formatting stays separated from app state.
 
 ## What this is for
 
@@ -155,13 +152,7 @@ First start the server on the machine that hosts your media (config is required)
 cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml
 ```
 
-Then point the TUI at the server:
-
-```bash
- cargo run --release -p hub-cli -- --server http://<SERVER_IP>:8080 --dir <SERVER_MUSIC_DIR>
-```
-
-If the hub server uses a self-signed TLS cert and the CLI host doesn’t trust it, add `--tls-insecure`.
+Then open the web UI at `http://<SERVER_IP>:8080/` (or `https://...` when TLS is enabled).
 
 ## Web UI (experimental)
 
@@ -303,21 +294,6 @@ For a trusted local cert on macOS, use `mkcert` (recommended):
 scripts/gen-dev-cert-mkcert.sh 192.168.1.10 localhost
 ```
 
-## hub-cli keys (TUI)
-
-- **↑/↓**: select track
-- **Enter**: play selected track (starts streaming immediately)
-- **Space**: pause/resume
-- **n**: next (skip immediately)
-- **←/→**: seek −5s / +5s
-- **Shift+←/Shift+→**: seek −30s / +30s
-- **r**: rescan directory
-- **q**: quit
-
-### Hub-CLI screenshot
-
-![hub-cli TUI screenshot](docs/screenshots/hub-cli.png)
-
 ## Tuning playback stability vs latency
 
 `bridge` exposes a few knobs that trade latency for underrun resistance.
@@ -381,14 +357,7 @@ Tauri desktop bundles are built in a separate GitHub Actions workflow and attach
 
 ### Releasing a single crate
 
-If you only want to publish one binary (e.g. `hub-cli`), bump that crate’s version and tag using the `package/version` format:
-
-```bash
-git tag hub-cli/0.1.2
-git push origin hub-cli/0.1.2
-```
-
-This triggers a release for just that package (the tag name must match the Cargo package name).
+If you only want to publish one binary, bump that crate’s version and tag using the `package/version` format.
 
 ## Why not AirPlay?
 
