@@ -917,6 +917,8 @@ export default function App() {
       setSessionId(nextSessionId);
       setActiveOutputId(null);
       setStatus(null);
+      setQueue([]);
+      localPathRef.current = null;
       try {
         localStorage.setItem(WEB_SESSION_ID_KEY, nextSessionId);
       } catch {
@@ -1693,6 +1695,15 @@ export default function App() {
     }));
     setUpdatedAt(new Date());
   }, [isLocalSession, queue, sessionId, status?.now_playing]);
+
+  useEffect(() => {
+    if (!isLocalSession) return;
+    const hasLocalNowPlaying = queue.some((item) => item.kind === "track" && item.now_playing);
+    if (hasLocalNowPlaying) return;
+    if (!status?.now_playing) return;
+    setStatus(null);
+    localPathRef.current = null;
+  }, [isLocalSession, queue, status?.now_playing]);
 
   useQueueStream({
     enabled: serverConnected && Boolean(sessionId),
