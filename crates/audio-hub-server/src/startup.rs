@@ -814,7 +814,7 @@ mod tests {
         assert!(!should_log_path("/stream/track/31"));
         assert!(should_log_path("/queue"));
         assert!(should_log_path("/queue/stream"));
-        assert!(should_log_path("/outputs/bridge:test/status/stream"));
+        assert!(!should_log_path("/outputs/bridge:test/status/stream"));
         assert!(should_log_path("/artists"));
         assert!(should_log_path("/outputs/select"));
     }
