@@ -2138,6 +2138,7 @@ export default function App() {
                     disabled={
                       !serverConnected ||
                       !sessionId ||
+                      sessions.find((item) => item.id === sessionId)?.mode === "local" ||
                       isDefaultSessionName(
                         sessions.find((item) => item.id === sessionId)?.name
                       )
