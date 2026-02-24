@@ -7,7 +7,6 @@ mod bridge;
 mod bridge_device_streams;
 mod bridge_manager;
 mod bridge_transport;
-mod browser;
 mod config;
 mod cover_art;
 mod cast_v2;

@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import {
   apiUrl,
-  apiWsUrl,
   fetchJson,
   getDefaultApiBase,
   getEffectiveApiBase,
@@ -124,11 +123,53 @@ type ToastNotification = {
   createdAt: Date;
 };
 
+type LocalPlaybackCommand = {
+  url: string;
+  path: string;
+  track_id?: number | null;
+};
+
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const WEB_DEFAULT_SESSION_NAME = "Default";
+const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
+
+type LocalPlaybackSnapshot = {
+  path: string;
+  paused: boolean;
+  elapsed_ms: number | null;
+  duration_ms: number | null;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  saved_at_ms: number;
+};
+
+function localPlaybackSnapshotKey(sessionId: string): string {
+  return `${LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX}${sessionId}`;
+}
+
+function loadLocalPlaybackSnapshot(sessionId: string): LocalPlaybackSnapshot | null {
+  try {
+    const raw = localStorage.getItem(localPlaybackSnapshotKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalPlaybackSnapshot;
+    if (!parsed?.path) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalPlaybackSnapshot(sessionId: string, snapshot: LocalPlaybackSnapshot): void {
+  try {
+    localStorage.setItem(localPlaybackSnapshotKey(sessionId), JSON.stringify(snapshot));
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function isDefaultSessionName(name: string | null | undefined): boolean {
   return (name ?? "").trim().toLowerCase() === WEB_DEFAULT_SESSION_NAME.toLowerCase();
@@ -172,6 +213,12 @@ function formatRateRange(output: OutputInfo): string {
 
 function normalizeMatch(value?: string | null): string {
   return value?.trim().toLowerCase() ?? "";
+}
+
+function fileNameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || path;
 }
 
 // Folders view removed.
@@ -342,17 +389,13 @@ export default function App() {
   const albumsReloadQueuedRef = useRef(false);
   const albumsLoadingRef = useRef(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [browserOutputId, setBrowserOutputId] = useState<string | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const browserWsRef = useRef<WebSocket | null>(null);
-  const browserSessionIdRef = useRef<string | null>(null);
-  const browserPathRef = useRef<string | null>(null);
-  const lastBrowserStatusSentRef = useRef<number>(0);
+  const localPathRef = useRef<string | null>(null);
   const notificationIdRef = useRef(0);
   const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
 
@@ -400,7 +443,9 @@ export default function App() {
     [sessions, sessionId]
   );
   const isLocalSession = currentSession?.mode === "local";
-  const canTogglePlayback = Boolean(sessionId && activeOutputId && status?.now_playing);
+  const canTogglePlayback = Boolean(
+    sessionId && status?.now_playing && (isLocalSession || activeOutputId)
+  );
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const isPaused = Boolean(status?.now_playing && status?.paused);
   const uiBuildId = useMemo(() => {
@@ -429,9 +474,9 @@ export default function App() {
   const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
   const playButtonTitle = !sessionId
     ? "Creating session..."
-    : !activeOutputId
+    : !activeOutputId && !isLocalSession
     ? (isLocalSession
-      ? "Preparing local browser output..."
+      ? "Local session is ready."
       : "Select an output to control playback.")
     : !status?.now_playing
       ? "Select an album track to play."
@@ -1026,11 +1071,11 @@ export default function App() {
   const {
     handleRescanLibrary,
     handleRescanTrack,
-    handlePause,
+    handlePause: handlePauseRemote,
     handleSelectOutput,
-    handlePlay,
-    handlePlayAlbumTrack,
-    handlePlayAlbumById
+    handlePlay: handlePlayRemote,
+    handlePlayAlbumTrack: handlePlayAlbumTrackRemote,
+    handlePlayAlbumById: handlePlayAlbumByIdRemote
   } = usePlaybackActions({
     sessionId,
     activeOutputId,
@@ -1040,13 +1085,148 @@ export default function App() {
     setRescanBusy
   });
   const {
-    handleNext,
-    handlePrevious,
+    handleNext: handleNextRemote,
+    handlePrevious: handlePreviousRemote,
     handleQueue,
     handlePlayNext,
     handleQueueClear,
-    handleQueuePlayFrom
+    handleQueuePlayFrom: handleQueuePlayFromRemote
   } = useQueueActions({ sessionId, setError: reportError });
+
+  const handlePause = useCallback(async () => {
+    if (isLocalSession) {
+      const audio = audioRef.current;
+      if (!audio || !localPathRef.current) return;
+      if (audio.paused) {
+        await audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
+      updateLocalStatusFromAudio();
+      return;
+    }
+    await handlePauseRemote();
+  }, [handlePauseRemote, isLocalSession]);
+
+  const handlePlay = useCallback(
+    async (path: string) => {
+      try {
+        if (!isLocalSession || !sessionId) {
+          await handlePlayRemote(path);
+          return;
+        }
+        await postJson(`/sessions/${encodeURIComponent(sessionId)}/queue/next/add`, { paths: [path] });
+        const payload = await requestLocalCommand("/queue/next");
+        await applyLocalPlayback(payload);
+      } catch (err) {
+        reportError((err as Error).message);
+      }
+    },
+    [handlePlayRemote, isLocalSession, reportError, sessionId]
+  );
+
+  const handleNext = useCallback(async () => {
+    try {
+      if (!isLocalSession) {
+        await handleNextRemote();
+        return;
+      }
+      const payload = await requestLocalCommand("/queue/next");
+      await applyLocalPlayback(payload);
+    } catch (err) {
+      reportError((err as Error).message);
+    }
+  }, [handleNextRemote, isLocalSession, reportError]);
+
+  const handlePrevious = useCallback(async () => {
+    try {
+      if (!isLocalSession) {
+        await handlePreviousRemote();
+        return;
+      }
+      const payload = await requestLocalCommand("/queue/previous");
+      await applyLocalPlayback(payload);
+    } catch (err) {
+      reportError((err as Error).message);
+    }
+  }, [handlePreviousRemote, isLocalSession, reportError]);
+
+  const handleQueuePlayFrom = useCallback(
+    async (payload: { trackId?: number; path?: string }) => {
+      try {
+        if (!isLocalSession || !sessionId) {
+          await handleQueuePlayFromRemote(payload);
+          return;
+        }
+        const endpoint = `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`;
+        const body = payload.trackId ? { track_id: payload.trackId } : { path: payload.path };
+        const command = await postJson<LocalPlaybackCommand>(endpoint, body as any);
+        await applyLocalPlayback(command);
+      } catch (err) {
+        reportError((err as Error).message);
+      }
+    },
+    [handleQueuePlayFromRemote, isLocalSession, reportError, sessionId]
+  );
+
+  const handlePlayAlbumTrack = useCallback(
+    async (track: TrackSummary) => {
+      try {
+        if (!isLocalSession || !sessionId) {
+          await handlePlayAlbumTrackRemote(track);
+          return;
+        }
+        if (!track.path) return;
+        await postJson(`/sessions/${encodeURIComponent(sessionId)}/queue/next/add`, {
+          paths: [track.path]
+        });
+        const payload = await requestLocalCommand("/queue/next");
+        await applyLocalPlayback(payload);
+      } catch (err) {
+        reportError((err as Error).message);
+      }
+    },
+    [
+      handlePlayAlbumTrackRemote,
+      isLocalSession,
+      reportError,
+      sessionId
+    ]
+  );
+
+  const handlePlayAlbumById = useCallback(
+    async (albumId: number) => {
+      try {
+        if (!isLocalSession || !sessionId) {
+          await handlePlayAlbumByIdRemote(albumId);
+          return;
+        }
+        const tracks = await fetchJson<TrackListResponse>(`/tracks?album_id=${albumId}&limit=500`);
+        const paths = (tracks.items ?? [])
+          .map((track) => track.path)
+          .filter((path): path is string => Boolean(path));
+        if (!paths.length) {
+          throw new Error("Album has no playable tracks.");
+        }
+        const base = `/sessions/${encodeURIComponent(sessionId)}/queue`;
+        await postJson(`${base}/clear`, {
+          clear_queue: true,
+          clear_history: false
+        });
+        await postJson(base, { paths });
+        const payload = await requestLocalCommand("/queue/next");
+        await applyLocalPlayback(payload);
+      } catch (err) {
+        reportError((err as Error).message);
+      }
+    },
+    [
+      handlePlayAlbumByIdRemote,
+      isLocalSession,
+      reportError,
+      sessionId
+    ]
+  );
 
   const handleSelectOutputForSession = useCallback(
     async (id: string) => {
@@ -1215,7 +1395,7 @@ export default function App() {
   }, [fetchOutputSettings]);
 
   useStatusStream({
-    enabled: serverConnected && Boolean(sessionId && activeOutputId),
+    enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputId),
     sourceKey: streamKey,
     sessionId,
     onEvent: (data: SetStateAction<StatusResponse | null>) => {
@@ -1237,202 +1417,153 @@ export default function App() {
     }
   });
 
-  const sendBrowserStatus = useCallback((force = false) => {
-    const ws = browserWsRef.current;
-    const audio = audioRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !audio) return;
-    const now = Date.now();
-    if (!force && now - lastBrowserStatusSentRef.current < 500) {
-      return;
-    }
-    lastBrowserStatusSentRef.current = now;
-    const hasSrc = Boolean(audio.src);
-    const duration = hasSrc && Number.isFinite(audio.duration)
-      ? Math.floor(audio.duration * 1000)
-      : null;
-    const elapsed = hasSrc && Number.isFinite(audio.currentTime)
-      ? Math.floor(audio.currentTime * 1000)
-      : null;
-    ws.send(JSON.stringify({
-      type: "status",
-      paused: audio.paused,
-      elapsed_ms: elapsed,
-      duration_ms: duration,
-      now_playing: browserPathRef.current
-    }));
-  }, []);
+  const updateLocalStatusFromAudio = useCallback(
+    (base?: Partial<StatusResponse>) => {
+      if (!isLocalSession) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      const hasTrack = Boolean(localPathRef.current);
+      setStatus((prev) => {
+        const next: StatusResponse = {
+          ...(prev ?? {}),
+          ...base,
+          now_playing: hasTrack ? localPathRef.current : null,
+          paused: hasTrack ? audio.paused : true,
+          elapsed_ms:
+            hasTrack && Number.isFinite(audio.currentTime)
+              ? Math.floor(audio.currentTime * 1000)
+              : null,
+          duration_ms:
+            hasTrack && Number.isFinite(audio.duration) ? Math.floor(audio.duration * 1000) : null
+        };
+        if (!hasTrack) {
+          next.title = null;
+          next.artist = null;
+          next.album = null;
+          next.output_sample_rate = null;
+          next.channels = null;
+        }
+        return next;
+      });
+      setUpdatedAt(new Date());
+    },
+    [isLocalSession]
+  );
 
-  const sendBrowserEnded = useCallback(() => {
-    const ws = browserWsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "ended" }));
-  }, []);
+  const applyLocalPlayback = useCallback(
+    async (payload: LocalPlaybackCommand | null) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (!payload?.url || !payload.path) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        localPathRef.current = null;
+        updateLocalStatusFromAudio();
+        return;
+      }
+      const safeUrl = safeMediaUrl(payload.url);
+      if (!safeUrl) {
+        reportError("Rejected local playback URL.");
+        return;
+      }
+      localPathRef.current = payload.path;
+      const queueTrack = queue.find(
+        (item) => item.kind === "track" && item.path === payload.path
+      );
+      audio.src = safeUrl;
+      audio.load();
+      await audio.play().catch(() => {});
+      updateLocalStatusFromAudio({
+        title:
+          queueTrack?.kind === "track"
+            ? (queueTrack.title ?? queueTrack.file_name)
+            : fileNameFromPath(payload.path),
+        artist: queueTrack?.kind === "track" ? (queueTrack.artist ?? null) : null,
+        album: queueTrack?.kind === "track" ? (queueTrack.album ?? null) : null
+      });
+    },
+    [queue, reportError, updateLocalStatusFromAudio]
+  );
+
+  const requestLocalCommand = useCallback(
+    async (
+      endpoint: string,
+      body?: Record<string, string | number | boolean | null | undefined>
+    ): Promise<LocalPlaybackCommand | null> => {
+      if (!sessionId) return null;
+      const response = await postJson<LocalPlaybackCommand | null>(
+        `/sessions/${encodeURIComponent(sessionId)}${endpoint}`,
+        body as any
+      );
+      if (!response || !response.url || !response.path) {
+        return null;
+      }
+      return response;
+    },
+    [sessionId]
+  );
 
   useEffect(() => {
+    if (!isLocalSession) return;
     const audio = audioRef.current;
     if (!audio) return;
-    const handleTimeUpdate = () => sendBrowserStatus();
-    const handlePause = () => sendBrowserStatus(true);
-    const handlePlay = () => sendBrowserStatus(true);
-    const handleDurationChange = () => sendBrowserStatus(true);
-    const handleEnded = () => {
-      browserPathRef.current = null;
-      sendBrowserEnded();
-      sendBrowserStatus(true);
+    const onTimeUpdate = () => updateLocalStatusFromAudio();
+    const onPause = () => updateLocalStatusFromAudio();
+    const onPlay = () => updateLocalStatusFromAudio();
+    const onDurationChange = () => updateLocalStatusFromAudio();
+    const onEnded = () => {
+      requestLocalCommand("/queue/next")
+        .then((payload) => applyLocalPlayback(payload))
+        .catch((err) => reportError((err as Error).message));
     };
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("durationchange", handleDurationChange);
-    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("durationchange", onDurationChange);
+    audio.addEventListener("ended", onEnded);
     return () => {
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("durationchange", handleDurationChange);
-      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("durationchange", onDurationChange);
+      audio.removeEventListener("ended", onEnded);
     };
-  }, [sendBrowserStatus, sendBrowserEnded]);
-
+  }, [applyLocalPlayback, isLocalSession, reportError, requestLocalCommand, updateLocalStatusFromAudio]);
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      sendBrowserStatus();
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [sendBrowserStatus]);
-
-  useEffect(() => {
-    let mounted = true;
-    let retryTimer: number | null = null;
-    const connect = () => {
-      if (!mounted) return;
-      const ws = new WebSocket(apiWsUrl("/browser/ws"));
-      browserWsRef.current = ws;
-      ws.onopen = () => {
-        const name = `Browser (${navigator.platform || "unknown"})`;
-        ws.send(JSON.stringify({ type: "hello", name }));
-      };
-      ws.onmessage = (event) => {
-        let payload: any;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        const audio = audioRef.current;
-        if (!audio) return;
-        switch (payload?.type) {
-          case "hello":
-            browserSessionIdRef.current = payload.session_id ?? null;
-            setBrowserOutputId(payload.session_id ? `browser:${payload.session_id}` : null);
-            break;
-          case "play": {
-            const url = payload.url as string | undefined;
-            if (!url) return;
-            const safeUrl = safeMediaUrl(url);
-            if (!safeUrl) {
-              console.warn("browser: rejected media url", url);
-              return;
-            }
-            const startPaused = Boolean(payload.start_paused);
-            const seekMs = typeof payload.seek_ms === "number" ? payload.seek_ms : null;
-            browserPathRef.current = typeof payload.path === "string" ? payload.path : null;
-            const applyStart = () => {
-              if (seekMs !== null) {
-                audio.currentTime = seekMs / 1000;
-              }
-              if (startPaused) {
-                audio.pause();
-              } else {
-                audio.play().catch(() => {});
-              }
-              sendBrowserStatus(true);
-            };
-            audio.src = safeUrl;
-            audio.load();
-            if (seekMs === null) {
-              applyStart();
-            } else {
-              const onLoaded = () => {
-                audio.removeEventListener("loadedmetadata", onLoaded);
-                applyStart();
-              };
-              audio.addEventListener("loadedmetadata", onLoaded);
-            }
-            break;
-          }
-          case "pause_toggle":
-            if (audio.paused) {
-              audio.play().catch(() => {});
-            } else {
-              audio.pause();
-            }
-            break;
-          case "stop":
-            audio.pause();
-            audio.removeAttribute("src");
-            audio.load();
-            browserPathRef.current = null;
-            sendBrowserStatus(true);
-            break;
-          case "seek":
-            if (typeof payload.ms === "number") {
-              audio.currentTime = payload.ms / 1000;
-              sendBrowserStatus(true);
-            }
-            break;
-          default:
-            break;
-        }
-      };
-      ws.onerror = () => {
-        ws.close();
-      };
-      ws.onclose = () => {
-        if (!mounted) return;
-        setBrowserOutputId(null);
-        retryTimer = window.setTimeout(connect, 1500);
-      };
-    };
-    connect();
-    return () => {
-      mounted = false;
-      if (retryTimer !== null) {
-        window.clearTimeout(retryTimer);
-      }
-      browserWsRef.current?.close();
-    };
-  }, [sendBrowserStatus]);
-  useEffect(() => {
-    if (!sessionId || !activeOutputId) {
+    if (!sessionId || (!activeOutputId && !isLocalSession)) {
       setStatus(null);
     }
-  }, [sessionId, activeOutputId]);
+  }, [sessionId, activeOutputId, isLocalSession]);
 
   useEffect(() => {
-    if (!serverConnected || !sessionId || !isLocalSession || !browserOutputId) return;
-    if (activeOutputId === browserOutputId) return;
-    postJson(`/sessions/${encodeURIComponent(sessionId)}/select-output`, {
-      output_id: browserOutputId,
-      force: false
-    })
-      .then(() =>
-        Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(sessionId)])
-      )
-      .catch((err) => {
-        reportError((err as Error).message);
-      });
+    if (!isLocalSession || !sessionId) return;
+    const currentPath = status?.now_playing ?? null;
+    if (!currentPath) {
+      return;
+    }
+    saveLocalPlaybackSnapshot(sessionId, {
+      path: currentPath,
+      paused: Boolean(status?.paused ?? true),
+      elapsed_ms: status?.elapsed_ms ?? null,
+      duration_ms: status?.duration_ms ?? null,
+      title: status?.title ?? null,
+      artist: status?.artist ?? null,
+      album: status?.album ?? null,
+      saved_at_ms: Date.now()
+    });
   }, [
-    activeOutputId,
-    browserOutputId,
     isLocalSession,
-    refreshSessionDetail,
-    refreshSessionLocks,
-    refreshSessions,
-    reportError,
-    serverConnected,
-    sessionId
+    sessionId,
+    status?.album,
+    status?.artist,
+    status?.duration_ms,
+    status?.elapsed_ms,
+    status?.now_playing,
+    status?.paused,
+    status?.title
   ]);
+
 
   useEffect(() => {
     const path = status?.now_playing ?? null;
@@ -1465,6 +1596,71 @@ export default function App() {
       active = false;
     };
   }, [queue, status?.now_playing]);
+
+  useEffect(() => {
+    if (!isLocalSession) return;
+    const path = status?.now_playing ?? null;
+    if (!path) return;
+    const queueTrack = queue.find(
+      (item) => item.kind === "track" && item.path === path
+    );
+    if (!queueTrack || queueTrack.kind !== "track") return;
+
+    const nextTitle = queueTrack.title ?? queueTrack.file_name ?? fileNameFromPath(path);
+    const nextArtist = queueTrack.artist ?? null;
+    const nextAlbum = queueTrack.album ?? null;
+    if (
+      status?.title === nextTitle &&
+      (status?.artist ?? null) === nextArtist &&
+      (status?.album ?? null) === nextAlbum
+    ) {
+      return;
+    }
+    setStatus((prev) =>
+      prev
+        ? {
+            ...prev,
+            title: nextTitle,
+            artist: nextArtist,
+            album: nextAlbum
+          }
+        : prev
+    );
+  }, [isLocalSession, queue, status?.album, status?.artist, status?.now_playing, status?.title]);
+
+  useEffect(() => {
+    if (!isLocalSession || !sessionId) return;
+    if (status?.now_playing) return;
+    const currentQueueItem = queue.find(
+      (item) => item.kind === "track" && item.now_playing
+    );
+    if (!currentQueueItem || currentQueueItem.kind !== "track") return;
+
+    const snapshot = loadLocalPlaybackSnapshot(sessionId);
+    const path = currentQueueItem.path;
+    const title = currentQueueItem.title ?? currentQueueItem.file_name ?? fileNameFromPath(path);
+    const artist = currentQueueItem.artist ?? null;
+    const album = currentQueueItem.album ?? null;
+    const elapsedMs =
+      snapshot?.path === path ? (snapshot.elapsed_ms ?? null) : null;
+    const durationMs =
+      snapshot?.path === path
+        ? (snapshot.duration_ms ?? currentQueueItem.duration_ms ?? null)
+        : (currentQueueItem.duration_ms ?? null);
+
+    localPathRef.current = path;
+    setStatus((prev) => ({
+      ...(prev ?? {}),
+      now_playing: path,
+      paused: true,
+      elapsed_ms: elapsedMs,
+      duration_ms: durationMs,
+      title,
+      artist,
+      album
+    }));
+    setUpdatedAt(new Date());
+  }, [isLocalSession, queue, sessionId, status?.now_playing]);
 
   useQueueStream({
     enabled: serverConnected && Boolean(sessionId),
@@ -1712,15 +1908,52 @@ export default function App() {
 
   async function handlePrimaryAction() {
     if (status?.now_playing) {
+      if (isLocalSession && status.paused && sessionId) {
+        const audio = audioRef.current;
+        const hasSource = Boolean(audio?.src);
+        if (!hasSource) {
+          try {
+            const payload = await postJson<LocalPlaybackCommand>(
+              `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`,
+              { path: status.now_playing }
+            );
+            await applyLocalPlayback(payload);
+            const seekMs = status.elapsed_ms ?? null;
+            if (audioRef.current && seekMs && seekMs > 0) {
+              const resumeAt = seekMs / 1000;
+              const player = audioRef.current;
+              const applySeek = () => {
+                player.currentTime = resumeAt;
+              };
+              if (Number.isFinite(player.duration) && player.duration > 0) {
+                applySeek();
+              } else {
+                const onLoaded = () => {
+                  player.removeEventListener("loadedmetadata", onLoaded);
+                  applySeek();
+                };
+                player.addEventListener("loadedmetadata", onLoaded);
+              }
+            }
+            return;
+          } catch (err) {
+            reportError((err as Error).message);
+            return;
+          }
+        }
+      }
       await handlePause();
       return;
     }
   }
 
   const showGate = !serverConnected;
-  const queueHasNext = Boolean(sessionId && activeOutputId) && queue.some((item) =>
+  const queueHasNext = Boolean(sessionId && (activeOutputId || isLocalSession)) && queue.some((item) =>
     item.kind === "track" ? !item.now_playing : true
   );
+  const canGoPrevious = isLocalSession
+    ? queue.some((item) => item.kind === "track" && Boolean(item.played))
+    : Boolean(status?.has_previous);
   return (
     <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""} ${queueOpen ? "queue-open" : ""}`}>
       {showGate ? (
@@ -1921,7 +2154,7 @@ export default function App() {
                 loading={albumsLoading}
                 error={albumsError}
                 placeholder={albumPlaceholder}
-                canPlay={Boolean(sessionId && activeOutputId)}
+                canPlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
                 activeAlbumId={activeAlbumId}
                 isPlaying={isPlaying}
                 isPaused={isPaused}
@@ -1945,7 +2178,7 @@ export default function App() {
               loading={albumTracksLoading}
               error={albumTracksError}
               placeholder={albumPlaceholder}
-              canPlay={Boolean(sessionId && activeOutputId) && albumTracks.length > 0}
+              canPlay={Boolean(sessionId && (activeOutputId || isLocalSession)) && albumTracks.length > 0}
               activeAlbumId={activeAlbumId}
               isPlaying={isPlaying}
               isPaused={isPaused}
@@ -2074,12 +2307,14 @@ export default function App() {
           status={status}
           nowPlayingCover={nowPlayingCover}
           nowPlayingCoverFailed={nowPlayingCoverFailed}
+          showSignalAction={!isLocalSession}
           showSignalPath={isPlaying}
           canTogglePlayback={canTogglePlayback}
-          canGoPrevious={Boolean(status?.has_previous)}
+          canGoPrevious={canGoPrevious}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasNext}
           queueOpen={queueOpen}
+          showOutputAction={!isLocalSession}
           activeOutput={activeOutput}
           activeAlbumId={activeAlbumId}
           uiBuildId={uiBuildId}
@@ -2291,7 +2526,7 @@ export default function App() {
         onClose={() => setQueueOpen(false)}
         formatMs={formatMs}
         placeholder={albumPlaceholder}
-        canPlay={Boolean(sessionId && activeOutputId)}
+        canPlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
         isPaused={Boolean(status?.paused)}
         onPause={handlePause}
         onPlayFrom={handleQueuePlayFrom}

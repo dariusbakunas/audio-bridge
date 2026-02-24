@@ -9,7 +9,6 @@ pub mod metadata;
 pub mod outputs;
 pub mod sessions;
 pub mod streams;
-pub mod browser;
 pub mod health;
 
 pub use library::{
@@ -91,7 +90,6 @@ pub use streams::{
     metadata_stream,
     outputs_stream,
 };
-pub use browser::browser_ws;
 pub use health::HealthResponse;
 
 #[cfg(test)]
@@ -158,7 +156,6 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
 
-        let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
         let cast_state = Arc::new(crate::state::CastProviderState::new());
         let state = AppState::new(
             library,
@@ -167,7 +164,6 @@ mod tests {
             MetadataWake::new(),
             bridge_state,
             local_state,
-            browser_state,
             cast_state,
             playback_manager,
             device_selection,

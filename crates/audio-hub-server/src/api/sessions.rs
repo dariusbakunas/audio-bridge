@@ -1,6 +1,6 @@
 //! Session management API handlers.
 
-use actix_web::{get, post, web, Error, HttpResponse, Responder};
+use actix_web::{get, post, web, Error, HttpRequest, HttpResponse, Responder};
 use actix_web::http::header;
 use actix_web::web::Bytes;
 use futures_util::{Stream, stream::unfold};
@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 
 use crate::events::HubEvent;
 use crate::models::{
+    LocalPlaybackPlayResponse,
     OutputInUseError,
     QueueAddRequest,
     QueueClearRequest,
@@ -751,6 +752,35 @@ fn require_session(session_id: &str) -> Result<(), HttpResponse> {
     }
 }
 
+fn is_local_session(session_id: &str) -> bool {
+    matches!(
+        crate::session_registry::get_session(session_id).map(|s| s.mode),
+        Some(crate::models::SessionMode::Local)
+    )
+}
+
+fn build_local_playback_response(
+    state: &AppState,
+    req: &HttpRequest,
+    path: PathBuf,
+) -> LocalPlaybackPlayResponse {
+    let conn = req.connection_info();
+    let base_url = format!("{}://{}", conn.scheme(), conn.host());
+    let url = crate::stream_url::build_stream_url_for(&path, &base_url, Some(&state.metadata.db));
+    let path_str = path.to_string_lossy().to_string();
+    let track_id = state
+        .metadata
+        .db
+        .track_id_for_path(&path_str)
+        .ok()
+        .flatten();
+    LocalPlaybackPlayResponse {
+        url,
+        path: path_str,
+        track_id,
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/sessions/{id}/queue",
@@ -812,6 +842,9 @@ pub async fn sessions_queue_add(
         Ok(added) => added,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
+    if added > 0 {
+        state.events.queue_changed();
+    }
     HttpResponse::Ok().body(format!("added {added}"))
 }
 
@@ -851,6 +884,9 @@ pub async fn sessions_queue_add_next(
         Ok(added) => added,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
+    if added > 0 {
+        state.events.queue_changed();
+    }
     HttpResponse::Ok().body(format!("added {added}"))
 }
 
@@ -884,7 +920,12 @@ pub async fn sessions_queue_remove(
         Err(err) => return err.into_response(),
     };
     match crate::session_registry::queue_remove_path(&session_id, &path) {
-        Ok(_) => HttpResponse::Ok().finish(),
+        Ok(removed) => {
+            if removed {
+                state.events.queue_changed();
+            }
+            HttpResponse::Ok().finish()
+        }
         Err(()) => HttpResponse::NotFound().body("session not found"),
     }
 }
@@ -908,6 +949,7 @@ pub async fn sessions_queue_play_from(
     state: web::Data<AppState>,
     id: web::Path<String>,
     body: web::Json<QueuePlayFromRequest>,
+    req: HttpRequest,
 ) -> impl Responder {
     let session_id = id.into_inner();
     if let Err(resp) = require_session(&session_id) {
@@ -941,13 +983,15 @@ pub async fn sessions_queue_play_from(
     if !found {
         return HttpResponse::NotFound().finish();
     }
+    state.events.queue_changed();
+    state.events.status_changed();
 
-    match state
-        .output
-        .session_playback
-        .play_path(&state, &session_id, canonical)
-        .await
-    {
+    if is_local_session(&session_id) {
+        let payload = build_local_playback_response(&state, &req, canonical);
+        return HttpResponse::Ok().json(payload);
+    }
+
+    match state.output.session_playback.play_path(&state, &session_id, canonical).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -968,7 +1012,7 @@ pub async fn sessions_queue_play_from(
 #[post("/sessions/{id}/queue/clear")]
 /// Clear a session queue.
 pub async fn sessions_queue_clear(
-    _state: web::Data<AppState>,
+    state: web::Data<AppState>,
     id: web::Path<String>,
     body: Option<web::Json<QueueClearRequest>>,
 ) -> impl Responder {
@@ -979,7 +1023,10 @@ pub async fn sessions_queue_clear(
     let clear_history = body.as_ref().map(|req| req.clear_history).unwrap_or(false);
     let clear_queue = body.as_ref().map(|req| req.clear_queue).unwrap_or(true);
     match crate::session_registry::queue_clear(&session_id, clear_queue, clear_history) {
-        Ok(()) => HttpResponse::Ok().finish(),
+        Ok(()) => {
+            state.events.queue_changed();
+            HttpResponse::Ok().finish()
+        }
         Err(()) => HttpResponse::NotFound().body("session not found"),
     }
 }
@@ -998,7 +1045,11 @@ pub async fn sessions_queue_clear(
 )]
 #[post("/sessions/{id}/queue/next")]
 /// Skip to the next track in a session queue.
-pub async fn sessions_queue_next(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+pub async fn sessions_queue_next(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    req: HttpRequest,
+) -> impl Responder {
     let session_id = id.into_inner();
     if let Err(resp) = require_session(&session_id) {
         return resp;
@@ -1009,6 +1060,13 @@ pub async fn sessions_queue_next(state: web::Data<AppState>, id: web::Path<Strin
     }) else {
         return HttpResponse::NoContent().finish();
     };
+    state.events.queue_changed();
+    state.events.status_changed();
+    if is_local_session(&session_id) {
+        let payload = build_local_playback_response(&state, &req, next_path);
+        return HttpResponse::Ok().json(payload);
+    }
+
     match state
         .output
         .session_playback
@@ -1037,6 +1095,7 @@ pub async fn sessions_queue_next(state: web::Data<AppState>, id: web::Path<Strin
 pub async fn sessions_queue_previous(
     state: web::Data<AppState>,
     id: web::Path<String>,
+    req: HttpRequest,
 ) -> impl Responder {
     let session_id = id.into_inner();
     if let Err(resp) = require_session(&session_id) {
@@ -1048,6 +1107,13 @@ pub async fn sessions_queue_previous(
     }) else {
         return HttpResponse::NoContent().finish();
     };
+    state.events.queue_changed();
+    state.events.status_changed();
+    if is_local_session(&session_id) {
+        let payload = build_local_playback_response(&state, &req, prev_path);
+        return HttpResponse::Ok().json(payload);
+    }
+
     match state
         .output
         .session_playback

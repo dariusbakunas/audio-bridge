@@ -1123,7 +1123,6 @@ mod tests {
             bridge: Arc::new(Mutex::new(std::collections::HashMap::new())),
         };
         let metadata_db = crate::metadata_db::MetadataDb::new(library.root()).unwrap();
-        let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
         let cast_state = Arc::new(crate::state::CastProviderState::new());
         AppState::new(
             library,
@@ -1132,7 +1131,6 @@ mod tests {
             crate::state::MetadataWake::new(),
             bridge_state,
             local_state,
-            browser_state,
             cast_state,
             playback_manager,
             device_selection,

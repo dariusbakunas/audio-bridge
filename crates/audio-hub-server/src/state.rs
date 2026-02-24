@@ -12,7 +12,6 @@ use audio_bridge_types::BridgeStatus;
 use crossbeam_channel::Sender;
 
 use crate::bridge::{BridgeCommand, BridgePlayer};
-use crate::browser::BrowserProviderState;
 use crate::config::BridgeConfigResolved;
 use crate::events::{EventBus, LogBus};
 use crate::library::LibraryIndex;
@@ -126,8 +125,6 @@ pub struct ProviderState {
     pub bridge: Arc<BridgeProviderState>,
     /// Local provider state (optional local playback).
     pub local: Arc<LocalProviderState>,
-    /// Browser provider state (websocket receivers).
-    pub browser: Arc<BrowserProviderState>,
     /// Cast provider state (discovered Chromecast devices).
     pub cast: Arc<CastProviderState>,
 }
@@ -172,7 +169,6 @@ impl AppState {
         metadata_wake: MetadataWake,
         bridge: Arc<BridgeProviderState>,
         local: Arc<LocalProviderState>,
-        browser: Arc<BrowserProviderState>,
         cast: Arc<CastProviderState>,
         playback_manager: PlaybackManager,
         device_selection: DeviceSelectionState,
@@ -188,7 +184,7 @@ impl AppState {
                 musicbrainz,
                 wake: metadata_wake,
             },
-            providers: ProviderState { bridge, local, browser, cast },
+            providers: ProviderState { bridge, local, cast },
             playback: PlaybackState {
                 manager: playback_manager,
                 device_selection,

@@ -96,7 +96,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
-    let browser_state = Arc::new(crate::browser::BrowserProviderState::new());
     let cast_state = Arc::new(CastProviderState::new());
     let output_settings = Arc::new(Mutex::new(output_settings_state));
     let state = web::Data::new(AppState::new(
@@ -106,7 +105,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         metadata_wake.clone(),
         bridge_state,
         local_state,
-        browser_state,
         cast_state,
         playback_manager,
         device_selection,
@@ -213,7 +211,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::sessions_queue_next)
             .service(api::sessions_queue_previous)
             .service(api::sessions_queue_stream)
-            .service(api::browser_ws)
             .service(api::health::health)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
