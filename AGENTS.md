@@ -4,7 +4,7 @@
 - Rust workspace for a networked audio hub + receiver.
 - Main binaries: `bridge` (receiver), `audio-hub-server` (server).
 - Experimental web UI in `web-ui` (Vite + React).
-- Browser playback is supported via a browser output provider + WebSocket receiver (`/browser/ws`).
+- Browser local playback is client-managed via local sessions and session HTTP endpoints.
 
 ## Repo layout
 - `crates/audio-hub-server`: HTTP API, library scan, output management, stream source.
@@ -54,6 +54,8 @@
 
 ## Local playback (2026-02)
 - Local playback is decoupled from output selection and remote session control.
+- Browser local playback does not use `/browser/ws` and does not register browser outputs hub-side.
+- Queue/control for local sessions flows through `/sessions/{id}/queue/...` HTTP endpoints.
 - Endpoints:
   - `POST /local-playback/register`
   - `POST /local-playback/{session_id}/play`

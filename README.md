@@ -34,13 +34,13 @@ sequenceDiagram
     participant BR as bridge
     participant AP as audio-player
 
-    UI->>HUB: POST /sessions/{id}/play/album (album_id)
+    UI->>HUB: POST /sessions/{id}/queue + /sessions/{id}/queue/next
     HUB-->>UI: 200 OK
     BR->>HUB: GET /stream/track/{id}
     HUB-->>BR: 206 Partial Content (audio)
     BR->>AP: decode + resample + playback
     AP-->>BR: status/metrics
-    BR->>HUB: GET /status/stream (SSE)
+    BR->>HUB: GET /bridges/{id}/status/stream (internal polling stream)
     HUB-->>UI: SSE /sessions/{id}/status/stream + /sessions/{id}/queue/stream
 ```
 
@@ -107,7 +107,7 @@ sequenceDiagram
 - Providers expose outputs (devices). Sessions bind outputs via locks so one output is used by at most one session at a time.
 - `bridge` outputs are discovered via mDNS and status streams over HTTP (SSE).
 - Local outputs (optional) reuse the same control path as bridge outputs.
-- Browser outputs are registered by the web UI and controlled via WebSocket (`/browser/ws`).
+- Browser local playback is client-managed per local session and controlled via session HTTP endpoints.
 
 ### Status + UI
 
@@ -173,7 +173,7 @@ npm run build
 
 Then start `audio-hub-server` as usual and open `http://<SERVER_IP>:8080/`.
 
-The browser UI registers itself as a playback output; select the `browser:<id>` output to play directly in that browser.
+The browser UI supports local playback via the built-in `Local` session; no browser output selection is required.
 
 ### Track analysis (experimental)
 
@@ -346,7 +346,6 @@ listen
 - `POST /local-playback/register`
 - `POST /local-playback/{session_id}/play`
 - `GET /local-playback/sessions`
-- `GET /outputs/{id}/status`
 - `GET /stream` (range-enabled)
 - `GET /providers`
 - `GET /providers/{id}/outputs`
@@ -366,6 +365,8 @@ This adds a provider `local:local` (id configurable) that lists the host’s dev
 and plays locally without running a separate bridge.
 
 ## Releases
+
+See `CHANGELOG.md` for release notes and version history.
 
 Releases are handled by `cargo-dist` via GitHub Actions. Tag a version (e.g. `v0.1.1`) to trigger builds for all configured targets.
 
