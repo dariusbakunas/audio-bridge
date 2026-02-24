@@ -55,6 +55,10 @@ fn mode_key(mode: &SessionMode) -> &'static str {
     }
 }
 
+fn session_name_key(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
 pub fn create_or_refresh(
     name: String,
     mode: SessionMode,
@@ -63,15 +67,21 @@ pub fn create_or_refresh(
     owner: Option<String>,
     lease_ttl_sec: Option<u64>,
 ) -> (String, u64) {
-    let ttl = lease_ttl_sec.unwrap_or(DEFAULT_LEASE_TTL_SEC).max(5);
+    let never_expires = lease_ttl_sec == Some(0);
+    let ttl = if never_expires {
+        0
+    } else {
+        lease_ttl_sec.unwrap_or(DEFAULT_LEASE_TTL_SEC).max(5)
+    };
     let ttl_dur = Duration::from_secs(ttl);
     let now = Instant::now();
-    let key = (mode_key(&mode).to_string(), client_id.clone());
+    let key = (mode_key(&mode).to_string(), session_name_key(&name));
 
     let mut store = store().lock().unwrap_or_else(|err| err.into_inner());
     if let Some(existing_id) = store.by_key.get(&key).cloned() {
         if let Some(existing) = store.by_id.get_mut(&existing_id) {
             existing.name = name;
+            existing.client_id = client_id;
             existing.app_version = app_version;
             existing.owner = owner;
             existing.last_seen = now;
@@ -122,6 +132,21 @@ pub fn list_sessions() -> Vec<SessionRecord> {
         .unwrap_or_default()
 }
 
+pub fn list_sessions_visible(viewer_client_id: Option<&str>) -> Vec<SessionRecord> {
+    list_sessions()
+        .into_iter()
+        .filter(|session| {
+            if !matches!(session.mode, SessionMode::Local) {
+                return true;
+            }
+            match viewer_client_id {
+                Some(client_id) => client_id == session.client_id,
+                None => false,
+            }
+        })
+        .collect()
+}
+
 pub fn lock_snapshot() -> (Vec<(String, String)>, Vec<(String, String)>) {
     let store = match store().lock() {
         Ok(guard) => guard,
@@ -147,6 +172,22 @@ pub fn get_session(session_id: &str) -> Option<SessionRecord> {
         .lock()
         .ok()
         .and_then(|s| s.by_id.get(session_id).cloned())
+}
+
+pub fn get_session_visible(
+    session_id: &str,
+    viewer_client_id: Option<&str>,
+) -> Option<SessionRecord> {
+    let session = get_session(session_id)?;
+    if matches!(session.mode, SessionMode::Local) {
+        let Some(client_id) = viewer_client_id else {
+            return None;
+        };
+        if session.client_id != client_id {
+            return None;
+        }
+    }
+    Some(session)
 }
 
 pub fn touch_session(session_id: &str) -> bool {
@@ -471,7 +512,7 @@ pub fn delete_session(session_id: &str) -> Result<Option<String>, ()> {
     let Some(removed) = store.by_id.remove(session_id) else {
         return Err(());
     };
-    let key = (mode_key(&removed.mode).to_string(), removed.client_id.clone());
+    let key = (mode_key(&removed.mode).to_string(), session_name_key(&removed.name));
     if store.by_key.get(&key).map(|id| id.as_str()) == Some(session_id) {
         store.by_key.remove(&key);
     }
@@ -529,6 +570,48 @@ mod tests {
             None,
         )
         .0
+    }
+
+    #[test]
+    fn create_or_refresh_supports_never_expiring_sessions() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let (sid, ttl) = create_or_refresh(
+            "Default".to_string(),
+            SessionMode::Remote,
+            "client-default".to_string(),
+            "test".to_string(),
+            None,
+            Some(0),
+        );
+        assert_eq!(ttl, 0);
+        let session = get_session(&sid).expect("session");
+        assert_eq!(session.lease_ttl.as_secs(), 0);
+    }
+
+    #[test]
+    fn create_or_refresh_reuses_session_by_name_across_clients() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let (a, _) = create_or_refresh(
+            "Living Room".to_string(),
+            SessionMode::Remote,
+            "client-a".to_string(),
+            "test".to_string(),
+            None,
+            None,
+        );
+        let (b, _) = create_or_refresh(
+            "Living Room".to_string(),
+            SessionMode::Remote,
+            "client-b".to_string(),
+            "test".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(a, b);
+        let session = get_session(&a).expect("session");
+        assert_eq!(session.client_id, "client-b");
     }
 
     #[test]

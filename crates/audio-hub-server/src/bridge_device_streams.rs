@@ -160,6 +160,32 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
                 String::new(),
                 Some(state.metadata.db.clone()),
             );
+            let should_stop_on_join = state
+                .providers
+                .bridge
+                .stop_on_join_done
+                .lock()
+                .map(|done| !done.contains(&bridge_id))
+                .unwrap_or(false);
+            if should_stop_on_join {
+                match client.stop().await {
+                    Ok(()) => {
+                        if let Ok(mut done) = state.providers.bridge.stop_on_join_done.lock() {
+                            done.insert(bridge_id.clone());
+                        }
+                        tracing::info!(bridge_id = %bridge_id, "bridge reset on join");
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            bridge_id = %bridge_id,
+                            error = %err,
+                            "bridge stop-on-join failed; will retry"
+                        );
+                        tokio::time::sleep(RETRY_BASE_DELAY).await;
+                        continue;
+                    }
+                }
+            }
             let result = client.listen_status_stream(|snapshot| {
                 if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                     cache.insert(bridge_id.clone(), snapshot.clone());

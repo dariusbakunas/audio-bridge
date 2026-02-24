@@ -11,7 +11,8 @@ import {
   PanelLeftOpen,
   Radio,
   Search,
-  Settings
+  Settings,
+  Trash2
 } from "lucide-react";
 import {
   apiUrl,
@@ -51,6 +52,7 @@ import AlbumsView from "./components/AlbumsView";
 import CatalogMetadataDialog from "./components/CatalogMetadataDialog";
 import AlbumNotesModal from "./components/AlbumNotesModal";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
+import Modal from "./components/Modal";
 import TrackMetadataModal from "./components/TrackMetadataModal";
 import TrackAnalysisModal from "./components/TrackAnalysisModal";
 import OutputsModal from "./components/OutputsModal";
@@ -126,6 +128,11 @@ const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
+const WEB_DEFAULT_SESSION_NAME = "Default";
+
+function isDefaultSessionName(name: string | null | undefined): boolean {
+  return (name ?? "").trim().toLowerCase() === WEB_DEFAULT_SESSION_NAME.toLowerCase();
+}
 
 function albumPlaceholder(title?: string | null, artist?: string | null): string {
   const source = title?.trim() || artist?.trim() || "";
@@ -277,6 +284,10 @@ export default function App() {
   const [sessionBridgeLocks, setSessionBridgeLocks] = useState<
     SessionLocksResponse["bridge_locks"]
   >([]);
+  const [createSessionOpen, setCreateSessionOpen] = useState<boolean>(false);
+  const [newSessionName, setNewSessionName] = useState<string>("");
+  const [newSessionNeverExpires, setNewSessionNeverExpires] = useState<boolean>(false);
+  const [createSessionBusy, setCreateSessionBusy] = useState<boolean>(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
@@ -759,7 +770,10 @@ export default function App() {
   }, [isPlaying, signalOpen]);
 
   const refreshSessions = useCallback(async () => {
-    const response = await fetchJson<SessionsListResponse>("/sessions");
+    const clientId = getOrCreateWebSessionClientId();
+    const response = await fetchJson<SessionsListResponse>(
+      `/sessions?client_id=${encodeURIComponent(clientId)}`
+    );
     setSessions(response.sessions ?? []);
   }, []);
 
@@ -770,18 +784,22 @@ export default function App() {
   }, []);
 
   const refreshSessionDetail = useCallback(async (id: string) => {
-    const detail = await fetchJson<SessionDetailResponse>(`/sessions/${encodeURIComponent(id)}`);
+    const clientId = getOrCreateWebSessionClientId();
+    const detail = await fetchJson<SessionDetailResponse>(
+      `/sessions/${encodeURIComponent(id)}?client_id=${encodeURIComponent(clientId)}`
+    );
     setActiveOutputId(detail.active_output_id ?? null);
   }, []);
 
   const ensureSession = useCallback(async () => {
     const clientId = getOrCreateWebSessionClientId();
     const created = await postJson<SessionCreateResponse>("/sessions", {
-      name: "Web UI",
+      name: WEB_DEFAULT_SESSION_NAME,
       mode: "remote",
-      client_id: clientId,
+      client_id: `${clientId}:default`,
       app_version: __APP_VERSION__,
-      owner: "web-ui"
+      owner: "web-ui",
+      lease_ttl_sec: 0
     });
     const nextSessionId = created.session_id;
     setSessionId(nextSessionId);
@@ -812,14 +830,18 @@ export default function App() {
     [refreshSessionDetail, reportError]
   );
 
-  const handleCreateSession = useCallback(async () => {
+  const createNamedSession = useCallback(async (name: string, neverExpires = false) => {
     try {
       const response = await postJson<SessionCreateResponse>("/sessions", {
-        name: `Web UI ${new Date().toLocaleTimeString()}`,
+        name,
         mode: "remote",
-        client_id: `${getOrCreateWebSessionClientId()}-${Date.now()}`,
+        client_id:
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? `${getOrCreateWebSessionClientId()}:${crypto.randomUUID()}`
+            : `${getOrCreateWebSessionClientId()}-${Date.now()}`,
         app_version: __APP_VERSION__,
-        owner: "web-ui"
+        owner: "web-ui",
+        ...(neverExpires ? { lease_ttl_sec: 0 } : {})
       });
       await Promise.all([refreshSessions(), refreshSessionLocks()]);
       await handleSessionChange(response.session_id);
@@ -827,6 +849,63 @@ export default function App() {
       reportError((err as Error).message);
     }
   }, [refreshSessionLocks, refreshSessions, handleSessionChange, reportError]);
+
+  const handleCreateSession = useCallback(() => {
+    setNewSessionName(`Session ${sessions.length + 1}`);
+    setNewSessionNeverExpires(false);
+    setCreateSessionOpen(true);
+  }, [sessions.length]);
+
+  const submitCreateSession = useCallback(async () => {
+    const name = newSessionName.trim();
+    if (!name) {
+      reportError("Session name is required.");
+      return;
+    }
+    setCreateSessionBusy(true);
+    try {
+      await createNamedSession(name, newSessionNeverExpires);
+      setCreateSessionOpen(false);
+      setNewSessionName("");
+      setNewSessionNeverExpires(false);
+    } finally {
+      setCreateSessionBusy(false);
+    }
+  }, [createNamedSession, newSessionName, newSessionNeverExpires, reportError]);
+
+  const handleDeleteSession = useCallback(async () => {
+    if (!sessionId) return;
+    const session = sessions.find((item) => item.id === sessionId) ?? null;
+    if (!session || isDefaultSessionName(session.name)) {
+      return;
+    }
+    const confirmed = window.confirm(`Delete session "${session.name}"?`);
+    if (!confirmed) return;
+
+    try {
+      await fetchJson(`/sessions/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE"
+      });
+      const clientId = getOrCreateWebSessionClientId();
+      const sessionsResponse = await fetchJson<SessionsListResponse>(
+        `/sessions?client_id=${encodeURIComponent(clientId)}`
+      );
+      const nextSessions = sessionsResponse.sessions ?? [];
+      setSessions(nextSessions);
+      await refreshSessionLocks();
+      const defaultSession =
+        nextSessions.find((item) => isDefaultSessionName(item.name)) ?? nextSessions[0] ?? null;
+      if (defaultSession) {
+        await handleSessionChange(defaultSession.id);
+      } else {
+        setSessionId(null);
+        setActiveOutputId(null);
+        setStatus(null);
+      }
+    } catch (err) {
+      reportError((err as Error).message);
+    }
+  }, [sessionId, sessions, refreshSessionLocks, handleSessionChange, reportError]);
 
   useEffect(() => {
     if (!serverConnected) return;
@@ -871,7 +950,9 @@ export default function App() {
     const poll = async () => {
       try {
         const [sessionsResponse, locksResponse] = await Promise.all([
-          fetchJson<SessionsListResponse>("/sessions"),
+          fetchJson<SessionsListResponse>(
+            `/sessions?client_id=${encodeURIComponent(getOrCreateWebSessionClientId())}`
+          ),
           fetchJson<SessionLocksResponse>("/sessions/locks")
         ]);
         if (!mounted) return;
@@ -1727,6 +1808,24 @@ export default function App() {
                   >
                     <Radio className="icon" aria-hidden="true" />
                   </button>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    onClick={() => {
+                      void handleDeleteSession();
+                    }}
+                    title="Delete selected session"
+                    aria-label="Delete selected session"
+                    disabled={
+                      !serverConnected ||
+                      !sessionId ||
+                      isDefaultSessionName(
+                        sessions.find((item) => item.id === sessionId)?.name
+                      )
+                    }
+                  >
+                    <Trash2 className="icon" aria-hidden="true" />
+                  </button>
                 </div>
                 <button
                   className={`icon-btn notification-btn ${notificationsOpen ? "active" : ""}`}
@@ -1931,6 +2030,70 @@ export default function App() {
           onQueueOpen={() => setQueueOpen((value) => !value)}
           onSelectOutput={() => setOutputsOpen(true)}
         />
+      ) : null}
+
+      {!showGate ? (
+        <Modal
+        open={createSessionOpen}
+        title="Create session"
+        onClose={() => {
+          if (!createSessionBusy) {
+            setCreateSessionOpen(false);
+          }
+        }}
+        >
+          <div className="modal-body">
+            <label className="mb-match-field">
+              <span>Session name</span>
+              <input
+                className="mb-match-input"
+                type="text"
+                value={newSessionName}
+                onChange={(event) => setNewSessionName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    if (!createSessionBusy) {
+                      void submitCreateSession();
+                    }
+                  }
+                }}
+                autoFocus
+                maxLength={80}
+                placeholder="My session"
+              />
+            </label>
+            <label className="modal-checkbox">
+              <input
+                type="checkbox"
+                checked={newSessionNeverExpires}
+                onChange={(event) => setNewSessionNeverExpires(event.target.checked)}
+                disabled={createSessionBusy}
+              />
+              Never expires
+            </label>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => setCreateSessionOpen(false)}
+                disabled={createSessionBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  void submitCreateSession();
+                }}
+                disabled={createSessionBusy || newSessionName.trim().length === 0}
+              >
+                {createSessionBusy ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {!showGate ? (

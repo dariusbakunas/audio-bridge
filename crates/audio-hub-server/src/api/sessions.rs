@@ -38,6 +38,12 @@ use crate::models::{
 };
 use crate::state::AppState;
 
+#[derive(serde::Deserialize)]
+pub struct SessionViewerQuery {
+    #[serde(default)]
+    pub client_id: Option<String>,
+}
+
 /// Session seek request payload (milliseconds).
 #[derive(Deserialize, ToSchema)]
 pub struct SessionSeekBody {
@@ -145,7 +151,7 @@ fn clear_cached_session_status(state: &AppState, session_id: &str) {
     )
 )]
 #[post("/sessions")]
-/// Create or refresh a session by `(mode, client_id)`.
+/// Create or refresh a session by `(mode, name)`.
 pub async fn sessions_create(body: web::Json<SessionCreateRequest>) -> impl Responder {
     let req = body.into_inner();
     let name = req.name.trim().to_string();
@@ -177,8 +183,9 @@ pub async fn sessions_create(body: web::Json<SessionCreateRequest>) -> impl Resp
 )]
 #[get("/sessions")]
 /// List known sessions.
-pub async fn sessions_list() -> impl Responder {
-    let sessions = crate::session_registry::list_sessions()
+pub async fn sessions_list(query: web::Query<SessionViewerQuery>) -> impl Responder {
+    let viewer_client_id = query.client_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let sessions = crate::session_registry::list_sessions_visible(viewer_client_id)
         .into_iter()
         .map(|s| SessionSummary {
             id: s.id,
@@ -232,9 +239,13 @@ pub async fn sessions_locks() -> impl Responder {
 )]
 #[get("/sessions/{id}")]
 /// Return detailed session information.
-pub async fn sessions_get(id: web::Path<String>) -> impl Responder {
+pub async fn sessions_get(
+    id: web::Path<String>,
+    query: web::Query<SessionViewerQuery>,
+) -> impl Responder {
     let session_id = id.into_inner();
-    let Some(s) = crate::session_registry::get_session(&session_id) else {
+    let viewer_client_id = query.client_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let Some(s) = crate::session_registry::get_session_visible(&session_id, viewer_client_id) else {
         return HttpResponse::NotFound().body("session not found");
     };
     HttpResponse::Ok().json(SessionDetailResponse {
@@ -391,6 +402,13 @@ pub async fn sessions_delete(
     id: web::Path<String>,
 ) -> impl Responder {
     let session_id = id.into_inner();
+    if let Some(session) = crate::session_registry::get_session(&session_id) {
+        if session.active_output_id.is_some() {
+            if let Err(err) = state.output.session_playback.stop(&state, &session_id).await {
+                return err.into_response();
+            }
+        }
+    }
     let released_output_id = match crate::session_registry::delete_session(&session_id) {
         Ok(released) => released,
         Err(()) => return HttpResponse::NotFound().body("session not found"),

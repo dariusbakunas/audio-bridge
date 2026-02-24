@@ -273,6 +273,8 @@ pub struct BridgeProviderState {
     pub device_cache: Arc<Mutex<std::collections::HashMap<String, Vec<crate::bridge_transport::HttpDeviceInfo>>>>,
     /// Cached status snapshots by bridge id.
     pub status_cache: Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
+    /// Bridges that were already reset (stop command) after hub start.
+    pub stop_on_join_done: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Whether the bridge worker loop is running.
     pub worker_running: Arc<AtomicBool>,
     /// Output switch in progress (suppresses auto-advance).
@@ -301,6 +303,7 @@ impl BridgeProviderState {
             device_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
             status_streams: Arc::new(Mutex::new(std::collections::HashSet::new())),
             status_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            stop_on_join_done: Arc::new(Mutex::new(std::collections::HashSet::new())),
             worker_running: Arc::new(AtomicBool::new(false)),
             output_switch_in_flight: Arc::new(AtomicBool::new(false)),
             output_switch_until: Arc::new(Mutex::new(None)),
