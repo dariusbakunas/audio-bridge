@@ -241,17 +241,37 @@ pub fn queue_clear(session_id: &str, clear_queue: bool, clear_history: bool) -> 
 pub fn queue_play_from(session_id: &str, path: &Path) -> Result<bool, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
-    let Some(pos) = session.queue_items.iter().position(|p| p == path) else {
-        return Ok(false);
-    };
-    if let Some(current) = session.now_playing.take() {
-        if session.history.back().map(|last| last != &current).unwrap_or(true) {
-            session.history.push_back(current);
+    let found = if let Some(pos) = session.queue_items.iter().position(|p| p == path) {
+        if let Some(current) = session.now_playing.take() {
+            if session.history.back().map(|last| last != &current).unwrap_or(true) {
+                session.history.push_back(current);
+            }
         }
+        let selected = session.queue_items[pos].clone();
+        session.queue_items.drain(0..=pos);
+        session.now_playing = Some(selected);
+        true
+    } else if session.now_playing.as_deref() == Some(path) {
+        true
+    } else {
+        let mut matched_history = false;
+        while let Some(prev) = session.history.pop_back() {
+            if let Some(current) = session.now_playing.take() {
+                if current != prev {
+                    session.queue_items.insert(0, current);
+                }
+            }
+            session.now_playing = Some(prev.clone());
+            if prev.as_path() == path {
+                matched_history = true;
+                break;
+            }
+        }
+        matched_history
+    };
+    if !found {
+        return Ok(false);
     }
-    let selected = session.queue_items[pos].clone();
-    session.queue_items.drain(0..=pos);
-    session.now_playing = Some(selected);
     if session.history.len() > 100 {
         let _ = session.history.pop_front();
     }
@@ -544,6 +564,14 @@ pub fn reset_for_tests() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn test_guard() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("test lock poisoned")
+    }
 
     fn make_session(name: &str, client_id: &str) -> String {
         create_or_refresh(
@@ -559,6 +587,7 @@ mod tests {
 
     #[test]
     fn bind_output_rejects_bridge_in_use() {
+        let _guard = test_guard();
         reset_for_tests();
         let a = make_session("A", "a");
         let b = make_session("B", "b");
@@ -579,6 +608,7 @@ mod tests {
 
     #[test]
     fn bind_output_rejects_output_in_use_non_bridge() {
+        let _guard = test_guard();
         reset_for_tests();
         let a = make_session("A", "a");
         let b = make_session("B", "b");
@@ -599,6 +629,7 @@ mod tests {
 
     #[test]
     fn release_output_clears_output_and_bridge_locks() {
+        let _guard = test_guard();
         reset_for_tests();
         let a = make_session("A", "a");
         bind_output(&a, "bridge:living:dev1", false).expect("bind");
@@ -617,6 +648,7 @@ mod tests {
 
     #[test]
     fn delete_session_clears_output_and_bridge_locks() {
+        let _guard = test_guard();
         reset_for_tests();
         let a = make_session("A", "a");
         bind_output(&a, "bridge:living:dev1", false).expect("bind");
@@ -627,5 +659,77 @@ mod tests {
         let (output_locks, bridge_locks) = lock_snapshot();
         assert!(output_locks.is_empty());
         assert!(bridge_locks.is_empty());
+    }
+
+    #[test]
+    fn queue_play_from_selects_pending_queue_item() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q");
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        let c = PathBuf::from("/music/c.flac");
+        queue_add_paths(&sid, vec![a.clone(), b.clone(), c.clone()]).expect("add paths");
+        let current = queue_next_path(&sid).expect("next").expect("current");
+        assert_eq!(current, a);
+
+        let found = queue_play_from(&sid, &c).expect("play from");
+        assert!(found);
+        let snapshot = queue_snapshot(&sid).expect("snapshot");
+        assert_eq!(snapshot.now_playing.as_deref(), Some(c.as_path()));
+        assert!(snapshot.queue_items.is_empty());
+        assert_eq!(snapshot.history.back().map(|p| p.as_path()), Some(a.as_path()));
+    }
+
+    #[test]
+    fn queue_play_from_accepts_current_track() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q2");
+        let a = PathBuf::from("/music/a.flac");
+        queue_add_paths(&sid, vec![a.clone()]).expect("add path");
+        let _ = queue_next_path(&sid).expect("next");
+
+        let found = queue_play_from(&sid, &a).expect("play from current");
+        assert!(found);
+        let snapshot = queue_snapshot(&sid).expect("snapshot");
+        assert_eq!(snapshot.now_playing.as_deref(), Some(a.as_path()));
+        assert!(snapshot.queue_items.is_empty());
+    }
+
+    #[test]
+    fn queue_play_from_rewinds_history_to_target() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q3");
+        let a = PathBuf::from("/music/a.flac");
+        let b = PathBuf::from("/music/b.flac");
+        let c = PathBuf::from("/music/c.flac");
+        queue_add_paths(&sid, vec![a.clone(), b.clone(), c.clone()]).expect("add");
+        let _ = queue_next_path(&sid).expect("next a");
+        let _ = queue_next_path(&sid).expect("next b");
+        let _ = queue_next_path(&sid).expect("next c");
+
+        let found = queue_play_from(&sid, &a).expect("play from history");
+        assert!(found);
+        let snapshot = queue_snapshot(&sid).expect("snapshot");
+        assert_eq!(snapshot.now_playing.as_deref(), Some(a.as_path()));
+        assert_eq!(snapshot.queue_items.len(), 2);
+        assert_eq!(snapshot.queue_items[0], b);
+        assert_eq!(snapshot.queue_items[1], c);
+    }
+
+    #[test]
+    fn queue_play_from_returns_false_when_not_present_anywhere() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q4");
+        let a = PathBuf::from("/music/a.flac");
+        queue_add_paths(&sid, vec![a.clone()]).expect("add");
+        let _ = queue_next_path(&sid).expect("next");
+        let missing = PathBuf::from("/music/missing.flac");
+
+        let found = queue_play_from(&sid, &missing).expect("play from missing");
+        assert!(!found);
     }
 }
