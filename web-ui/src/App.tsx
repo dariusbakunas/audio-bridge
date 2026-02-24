@@ -133,6 +133,7 @@ const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
+const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
 const WEB_DEFAULT_SESSION_NAME = "Default";
 const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
 
@@ -354,7 +355,13 @@ export default function App() {
     title: string;
     artist?: string | null;
   } | null>(null);
-  const [navCollapsed, setNavCollapsed] = useState<boolean>(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NAV_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection" | "outputs">("metadata");
   const [outputsSettings, setOutputsSettings] = useState<OutputSettings | null>(null);
   const [outputsProviders, setOutputsProviders] = useState<ProviderOutputs[]>([]);
@@ -661,6 +668,14 @@ export default function App() {
       document.body.style.overflow = previousOverflow;
     };
   }, [notificationsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(NAV_COLLAPSED_KEY, navCollapsed ? "1" : "0");
+    } catch {
+      // ignore storage failures
+    }
+  }, [navCollapsed]);
 
   useEffect(() => {
     activeSessionIdRef.current = sessionId;
