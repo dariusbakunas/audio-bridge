@@ -529,6 +529,58 @@ pub fn delete_session(session_id: &str) -> Result<Option<String>, ()> {
     Ok(removed.active_output_id)
 }
 
+pub fn purge_expired() -> Vec<String> {
+    let now = Instant::now();
+    let mut store = match store().lock() {
+        Ok(guard) => guard,
+        Err(_) => return Vec::new(),
+    };
+
+    let expired_ids: Vec<String> = store
+        .by_id
+        .iter()
+        .filter_map(|(id, session)| {
+            if session.lease_ttl.as_secs() == 0 {
+                return None;
+            }
+            let age = now.saturating_duration_since(session.last_seen);
+            if age >= session.lease_ttl {
+                Some(id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if expired_ids.is_empty() {
+        return Vec::new();
+    }
+
+    for session_id in &expired_ids {
+        let Some(removed) = store.by_id.remove(session_id) else {
+            continue;
+        };
+        let key = (mode_key(&removed.mode).to_string(), session_name_key(&removed.name));
+        if store.by_key.get(&key).map(|id| id.as_str()) == Some(session_id.as_str()) {
+            store.by_key.remove(&key);
+        }
+        if let Some(output_id) = removed.active_output_id.as_deref() {
+            if store.output_locks.get(output_id).map(|id| id.as_str()) == Some(session_id.as_str()) {
+                store.output_locks.remove(output_id);
+            }
+            if let Some(bridge_id) = parse_bridge_id(output_id) {
+                if store.bridge_locks.get(&bridge_id).map(|id| id.as_str())
+                    == Some(session_id.as_str())
+                {
+                    store.bridge_locks.remove(&bridge_id);
+                }
+            }
+        }
+    }
+
+    expired_ids
+}
+
 fn parse_bridge_id(output_id: &str) -> Option<String> {
     let mut parts = output_id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");
@@ -612,6 +664,42 @@ mod tests {
         assert_eq!(a, b);
         let session = get_session(&a).expect("session");
         assert_eq!(session.client_id, "client-b");
+    }
+
+    #[test]
+    fn purge_expired_removes_expired_and_keeps_never_expiring() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let (expired_id, _) = create_or_refresh(
+            "Temp".to_string(),
+            SessionMode::Remote,
+            "client-temp".to_string(),
+            "test".to_string(),
+            None,
+            Some(5),
+        );
+        let (default_id, _) = create_or_refresh(
+            "Default".to_string(),
+            SessionMode::Remote,
+            "client-default".to_string(),
+            "test".to_string(),
+            None,
+            Some(0),
+        );
+        bind_output(&expired_id, "bridge:living:dev1", false).expect("bind expired");
+        {
+            let mut s = store().lock().expect("store");
+            let record = s.by_id.get_mut(&expired_id).expect("expired session");
+            record.last_seen = Instant::now() - Duration::from_secs(10);
+        }
+
+        let removed = purge_expired();
+        assert_eq!(removed, vec![expired_id.clone()]);
+        assert!(get_session(&expired_id).is_none());
+        assert!(get_session(&default_id).is_some());
+        let (output_locks, bridge_locks) = lock_snapshot();
+        assert!(output_locks.is_empty());
+        assert!(bridge_locks.is_empty());
     }
 
     #[test]

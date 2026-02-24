@@ -38,6 +38,8 @@ use crate::models::{
 };
 use crate::state::AppState;
 
+const DEFAULT_SESSION_NAME: &str = "default";
+
 #[derive(serde::Deserialize)]
 pub struct SessionViewerQuery {
     #[serde(default)]
@@ -392,6 +394,7 @@ pub async fn sessions_release_output(
     ),
     responses(
         (status = 200, description = "Session deleted", body = SessionDeleteResponse),
+        (status = 403, description = "Default session cannot be deleted"),
         (status = 404, description = "Session not found")
     )
 )]
@@ -403,6 +406,9 @@ pub async fn sessions_delete(
 ) -> impl Responder {
     let session_id = id.into_inner();
     if let Some(session) = crate::session_registry::get_session(&session_id) {
+        if session.name.trim().eq_ignore_ascii_case(DEFAULT_SESSION_NAME) {
+            return HttpResponse::Forbidden().body("default session cannot be deleted");
+        }
         if session.active_output_id.is_some() {
             if let Err(err) = state.output.session_playback.stop(&state, &session_id).await {
                 return err.into_response();
