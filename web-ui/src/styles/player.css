@@ -310,3 +310,21 @@
 .build-footer {
   font-family: "JetBrains Mono", monospace;
 }
+
+@media (max-width: 1320px) {
+  .player-actions {
+    gap: 6px;
+  }
+
+  .player-action-signal,
+  .player-action-output {
+    padding: 0;
+    width: 36px;
+    justify-content: center;
+  }
+
+  .player-action-signal .player-action-label,
+  .player-action-output .player-action-label {
+    display: none;
+  }
+}
