@@ -328,6 +328,7 @@ pub struct CastProviderState {
     pub discovered: Arc<Mutex<std::collections::HashMap<String, DiscoveredCast>>>,
     pub workers: Arc<Mutex<HashMap<String, Sender<BridgeCommand>>>>,
     pub status_by_output: Arc<Mutex<HashMap<String, BridgeStatus>>>,
+    pub status_updated_at: Arc<Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl CastProviderState {
@@ -336,6 +337,7 @@ impl CastProviderState {
             discovered: Arc::new(Mutex::new(std::collections::HashMap::new())),
             workers: Arc::new(Mutex::new(HashMap::new())),
             status_by_output: Arc::new(Mutex::new(HashMap::new())),
+            status_updated_at: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

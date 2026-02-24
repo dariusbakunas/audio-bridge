@@ -82,6 +82,7 @@ impl CastProvider {
             state.providers.bridge.bridges.clone(),
             state.providers.cast.workers.clone(),
             state.providers.cast.status_by_output.clone(),
+            state.providers.cast.status_updated_at.clone(),
         );
         if let Ok(mut workers) = state.providers.cast.workers.lock() {
             workers.insert(output_id.to_string(), cmd_tx.clone());
@@ -293,7 +294,7 @@ impl OutputProvider for CastProvider {
             return Ok(Self::idle_status(output_id, None, false));
         };
         let device_name = Some(found.name.clone());
-        if let Some(remote) = state
+        if let Some(mut remote) = state
             .providers
             .cast
             .status_by_output
@@ -301,6 +302,25 @@ impl OutputProvider for CastProvider {
             .ok()
             .and_then(|map| map.get(output_id).cloned())
         {
+            if !remote.paused {
+                if let Some(base_elapsed) = remote.elapsed_ms {
+                    let updated_at = state
+                        .providers
+                        .cast
+                        .status_updated_at
+                        .lock()
+                        .ok()
+                        .and_then(|map| map.get(output_id).copied());
+                    if let Some(updated_at) = updated_at {
+                        let extra_ms = updated_at.elapsed().as_millis() as u64;
+                        let advanced = base_elapsed.saturating_add(extra_ms);
+                        remote.elapsed_ms = Some(match remote.duration_ms {
+                            Some(duration) => advanced.min(duration),
+                            None => advanced,
+                        });
+                    }
+                }
+            }
             return Ok(status_from_remote(state, output_id, remote));
         }
         Ok(Self::idle_status(output_id, device_name, true))

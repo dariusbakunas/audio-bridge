@@ -128,6 +128,7 @@ pub fn spawn_cast_worker(
     bridge_state: Arc<Mutex<crate::state::BridgeState>>,
     cast_workers: Arc<Mutex<std::collections::HashMap<String, Sender<BridgeCommand>>>>,
     cast_statuses: Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    cast_status_updated_at: Arc<Mutex<std::collections::HashMap<String, Instant>>>,
 ) {
     std::thread::spawn(move || {
         let addr = resolve_device_addr(&device.host, device.port);
@@ -293,6 +294,7 @@ pub fn spawn_cast_worker(
                         &output_id,
                         &mut current_path,
                         &cast_statuses,
+                        &cast_status_updated_at,
                         &mut session_auto_advance_in_flight,
                         &mut request_id,
                         &bridge_state,
@@ -307,6 +309,9 @@ pub fn spawn_cast_worker(
         }
         if let Ok(mut statuses) = cast_statuses.lock() {
             statuses.remove(&output_id);
+        }
+        if let Ok(mut updates) = cast_status_updated_at.lock() {
+            updates.remove(&output_id);
         }
         if let Ok(mut workers) = cast_workers.lock() {
             workers.remove(&output_id);
@@ -356,6 +361,7 @@ fn handle_message(
     output_id: &str,
     current_path: &mut Option<PathBuf>,
     cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    cast_status_updated_at: &Arc<Mutex<std::collections::HashMap<String, Instant>>>,
     session_auto_advance_in_flight: &mut bool,
     request_id: &mut i64,
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
@@ -423,6 +429,7 @@ fn handle_message(
                         is_active,
                         current_path,
                         cast_statuses,
+                        cast_status_updated_at,
                         session_auto_advance_in_flight,
                     );
                 }
@@ -452,6 +459,7 @@ fn apply_media_status(
     is_active_output: bool,
     current_path: &mut Option<PathBuf>,
     cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    cast_status_updated_at: &Arc<Mutex<std::collections::HashMap<String, Instant>>>,
     session_auto_advance_in_flight: &mut bool,
 ) {
     let had_current_path = current_path.is_some();
@@ -487,6 +495,9 @@ fn apply_media_status(
     if let Ok(mut statuses) = cast_statuses.lock() {
         statuses.insert(output_id.to_string(), remote.clone());
     }
+    if let Ok(mut updates) = cast_status_updated_at.lock() {
+        updates.insert(output_id.to_string(), Instant::now());
+    }
 
     let bound_session_id = crate::session_registry::output_lock_owner(output_id);
     if !is_idle {
@@ -519,6 +530,9 @@ fn apply_media_status(
                     next_remote.elapsed_ms = None;
                     next_remote.end_reason = None;
                     statuses.insert(output_id.to_string(), next_remote);
+                }
+                if let Ok(mut updates) = cast_status_updated_at.lock() {
+                    updates.insert(output_id.to_string(), Instant::now());
                 }
             }
         }
