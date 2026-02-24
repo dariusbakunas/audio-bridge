@@ -8,6 +8,7 @@ use std::sync::{Condvar};
 use std::sync::atomic::AtomicBool;
 use std::collections::{HashMap, HashSet};
 
+use audio_bridge_types::BridgeStatus;
 use crossbeam_channel::Sender;
 
 use crate::bridge::{BridgeCommand, BridgePlayer};
@@ -322,12 +323,16 @@ pub struct LocalProviderState {
 #[derive(Debug)]
 pub struct CastProviderState {
     pub discovered: Arc<Mutex<std::collections::HashMap<String, DiscoveredCast>>>,
+    pub workers: Arc<Mutex<HashMap<String, Sender<BridgeCommand>>>>,
+    pub status_by_output: Arc<Mutex<HashMap<String, BridgeStatus>>>,
 }
 
 impl CastProviderState {
     pub fn new() -> Self {
         Self {
             discovered: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            workers: Arc::new(Mutex::new(HashMap::new())),
+            status_by_output: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

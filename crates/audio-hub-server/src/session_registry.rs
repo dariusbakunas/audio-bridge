@@ -339,6 +339,13 @@ pub fn require_bound_output(session_id: &str) -> Result<String, BoundOutputError
     }
 }
 
+pub fn output_lock_owner(output_id: &str) -> Option<String> {
+    store()
+        .lock()
+        .ok()
+        .and_then(|s| s.output_locks.get(output_id).cloned())
+}
+
 #[derive(Clone, Debug)]
 pub struct BindTransition {
     pub previous_output: Option<String>,

@@ -5,10 +5,13 @@
 use std::path::{Path, PathBuf};
 
 use actix_web::HttpResponse;
+use crossbeam_channel::Sender;
 
+use crate::bridge::BridgeCommand;
 use crate::bridge_manager::{merge_bridges, parse_output_id};
 use crate::bridge_transport::BridgeTransportClient;
 use crate::models::QueueMode;
+use crate::output_providers::cast_provider::CastProvider;
 use crate::output_controller::OutputControllerError;
 use crate::session_registry::BoundOutputError;
 use crate::state::AppState;
@@ -167,6 +170,17 @@ impl SessionPlaybackManager {
         })
     }
 
+    fn cast_worker(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Option<Sender<BridgeCommand>> {
+        if !output_id.starts_with("cast:") {
+            return None;
+        }
+        CastProvider::ensure_worker_for_output(state, output_id).ok()
+    }
+
     async fn bridge_play_path(
         &self,
         state: &AppState,
@@ -242,6 +256,26 @@ impl SessionPlaybackManager {
         path: PathBuf,
     ) -> Result<String, SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
+        if let Some(tx) = self.cast_worker(state, &output_id) {
+            let ext_hint = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            tx.send(BridgeCommand::Play {
+                path,
+                ext_hint,
+                seek_ms: None,
+                start_paused: false,
+            })
+            .map_err(|err| SessionPlaybackError::DispatchFailed {
+                session_id: session_id.to_string(),
+                output_id: output_id.clone(),
+                reason: format!("cast_send_failed {err}"),
+            })?;
+            state.events.status_changed();
+            return Ok(output_id);
+        }
         if let Some(target) = self.bridge_target(state, &output_id) {
             return self
                 .bridge_play_path(state, session_id, target, path)
@@ -297,6 +331,9 @@ impl SessionPlaybackManager {
                 None
             };
             let now_playing_path = status.now_playing.clone().or(queue_now_playing);
+            let session_has_previous = crate::session_registry::queue_snapshot(session_id)
+                .ok()
+                .map(|snapshot| !snapshot.history.is_empty());
             let resolved_path = now_playing_path
                 .as_deref()
                 .and_then(parse_now_playing_path)
@@ -355,7 +392,7 @@ impl SessionPlaybackManager {
                 buffer_size_frames: status.buffer_size_frames,
                 buffered_frames: status.buffered_frames,
                 buffer_capacity_frames: status.buffer_capacity_frames,
-                has_previous: None,
+                has_previous: session_has_previous,
             });
         }
         match state
@@ -378,6 +415,16 @@ impl SessionPlaybackManager {
         session_id: &str,
     ) -> Result<(), SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
+        if let Some(tx) = self.cast_worker(state, &output_id) {
+            tx.send(BridgeCommand::PauseToggle)
+                .map_err(|err| SessionPlaybackError::CommandFailed {
+                    session_id: session_id.to_string(),
+                    output_id: output_id.clone(),
+                    reason: format!("cast_send_failed {err}"),
+                })?;
+            state.events.status_changed();
+            return Ok(());
+        }
         if let Some(target) = self.bridge_target(state, &output_id) {
             BridgeTransportClient::new(target.http_addr)
                 .pause_toggle()
@@ -416,6 +463,16 @@ impl SessionPlaybackManager {
         ms: u64,
     ) -> Result<(), SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
+        if let Some(tx) = self.cast_worker(state, &output_id) {
+            tx.send(BridgeCommand::Seek { ms })
+                .map_err(|err| SessionPlaybackError::CommandFailed {
+                    session_id: session_id.to_string(),
+                    output_id: output_id.clone(),
+                    reason: format!("cast_send_failed {err}"),
+                })?;
+            state.events.status_changed();
+            return Ok(());
+        }
         if let Some(target) = self.bridge_target(state, &output_id) {
             BridgeTransportClient::new(target.http_addr)
                 .seek(ms)
@@ -453,6 +510,16 @@ impl SessionPlaybackManager {
         session_id: &str,
     ) -> Result<(), SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
+        if let Some(tx) = self.cast_worker(state, &output_id) {
+            tx.send(BridgeCommand::Stop)
+                .map_err(|err| SessionPlaybackError::CommandFailed {
+                    session_id: session_id.to_string(),
+                    output_id: output_id.clone(),
+                    reason: format!("cast_send_failed {err}"),
+                })?;
+            state.events.status_changed();
+            return Ok(());
+        }
         if let Some(target) = self.bridge_target(state, &output_id) {
             BridgeTransportClient::new(target.http_addr)
                 .stop()
@@ -573,23 +640,23 @@ impl SessionPlaybackManager {
         session_id: &str,
         status: &mut crate::models::StatusResponse,
     ) {
+        let Some(snapshot) = crate::session_registry::queue_snapshot(session_id).ok() else {
+            return;
+        };
+        if status.has_previous.is_none() {
+            status.has_previous = Some(!snapshot.history.is_empty());
+        }
         if status.now_playing.is_some() {
             return;
         }
         if status.paused && status.elapsed_ms.is_none() && status.duration_ms.is_none() {
             return;
         }
-        let Some(snapshot) = crate::session_registry::queue_snapshot(session_id).ok() else {
-            return;
-        };
         let Some(path) = snapshot.now_playing else {
             return;
         };
         let now = path.to_string_lossy().to_string();
         status.now_playing = Some(now.clone());
-        if status.has_previous.is_none() {
-            status.has_previous = Some(!snapshot.history.is_empty());
-        }
         let lib = state.library.read().unwrap();
         if let Some(crate::models::LibraryEntry::Track {
             file_name,

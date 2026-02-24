@@ -116,6 +116,7 @@ impl CastConnection {
 }
 
 pub fn spawn_cast_worker(
+    output_id: String,
     device: CastDeviceDescriptor,
     cmd_rx: Receiver<BridgeCommand>,
     cmd_tx: Sender<BridgeCommand>,
@@ -125,6 +126,8 @@ pub fn spawn_cast_worker(
     public_base_url: String,
     metadata: Option<MetadataDb>,
     bridge_state: Arc<Mutex<crate::state::BridgeState>>,
+    cast_workers: Arc<Mutex<std::collections::HashMap<String, Sender<BridgeCommand>>>>,
+    cast_statuses: Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
 ) {
     std::thread::spawn(move || {
         let addr = resolve_device_addr(&device.host, device.port);
@@ -147,10 +150,12 @@ pub fn spawn_cast_worker(
         let queue_service = QueueService::new(queue, status.clone(), events);
         let mut session: Option<CastSession> = None;
         let mut pending_play: Option<(PathBuf, String, Option<u64>, bool)> = None;
+        let mut current_path: Option<PathBuf> = None;
         let mut request_id: i64 = 1;
         let mut last_ping = Instant::now();
         let mut last_status_poll = Instant::now();
         let mut last_duration_ms: Option<u64> = None;
+        let mut session_auto_advance_in_flight = false;
 
         let _ = conn.send_json(RECEIVER_ID, NAMESPACE_CONNECTION, &json!({ "type": "CONNECT" }));
 
@@ -190,6 +195,7 @@ pub fn spawn_cast_worker(
                                 );
                             }
                         }
+                        current_path = None;
                     }
                     BridgeCommand::StopSilent => {
                         if let Some(session) = session.as_ref() {
@@ -205,6 +211,7 @@ pub fn spawn_cast_worker(
                                 );
                             }
                         }
+                        current_path = None;
                     }
                     BridgeCommand::Seek { ms } => {
                         if let Some(session) = session.as_ref() {
@@ -224,6 +231,7 @@ pub fn spawn_cast_worker(
                         }
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
+                        current_path = Some(path.clone());
                         pending_play = Some((path, ext_hint, seek_ms, start_paused));
                         ensure_session(&mut conn, &mut session, &device, &mut request_id);
                     }
@@ -282,6 +290,10 @@ pub fn spawn_cast_worker(
                         &status,
                         &queue_service,
                         &cmd_tx,
+                        &output_id,
+                        &mut current_path,
+                        &cast_statuses,
+                        &mut session_auto_advance_in_flight,
                         &mut request_id,
                         &bridge_state,
                     );
@@ -292,6 +304,12 @@ pub fn spawn_cast_worker(
                     break;
                 }
             }
+        }
+        if let Ok(mut statuses) = cast_statuses.lock() {
+            statuses.remove(&output_id);
+        }
+        if let Ok(mut workers) = cast_workers.lock() {
+            workers.remove(&output_id);
         }
         tracing::info!(cast_id = %device.id, "cast worker stopped");
     });
@@ -335,12 +353,14 @@ fn handle_message(
     status: &StatusStore,
     queue_service: &QueueService,
     cmd_tx: &Sender<BridgeCommand>,
+    output_id: &str,
+    current_path: &mut Option<PathBuf>,
+    cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    session_auto_advance_in_flight: &mut bool,
     request_id: &mut i64,
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
 ) {
-    if !is_active_cast_output(bridge_state, &device.id) {
-        return;
-    }
+    let is_active = is_active_cast_output(bridge_state, &device.id);
     if msg.payload_type != proto::cast_message::PayloadType::String as i32 {
         return;
     }
@@ -399,6 +419,11 @@ fn handle_message(
                         status,
                         queue_service,
                         cmd_tx,
+                        output_id,
+                        is_active,
+                        current_path,
+                        cast_statuses,
+                        session_auto_advance_in_flight,
                     );
                 }
             }
@@ -423,7 +448,13 @@ fn apply_media_status(
     status: &StatusStore,
     queue_service: &QueueService,
     cmd_tx: &Sender<BridgeCommand>,
+    output_id: &str,
+    is_active_output: bool,
+    current_path: &mut Option<PathBuf>,
+    cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    session_auto_advance_in_flight: &mut bool,
 ) {
+    let had_current_path = current_path.is_some();
     let is_idle = matches!(info.player_state.as_deref(), Some("IDLE"));
     let should_clear = is_idle && info.idle_reason.is_some();
     let (elapsed_ms, duration_ms) = if should_clear {
@@ -444,15 +475,64 @@ fn apply_media_status(
     };
 
     let mut remote = BridgeStatus::default();
+    if should_clear {
+        *current_path = None;
+    }
+    remote.now_playing = current_path.as_ref().map(|path| path.to_string_lossy().to_string());
     remote.paused = matches!(info.player_state.as_deref(), Some("PAUSED"));
     remote.elapsed_ms = elapsed_ms;
     remote.duration_ms = duration_ms;
     remote.device = Some(device.name.clone());
     remote.end_reason = end_reason;
+    if let Ok(mut statuses) = cast_statuses.lock() {
+        statuses.insert(output_id.to_string(), remote.clone());
+    }
+
+    let bound_session_id = crate::session_registry::output_lock_owner(output_id);
+    if !is_idle {
+        *session_auto_advance_in_flight = false;
+    }
+    let idle_without_reason = is_idle && end_reason.is_none();
+    let should_session_advance = end_reason == Some(PlaybackEndReason::Eof)
+        || (idle_without_reason && had_current_path);
+    if should_session_advance && !*session_auto_advance_in_flight {
+        if let Some(session_id) = bound_session_id.as_deref() {
+            if let Ok(Some(next_path)) = crate::session_registry::queue_next_path(session_id) {
+                let ext_hint = next_path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let _ = cmd_tx.send(BridgeCommand::Play {
+                    path: next_path.clone(),
+                    ext_hint,
+                    seek_ms: None,
+                    start_paused: false,
+                });
+                *current_path = Some(next_path);
+                *session_auto_advance_in_flight = true;
+                if let Ok(mut statuses) = cast_statuses.lock() {
+                    let mut next_remote = remote.clone();
+                    next_remote.now_playing =
+                        current_path.as_ref().map(|path| path.to_string_lossy().to_string());
+                    next_remote.paused = false;
+                    next_remote.elapsed_ms = None;
+                    next_remote.end_reason = None;
+                    statuses.insert(output_id.to_string(), next_remote);
+                }
+            }
+        }
+    }
+    if !is_active_output {
+        return;
+    }
 
     let (inputs, changed) = status.reduce_remote_and_inputs(&remote, *last_duration_ms);
     status.emit_if_changed(changed);
     *last_duration_ms = remote.duration_ms;
+    if bound_session_id.is_some() {
+        return;
+    }
 
     let transport = ChannelTransport::new(cmd_tx.clone());
     let _ = queue_service.maybe_auto_advance(&transport, inputs);
