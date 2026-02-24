@@ -7,8 +7,6 @@ pub mod logs;
 pub mod local_playback;
 pub mod metadata;
 pub mod outputs;
-pub mod playback;
-pub mod queue;
 pub mod sessions;
 pub mod streams;
 pub mod browser;
@@ -63,24 +61,6 @@ pub use outputs::{
     provider_refresh,
     providers_list,
 };
-pub use playback::{
-    pause_toggle,
-    play_track,
-    play_album,
-    seek,
-    status_for_output,
-    stop,
-};
-pub use queue::{
-    queue_add,
-    queue_add_next,
-    queue_clear,
-    queue_list,
-    queue_next,
-    queue_play_from,
-    queue_previous,
-    queue_remove,
-};
 pub use sessions::{
     sessions_create,
     sessions_delete,
@@ -109,10 +89,7 @@ pub use streams::{
     albums_stream,
     logs_stream,
     metadata_stream,
-    active_status_stream,
     outputs_stream,
-    queue_stream,
-    status_stream,
 };
 pub use browser::browser_ws;
 pub use health::HealthResponse;
@@ -125,7 +102,6 @@ mod tests {
 
     use crate::api;
     use crate::events::{EventBus, LogBus};
-    use crate::models::{QueueAddRequest, QueueResponse};
     use crate::state::{
         AppState, BridgeProviderState, BridgeState, DeviceSelectionState, LocalProviderState,
         MetadataWake, PlayerStatus, QueueState,
@@ -202,35 +178,6 @@ mod tests {
         );
 
         actix_web::web::Data::new(state)
-    }
-
-    #[actix_web::test]
-    async fn queue_add_and_list_round_trip() {
-        let state = make_state();
-        let file_path = state.library.read().unwrap().root().join("track.flac");
-        std::fs::write(&file_path, b"stub").expect("write file");
-
-        let app = test::init_service(
-            App::new()
-                .app_data(state.clone())
-                .service(api::queue_add)
-                .service(api::queue_list),
-        )
-        .await;
-
-        let payload = QueueAddRequest {
-            paths: vec!["track.flac".to_string()],
-        };
-        let req = test::TestRequest::post()
-            .uri("/queue")
-            .set_json(&payload)
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert!(resp.status().is_success());
-
-        let req = test::TestRequest::get().uri("/queue").to_request();
-        let resp: QueueResponse = test::call_and_read_body_json(&app, req).await;
-        assert_eq!(resp.items.len(), 1);
     }
 
     #[actix_web::test]

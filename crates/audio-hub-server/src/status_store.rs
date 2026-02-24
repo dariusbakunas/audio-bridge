@@ -212,17 +212,6 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
-    /// Merge remote bridge status and return inputs for auto-advance checks.
-    pub fn apply_remote_and_inputs(
-        &self,
-        remote: &BridgeStatus,
-        last_duration_ms: Option<u64>,
-    ) -> AutoAdvanceInputs {
-        let (inputs, changed) = self.reduce_remote_and_inputs(remote, last_duration_ms);
-        self.emit_if_changed(changed);
-        inputs
-    }
-
     pub fn reduce_remote_and_inputs(
         &self,
         remote: &BridgeStatus,
@@ -541,7 +530,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(!status.seek_in_flight);
     }
@@ -556,7 +545,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(!status.manual_advance_in_flight);
     }
@@ -570,7 +559,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        let inputs = store.apply_remote_and_inputs(&remote, Some(90));
+        let (inputs, _) = store.reduce_remote_and_inputs(&remote, Some(90));
         assert_eq!(inputs.last_duration_ms, Some(90));
         assert_eq!(inputs.remote_duration_ms, Some(100));
         assert_eq!(inputs.remote_elapsed_ms, Some(50));
@@ -591,7 +580,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(status.now_playing.is_none());
         assert!(!status.paused);
@@ -610,7 +599,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(status.now_playing.is_some());
     }
@@ -627,7 +616,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert!(status.now_playing.is_some());
     }
@@ -642,7 +631,7 @@ mod tests {
             ..make_bridge_status()
         };
 
-        store.apply_remote_and_inputs(&remote, None);
+        let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
         assert_eq!(status.now_playing, Some(PathBuf::from("/music/remote.flac")));
     }

@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::models::{QueueItem, QueueResponse};
 use audio_bridge_types::PlaybackEndReason;
 use crate::events::EventBus;
 use crate::playback_transport::PlaybackTransport;
@@ -80,17 +79,6 @@ impl QueueService {
         }
     }
 
-    pub(crate) fn take_previous(&self, current: Option<&Path>) -> Option<PathBuf> {
-        let mut queue = self.queue.lock().unwrap();
-        while let Some(last) = queue.history.pop_back() {
-            if current.map(|c| c == last).unwrap_or(false) {
-                continue;
-            }
-            return Some(last);
-        }
-        None
-    }
-
     pub(crate) fn has_previous(&self, current: Option<&Path>) -> bool {
         let queue = self.queue.lock().unwrap();
         for path in queue.history.iter().rev() {
@@ -100,207 +88,6 @@ impl QueueService {
             return true;
         }
         false
-    }
-
-    /// Build an API response for the current queue.
-    pub(crate) fn list(
-        &self,
-        library: &crate::library::LibraryIndex,
-        metadata_db: Option<&crate::metadata_db::MetadataDb>,
-    ) -> QueueResponse {
-        let now_playing = self
-            .status
-            .inner()
-            .lock()
-            .ok()
-            .and_then(|guard| guard.now_playing.clone());
-        let now_playing_str = now_playing.as_ref().map(|p| p.to_string_lossy().to_string());
-        let (queued_items, history_items) = {
-            let queue = self.queue.lock().unwrap();
-            (queue.items.clone(), queue.history.clone())
-        };
-
-        let mut items: Vec<QueueItem> = queued_items
-            .iter()
-            .map(|path| {
-                let is_now_playing = now_playing_str
-                    .as_deref()
-                    .map(|current| current == path.to_string_lossy().as_ref())
-                    .unwrap_or(false);
-                match library.find_track_by_path(path) {
-                    Some(crate::models::LibraryEntry::Track {
-                        path,
-                        file_name,
-                        duration_ms,
-                        sample_rate,
-                        album,
-                        artist,
-                        format,
-                        ..
-                    }) => {
-                        let title = metadata_db
-                            .and_then(|db| {
-                                db.track_record_by_path(path.as_str())
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|record| record.title)
-                            });
-                        let id = metadata_db
-                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
-                        QueueItem::Track {
-                            id,
-                            path,
-                            file_name,
-                            title,
-                            duration_ms,
-                            sample_rate,
-                            album,
-                            artist,
-                            format,
-                            now_playing: is_now_playing,
-                            played: false,
-                        }
-                    }
-                    _ => QueueItem::Missing {
-                        path: path.to_string_lossy().to_string(),
-                    },
-                }
-            })
-            .collect();
-
-        if let Some(current_path) = now_playing {
-            let current_str = current_path.to_string_lossy();
-            let index = items.iter().position(|item| match item {
-                QueueItem::Track { path, .. } => path == current_str.as_ref(),
-                QueueItem::Missing { path } => path == current_str.as_ref(),
-            });
-            if let Some(index) = index {
-                if index != 0 {
-                    let current = items.remove(index);
-                    items.insert(0, current);
-                }
-            } else {
-                let entry = match library.find_track_by_path(&current_path) {
-                    Some(crate::models::LibraryEntry::Track {
-                        path,
-                        file_name,
-                        duration_ms,
-                        sample_rate,
-                        album,
-                        artist,
-                        format,
-                        ..
-                    }) => {
-                        let title = metadata_db
-                            .and_then(|db| {
-                                db.track_record_by_path(path.as_str())
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|record| record.title)
-                            });
-                        let id = metadata_db
-                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
-                        QueueItem::Track {
-                            id,
-                            path,
-                            file_name,
-                            title,
-                            duration_ms,
-                            sample_rate,
-                            album,
-                            artist,
-                            format,
-                            now_playing: true,
-                            played: false,
-                        }
-                    }
-                    _ => QueueItem::Missing {
-                        path: current_path.to_string_lossy().to_string(),
-                    },
-                };
-                items.insert(0, entry);
-            }
-        }
-
-        let mut played_paths = Vec::new();
-        for path in history_items.iter().rev() {
-            if let Some(current) = now_playing_str.as_deref() {
-                if current == path.to_string_lossy().as_ref() {
-                    continue;
-                }
-            }
-            played_paths.push(path.clone());
-            if played_paths.len() >= 10 {
-                break;
-            }
-        }
-
-        if !played_paths.is_empty() {
-            played_paths.reverse();
-            let mut seen = std::collections::HashSet::new();
-            for item in &items {
-                match item {
-                    QueueItem::Track { path, .. } => {
-                        seen.insert(path.clone());
-                    }
-                    QueueItem::Missing { path } => {
-                        seen.insert(path.clone());
-                    }
-                }
-            }
-
-            let mut played_items = Vec::new();
-            for path in played_paths {
-                let path_str = path.to_string_lossy().to_string();
-                if seen.contains(&path_str) {
-                    continue;
-                }
-                let entry = match library.find_track_by_path(&path) {
-                    Some(crate::models::LibraryEntry::Track {
-                        path,
-                        file_name,
-                        duration_ms,
-                        sample_rate,
-                        album,
-                        artist,
-                        format,
-                        ..
-                    }) => {
-                        let title = metadata_db
-                            .and_then(|db| {
-                                db.track_record_by_path(path.as_str())
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|record| record.title)
-                            });
-                        let id = metadata_db
-                            .and_then(|db| db.track_id_for_path(&path).ok().flatten());
-                        QueueItem::Track {
-                            id,
-                            path,
-                            file_name,
-                            title,
-                            duration_ms,
-                            sample_rate,
-                            album,
-                            artist,
-                            format,
-                            now_playing: false,
-                            played: true,
-                        }
-                    }
-                    _ => QueueItem::Missing { path: path_str },
-                };
-                played_items.push(entry);
-            }
-
-            if !played_items.is_empty() {
-                played_items.append(&mut items);
-                items = played_items;
-            }
-        }
-
-        QueueResponse { items }
     }
 
     /// Add paths to the queue, skipping duplicates.
@@ -319,35 +106,6 @@ impl QueueService {
             self.events.queue_changed();
         }
         added
-    }
-
-    /// Insert paths at the front of the queue, preserving order and skipping duplicates.
-    pub(crate) fn add_next_paths(&self, paths: Vec<PathBuf>) -> usize {
-        let mut added = 0usize;
-        let mut queue = self.queue.lock().unwrap();
-        for path in paths {
-            if queue.items.iter().any(|p| p == &path) {
-                continue;
-            }
-            queue.items.insert(added, path);
-            added += 1;
-        }
-        if added > 0 {
-            tracing::debug!(added, total = queue.items.len(), "queue add next paths");
-            self.events.queue_changed();
-        }
-        added
-    }
-
-    /// Remove a single path from the queue.
-    pub(crate) fn remove_path(&self, path: &PathBuf) -> bool {
-        let mut queue = self.queue.lock().unwrap();
-        if let Some(pos) = queue.items.iter().position(|p| p == path) {
-            queue.items.remove(pos);
-            self.events.queue_changed();
-            return true;
-        }
-        false
     }
 
     /// Clear the queue.
@@ -375,77 +133,6 @@ impl QueueService {
             self.events.queue_changed();
         }
         changed
-    }
-
-    /// Drop all items up to and including the matching path.
-    pub(crate) fn drain_through_path(&self, path: &Path) -> bool {
-        let mut queue = self.queue.lock().unwrap();
-        if let Some(pos) = queue.items.iter().position(|p| p == path) {
-            queue.items.drain(0..=pos);
-            self.events.queue_changed();
-            return true;
-        }
-        false
-    }
-
-    /// Rebuild the queue starting after the supplied path, checking queue and history.
-    pub(crate) fn play_from_any(&self, path: &Path) -> bool {
-        if self.drain_through_path(path) {
-            return true;
-        }
-
-        let (history_tail, queued_items) = {
-            let mut queue = self.queue.lock().unwrap();
-            let pos = match queue.history.iter().position(|p| p == path) {
-                Some(pos) => pos,
-                None => return false,
-            };
-            let tail = queue
-                .history
-                .iter()
-                .skip(pos + 1)
-                .cloned()
-                .collect::<Vec<PathBuf>>();
-            if pos + 1 < queue.history.len() {
-                queue.history.drain((pos + 1)..);
-            }
-            let queued_items = queue.items.clone();
-            (tail, queued_items)
-        };
-
-        let current = self
-            .status
-            .inner()
-            .lock()
-            .ok()
-            .and_then(|guard| guard.now_playing.clone());
-
-        let mut seen = std::collections::HashSet::new();
-        let mut rebuilt = Vec::new();
-
-        for item in history_tail {
-            if seen.insert(item.clone()) {
-                rebuilt.push(item);
-            }
-        }
-
-        if let Some(current) = current {
-            if seen.insert(current.clone()) {
-                rebuilt.push(current);
-            }
-        }
-
-        for item in queued_items.iter() {
-            if seen.insert(item.clone()) {
-                rebuilt.push(item.clone());
-            }
-        }
-
-        if let Ok(mut queue) = self.queue.lock() {
-            queue.items = rebuilt;
-        }
-        self.events.queue_changed();
-        true
     }
 
     /// Dispatch the next track (if any) via the provided transport.
@@ -621,15 +308,6 @@ mod tests {
     }
 
     #[test]
-    fn remove_path_returns_true_when_found() {
-        let service = make_service();
-        let path = PathBuf::from("/music/a.flac");
-        service.add_paths(vec![path.clone()]);
-        assert!(service.remove_path(&path));
-        assert!(service.queue.lock().unwrap().items.is_empty());
-    }
-
-    #[test]
     fn dispatch_next_returns_empty_when_queue_empty() {
         let service = make_service();
         let transport = TestTransport::new(true);
@@ -655,44 +333,6 @@ mod tests {
         assert_eq!(plays[0].0, path);
         assert_eq!(plays[0].1, "flac");
         assert!(status.inner().lock().unwrap().auto_advance_in_flight);
-    }
-
-    #[test]
-    fn add_next_paths_inserts_at_front() {
-        let service = make_service();
-        let a = PathBuf::from("/music/a.flac");
-        let b = PathBuf::from("/music/b.flac");
-        let c = PathBuf::from("/music/c.flac");
-        service.add_paths(vec![a.clone(), b.clone()]);
-
-        let added = service.add_next_paths(vec![c.clone()]);
-
-        assert_eq!(added, 1);
-        let queue = service.queue.lock().unwrap();
-        assert_eq!(queue.items, vec![c, a, b]);
-    }
-
-    #[test]
-    fn drain_through_path_removes_up_to_match() {
-        let service = make_service();
-        let a = PathBuf::from("/music/a.flac");
-        let b = PathBuf::from("/music/b.flac");
-        let c = PathBuf::from("/music/c.flac");
-        service.add_paths(vec![a.clone(), b.clone(), c.clone()]);
-
-        assert!(service.drain_through_path(&b));
-        let queue = service.queue.lock().unwrap();
-        assert_eq!(queue.items, vec![c]);
-    }
-
-    #[test]
-    fn drain_through_path_returns_false_when_missing() {
-        let service = make_service();
-        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
-
-        assert!(!service.drain_through_path(Path::new("/music/missing.flac")));
-        let queue = service.queue.lock().unwrap();
-        assert_eq!(queue.items.len(), 1);
     }
 
     #[test]
@@ -801,39 +441,6 @@ mod tests {
         service.record_played_path(&a);
         service.record_played_path(&a);
         assert!(!service.has_previous(Some(&a)));
-    }
-
-    #[test]
-    fn play_from_any_rebuilds_queue_from_history_and_trims() {
-        let (service, status) = make_service_with_status();
-        let a = PathBuf::from("/music/a.flac");
-        let b = PathBuf::from("/music/b.flac");
-        let c = PathBuf::from("/music/c.flac");
-        let d = PathBuf::from("/music/d.flac");
-        let e = PathBuf::from("/music/e.flac");
-        let f = PathBuf::from("/music/f.flac");
-
-        service.record_played_path(&a);
-        service.record_played_path(&b);
-        service.record_played_path(&c);
-        status.on_play(d.clone(), false);
-        service.add_paths(vec![e.clone(), f.clone()]);
-
-        assert!(service.play_from_any(&b));
-
-        let queue_items = service.queue.lock().unwrap().items.clone();
-        assert_eq!(queue_items, vec![c, d, e, f]);
-
-        let history = service.queue.lock().unwrap().history.clone();
-        assert_eq!(history.into_iter().collect::<Vec<_>>(), vec![a, b]);
-    }
-
-    #[test]
-    fn play_from_any_returns_false_when_missing() {
-        let service = make_service();
-        let missing = PathBuf::from("/music/missing.flac");
-        service.add_paths(vec![PathBuf::from("/music/a.flac")]);
-        assert!(!service.play_from_any(&missing));
     }
 
     #[test]

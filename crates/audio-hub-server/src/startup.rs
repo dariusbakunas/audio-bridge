@@ -159,23 +159,9 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::list_library)
             .service(api::rescan_library)
             .service(api::rescan_track)
-            .service(api::play_track)
-            .service(api::play_album)
-            .service(api::pause_toggle)
-            .service(api::stop)
-            .service(api::seek)
             .service(api::stream_track)
             .service(api::stream_track_id)
             .service(api::transcode_track)
-            .service(api::queue_list)
-            .service(api::queue_add)
-            .service(api::queue_add_next)
-            .service(api::queue_remove)
-            .service(api::queue_play_from)
-            .service(api::queue_clear)
-            .service(api::queue_next)
-            .service(api::queue_previous)
-            .service(api::queue_stream)
             .service(api::artists_list)
             .service(api::albums_list)
             .service(api::tracks_list)
@@ -228,9 +214,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::sessions_queue_stream)
             .service(api::browser_ws)
             .service(api::health::health)
-            .service(api::status_for_output)
-            .service(api::status_stream)
-            .service(api::active_status_stream)
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::provider_refresh)
@@ -383,14 +366,12 @@ fn spawn_library_watcher(state: web::Data<AppState>) {
 
 /// Return true when the request path should be logged.
 fn should_log_path(path: &str) -> bool {
-    if path == "/queue"
-        || path == "/stream"
-        || path == "/queue/stream"
+    if path == "/stream"
         || path == "/logs/stream"
         || path == "/logs/clear"
         || path == "/local-playback/sessions"
         || path == "/health"
-        || path.ends_with("/status/stream")
+        || (path.starts_with("/sessions/") && path.ends_with("/status/stream"))
         || path.starts_with("/stream/track/")
     {
         return false;
@@ -827,12 +808,13 @@ mod tests {
 
     #[test]
     fn should_log_path_filters_noisy_paths() {
-        assert!(!should_log_path("/queue"));
-        assert!(!should_log_path("/queue/stream"));
         assert!(!should_log_path("/logs/stream"));
-        assert!(!should_log_path("/outputs/bridge:test/status/stream"));
+        assert!(!should_log_path("/sessions/sess:test/status/stream"));
         assert!(!should_log_path("/outputs/bridge:test"));
         assert!(!should_log_path("/stream/track/31"));
+        assert!(should_log_path("/queue"));
+        assert!(should_log_path("/queue/stream"));
+        assert!(should_log_path("/outputs/bridge:test/status/stream"));
         assert!(should_log_path("/artists"));
         assert!(should_log_path("/outputs/select"));
     }

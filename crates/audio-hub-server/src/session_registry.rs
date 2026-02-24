@@ -367,12 +367,6 @@ pub fn output_lock_owner(output_id: &str) -> Option<String> {
 }
 
 #[derive(Clone, Debug)]
-pub struct BindTransition {
-    pub previous_output: Option<String>,
-    pub displaced_session_id: Option<String>,
-}
-
-#[derive(Clone, Debug)]
 pub enum BindError {
     SessionNotFound,
     OutputInUse { output_id: String, held_by_session_id: String },
@@ -383,7 +377,7 @@ pub fn bind_output(
     session_id: &str,
     output_id: &str,
     force: bool,
-) -> Result<BindTransition, BindError> {
+) -> Result<(), BindError> {
     let mut store = store().lock().map_err(|_| BindError::SessionNotFound)?;
     if !store.by_id.contains_key(session_id) {
         return Err(BindError::SessionNotFound);
@@ -419,10 +413,7 @@ pub fn bind_output(
         }
     }
 
-    let previous_output = store
-        .by_id
-        .get(session_id)
-        .and_then(|s| s.active_output_id.clone());
+    let previous_output = store.by_id.get(session_id).and_then(|s| s.active_output_id.clone());
 
     if let Some(prev) = previous_output.as_deref() {
         if prev != output_id {
@@ -453,52 +444,7 @@ pub fn bind_output(
         session.last_seen = Instant::now();
     }
 
-    Ok(BindTransition {
-        previous_output,
-        displaced_session_id,
-    })
-}
-
-pub fn rollback_bind(
-    session_id: &str,
-    attempted_output_id: &str,
-    transition: BindTransition,
-) {
-    let mut store = match store().lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    store.output_locks.remove(attempted_output_id);
-    if let Some(bridge_id) = parse_bridge_id(attempted_output_id) {
-        if store.bridge_locks.get(&bridge_id).map(|id| id.as_str()) == Some(session_id) {
-            store.bridge_locks.remove(&bridge_id);
-        }
-    }
-
-    if let Some(session) = store.by_id.get_mut(session_id) {
-        session.active_output_id = transition.previous_output.clone();
-        session.last_seen = Instant::now();
-    }
-
-    if let Some(prev) = transition.previous_output {
-        store.output_locks.insert(prev.clone(), session_id.to_string());
-        if let Some(bridge_id) = parse_bridge_id(&prev) {
-            store.bridge_locks.insert(bridge_id, session_id.to_string());
-        }
-    }
-
-    if let Some(displaced) = transition.displaced_session_id {
-        if let Some(displaced_session) = store.by_id.get_mut(&displaced) {
-            displaced_session.active_output_id = Some(attempted_output_id.to_string());
-            displaced_session.last_seen = Instant::now();
-        }
-        store
-            .output_locks
-            .insert(attempted_output_id.to_string(), displaced.clone());
-        if let Some(bridge_id) = parse_bridge_id(attempted_output_id) {
-            store.bridge_locks.insert(bridge_id, displaced);
-        }
-    }
+    Ok(())
 }
 
 pub fn release_output(session_id: &str) -> Result<Option<String>, ()> {

@@ -4,9 +4,8 @@
 
 use actix_web::HttpResponse;
 
-use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, QueueResponse, StatusResponse};
+use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
-use crate::queue_service::NextDispatchResult;
 use crate::state::{AppState};
 
 /// Errors returned by the output controller facade.
@@ -112,11 +111,6 @@ impl OutputController {
         self.registry.list_outputs(state).await
     }
 
-    /// List outputs without applying output settings.
-    pub(crate) async fn list_outputs_raw(&self, state: &AppState) -> OutputsResponse {
-        self.registry.list_outputs_raw(state).await
-    }
-
     /// Return the list of providers.
     pub(crate) fn list_providers(&self, state: &AppState) -> ProvidersResponse {
         self.registry.list_providers(state)
@@ -193,118 +187,6 @@ impl OutputController {
         self.dispatch_play(state, path.clone(), None, false)?;
 
         Ok(output_id)
-    }
-
-    /// Return the current queue as API response items.
-    pub(crate) fn queue_list(&self, state: &AppState) -> QueueResponse {
-        state
-            .playback
-            .manager
-            .queue_list(&state.library.read().unwrap(), Some(&state.metadata.db))
-    }
-
-    /// Add paths to the queue and return the number added.
-    pub(crate) fn queue_add_paths(
-        &self,
-        state: &AppState,
-        paths: Vec<String>,
-    ) -> usize {
-        let mut resolved = Vec::new();
-        for path_str in paths {
-            let path = std::path::PathBuf::from(path_str);
-            let path = match self.canonicalize_under_root(state, &path) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            resolved.push(path);
-        }
-        state.playback.manager.queue_add_paths(resolved)
-    }
-
-    /// Insert paths to the front of the queue and return the number added.
-    pub(crate) fn queue_add_next_paths(
-        &self,
-        state: &AppState,
-        paths: Vec<String>,
-    ) -> usize {
-        let mut resolved = Vec::new();
-        for path_str in paths {
-            let path = std::path::PathBuf::from(path_str);
-            let path = match self.canonicalize_under_root(state, &path) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            resolved.push(path);
-        }
-        state.playback.manager.queue_add_next_paths(resolved)
-    }
-
-    /// Remove a path from the queue.
-    pub(crate) fn queue_remove_path(
-        &self,
-        state: &AppState,
-        path_str: &str,
-    ) -> Result<bool, OutputControllerError> {
-        let path = std::path::PathBuf::from(path_str);
-        let path = self.canonicalize_under_root(state, &path)?;
-        Ok(state.playback.manager.queue_remove_path(&path))
-    }
-
-    /// Play a queued item and drop items ahead of it.
-    pub(crate) async fn queue_play_from(
-        &self,
-        state: &AppState,
-        path_str: &str,
-    ) -> Result<bool, OutputControllerError> {
-        let path = std::path::PathBuf::from(path_str);
-        let path = self.canonicalize_under_root(state, &path)?;
-        let found = state.playback.manager.queue_play_from(&path);
-        if !found {
-            return Ok(false);
-        }
-        let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager.set_manual_advance_in_flight(true);
-        self.dispatch_play(state, path.clone(), None, false)?;
-        Ok(true)
-    }
-
-    /// Clear the queue.
-    pub(crate) fn queue_clear(&self, state: &AppState, clear_queue: bool, clear_history: bool) {
-        state.playback.manager.queue_clear(clear_queue, clear_history);
-    }
-
-    /// Dispatch the next queued track if available.
-    pub(crate) async fn queue_next(&self, state: &AppState) -> Result<bool, OutputControllerError> {
-        let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager.set_manual_advance_in_flight(true);
-        match state.playback.manager.queue_next() {
-            NextDispatchResult::Dispatched => Ok(true),
-            NextDispatchResult::Empty => {
-                state.playback.manager.set_manual_advance_in_flight(false);
-                Ok(false)
-            }
-            NextDispatchResult::Failed => {
-                state.playback.manager.set_manual_advance_in_flight(false);
-                Err(OutputControllerError::PlayerOffline)
-            }
-        }
-    }
-
-    /// Play the previous track from history if available.
-    pub(crate) async fn queue_previous(&self, state: &AppState) -> Result<bool, OutputControllerError> {
-        let _ = self.resolve_active_output_id(state, None).await?;
-        let current = state.playback.manager.current_path();
-        let previous = state.playback.manager.take_previous(current.as_deref());
-        let Some(path) = previous else {
-            return Ok(false);
-        };
-        if let Some(current) = current {
-            state.playback.manager.queue_add_next_paths(vec![current]);
-        }
-        state.playback.manager.set_manual_advance_in_flight(true);
-        self.dispatch_play(state, path.clone(), None, false)?;
-        state.playback.manager.update_has_previous();
-        Ok(true)
     }
 
     /// Toggle pause/resume on the active output.
@@ -872,75 +754,4 @@ mod tests {
         assert!(matches!(result, Err(OutputControllerError::Http(_))));
     }
 
-    #[test]
-    fn queue_play_from_returns_false_when_missing() {
-        let (state, root) = make_state_with_root();
-        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-        let file_path = root.join("track.flac");
-        let _ = std::fs::write(&file_path, b"test");
-
-        let result = actix_web::rt::System::new().block_on(async {
-            controller
-                .queue_play_from(&state, "track.flac")
-                .await
-        });
-
-        assert!(matches!(result, Ok(false)));
-    }
-
-    #[test]
-    fn queue_add_paths_skips_missing_files() {
-        let (state, root) = make_state_with_root();
-        let file_path = root.join("a.flac");
-        let _ = std::fs::write(&file_path, b"test");
-        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-
-        let added = controller.queue_add_paths(
-            &state,
-            vec!["a.flac".to_string(), "missing.flac".to_string()],
-        );
-
-        assert_eq!(added, 1);
-        assert_eq!(
-            state.playback.manager.queue_service().queue().lock().unwrap().items,
-            vec![file_path.canonicalize().unwrap()]
-        );
-    }
-
-    #[test]
-    fn queue_remove_path_returns_false_when_not_queued() {
-        let (state, root) = make_state_with_root();
-        let file_path = root.join("a.flac");
-        let _ = std::fs::write(&file_path, b"test");
-        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-
-        let removed = controller
-            .queue_remove_path(&state, "a.flac")
-            .expect("remove path");
-
-        assert!(!removed);
-    }
-
-    #[test]
-    fn queue_remove_path_removes_existing_item() {
-        let (state, root) = make_state_with_root();
-        let file_path = root.join("a.flac");
-        let _ = std::fs::write(&file_path, b"test");
-        let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-
-        let added = controller.queue_add_paths(&state, vec!["a.flac".to_string()]);
-        assert_eq!(added, 1);
-        let removed = controller
-            .queue_remove_path(&state, "a.flac")
-            .expect("remove path");
-
-        assert!(removed);
-        assert!(state.playback.manager
-            .queue_service()
-            .queue()
-            .lock()
-            .unwrap()
-            .items
-            .is_empty());
-    }
 }
