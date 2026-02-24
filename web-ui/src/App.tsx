@@ -1106,7 +1106,9 @@ export default function App() {
       }
       const message = connectionError(
         "Live status disconnected",
-        sessionId ? `/sessions/${encodeURIComponent(sessionId)}/status/stream` : "/status/stream"
+        sessionId
+          ? `/sessions/${encodeURIComponent(sessionId)}/status/stream`
+          : "/sessions/{id}/status/stream"
       );
       reportError(message, "warn");
     }
@@ -1325,7 +1327,9 @@ export default function App() {
     onError: () => {
       const message = connectionError(
         "Live queue disconnected",
-        sessionId ? `/sessions/${encodeURIComponent(sessionId)}/queue/stream` : "/queue/stream"
+        sessionId
+          ? `/sessions/${encodeURIComponent(sessionId)}/queue/stream`
+          : "/sessions/{id}/queue/stream"
       );
       reportError(message, "warn");
     }

@@ -17,6 +17,7 @@ use crate::config::BridgeConfigResolved;
 use crate::events::{EventBus, LogBus};
 use crate::library::LibraryIndex;
 use crate::metadata_service::MetadataService;
+use crate::models::StatusResponse;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
 use crate::metadata_db::MetadataDb;
@@ -137,6 +138,8 @@ pub struct OutputState {
     pub controller: OutputController,
     /// Session-scoped playback dispatch helper.
     pub session_playback: SessionPlaybackManager,
+    /// Last known status snapshot per session id.
+    pub session_status_cache: Arc<Mutex<HashMap<String, StatusResponse>>>,
 }
 
 /// Shared application state for Actix handlers and background workers.
@@ -193,6 +196,7 @@ impl AppState {
             output: OutputState {
                 controller: OutputController::default(),
                 session_playback: SessionPlaybackManager::new(),
+                session_status_cache: Arc::new(Mutex::new(HashMap::new())),
             },
             events,
             log_bus,

@@ -468,20 +468,15 @@ impl OutputProvider for BridgeProvider {
     ) -> Result<StatusResponse, ProviderError> {
         let (bridge_id, _) =
             parse_output_id(output_id).map_err(|_| ProviderError::BadRequest("invalid output id".to_string()))?;
-        let (active_output_id, http_addr) = {
+        let http_addr = {
             let bridges = state.providers.bridge.bridges.lock().unwrap();
-            let http_addr = bridges.active_bridge_id.as_ref().and_then(|active_id| {
-                bridges
-                    .bridges
-                    .iter()
-                    .find(|b| b.id == *active_id)
-                    .map(|b| b.http_addr)
-            });
-            (bridges.active_output_id.clone(), http_addr)
+            let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
+            let merged = merge_bridges(&bridges.bridges, &discovered);
+            merged
+                .iter()
+                .find(|b| b.id == bridge_id)
+                .map(|b| b.http_addr)
         };
-        if active_output_id.as_deref() != Some(output_id) {
-            return Err(ProviderError::BadRequest("output is not active".to_string()));
-        }
         let status = state.playback.manager.status().inner().lock().unwrap();
         let (title, artist, album, format, sample_rate, bitrate_kbps) =
             match status.now_playing.as_ref() {

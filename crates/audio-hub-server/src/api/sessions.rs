@@ -114,6 +114,27 @@ where
         .streaming(stream)
 }
 
+fn cache_session_status(state: &AppState, session_id: &str, status: &StatusResponse) {
+    if let Ok(mut cache) = state.output.session_status_cache.lock() {
+        cache.insert(session_id.to_string(), status.clone());
+    }
+}
+
+fn cached_session_status(state: &AppState, session_id: &str) -> Option<StatusResponse> {
+    state
+        .output
+        .session_status_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(session_id).cloned())
+}
+
+fn clear_cached_session_status(state: &AppState, session_id: &str) {
+    if let Ok(mut cache) = state.output.session_status_cache.lock() {
+        cache.remove(session_id);
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/sessions",
@@ -344,6 +365,7 @@ pub async fn sessions_release_output(
         Ok(released) => released,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
+    clear_cached_session_status(&state, &session_id);
     state.events.outputs_changed();
     HttpResponse::Ok().json(SessionReleaseOutputResponse {
         session_id,
@@ -373,6 +395,7 @@ pub async fn sessions_delete(
         Ok(released) => released,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
+    clear_cached_session_status(&state, &session_id);
     state.events.outputs_changed();
     HttpResponse::Ok().json(SessionDeleteResponse {
         session_id,
@@ -401,8 +424,14 @@ pub async fn sessions_status(
 ) -> impl Responder {
     let session_id = id.into_inner();
     match state.output.session_playback.status(&state, &session_id).await {
-        Ok(resp) => HttpResponse::Ok().json(resp),
-        Err(err) => err.into_response(),
+        Ok(resp) => {
+            cache_session_status(&state, &session_id, &resp);
+            HttpResponse::Ok().json(resp)
+        }
+        Err(err) => match cached_session_status(&state, &session_id) {
+            Some(cached) => HttpResponse::Ok().json(cached),
+            None => err.into_response(),
+        },
     }
 }
 
@@ -427,8 +456,14 @@ pub async fn sessions_status_stream(
 ) -> impl Responder {
     let session_id = id.into_inner();
     let initial = match state.output.session_playback.status(&state, &session_id).await {
-        Ok(resp) => resp,
-        Err(err) => return err.into_response(),
+        Ok(resp) => {
+            cache_session_status(&state, &session_id, &resp);
+            resp
+        }
+        Err(err) => match cached_session_status(&state, &session_id) {
+            Some(cached) => cached,
+            None => return err.into_response(),
+        },
     };
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
     let mut pending = VecDeque::new();
@@ -476,6 +511,14 @@ pub async fn sessions_status_stream(
                         .status(&ctx.state, &ctx.session_id)
                         .await
                     {
+                        cache_session_status(&ctx.state, &ctx.session_id, &status);
+                        let json = serde_json::to_string(&status)
+                            .unwrap_or_else(|_| "null".to_string());
+                        if ctx.last_status.as_deref() != Some(json.as_str()) {
+                            ctx.last_status = Some(json.clone());
+                            ctx.pending.push_back(session_sse_event("status", &json));
+                        }
+                    } else if let Some(status) = cached_session_status(&ctx.state, &ctx.session_id) {
                         let json = serde_json::to_string(&status)
                             .unwrap_or_else(|_| "null".to_string());
                         if ctx.last_status.as_deref() != Some(json.as_str()) {

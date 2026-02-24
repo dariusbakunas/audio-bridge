@@ -303,10 +303,6 @@ impl OutputProvider for CastProvider {
         {
             return Ok(status_from_remote(state, output_id, remote));
         }
-        let active_output_id = Self::active_output_id(state);
-        if active_output_id.as_deref() == Some(output_id) {
-            return Ok(Self::idle_status(output_id, device_name, true));
-        }
         Ok(Self::idle_status(output_id, device_name, true))
     }
 
