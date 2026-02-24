@@ -38,7 +38,7 @@ use crate::models::{
 };
 use crate::state::AppState;
 
-const DEFAULT_SESSION_NAME: &str = "default";
+const PROTECTED_SESSION_NAMES: [&str; 2] = ["default", "local"];
 
 #[derive(serde::Deserialize)]
 pub struct SessionViewerQuery {
@@ -153,7 +153,9 @@ fn clear_cached_session_status(state: &AppState, session_id: &str) {
     )
 )]
 #[post("/sessions")]
-/// Create or refresh a session by `(mode, name)`.
+/// Create or refresh a session:
+/// - remote mode by `(mode, name)`
+/// - local mode by `(mode, client_id)`.
 pub async fn sessions_create(body: web::Json<SessionCreateRequest>) -> impl Responder {
     let req = body.into_inner();
     let name = req.name.trim().to_string();
@@ -323,6 +325,14 @@ pub async fn sessions_select_output(
     if output_id.is_empty() {
         return HttpResponse::BadRequest().body("output_id is required");
     }
+    if output_id.starts_with("browser:") {
+        let Some(session) = crate::session_registry::get_session(&session_id) else {
+            return HttpResponse::NotFound().body("session not found");
+        };
+        if !matches!(session.mode, crate::models::SessionMode::Local) {
+            return HttpResponse::BadRequest().body("browser outputs can only be selected by local sessions");
+        }
+    }
 
     match crate::session_registry::bind_output(&session_id, &output_id, payload.force) {
         Ok(_) => {}
@@ -406,7 +416,10 @@ pub async fn sessions_delete(
 ) -> impl Responder {
     let session_id = id.into_inner();
     if let Some(session) = crate::session_registry::get_session(&session_id) {
-        if session.name.trim().eq_ignore_ascii_case(DEFAULT_SESSION_NAME) {
+        if PROTECTED_SESSION_NAMES
+            .iter()
+            .any(|name| session.name.trim().eq_ignore_ascii_case(name))
+        {
             return HttpResponse::Forbidden().body("default session cannot be deleted");
         }
         if session.active_output_id.is_some() {

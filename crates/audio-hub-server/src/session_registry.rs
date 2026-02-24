@@ -59,6 +59,14 @@ fn session_name_key(name: &str) -> String {
     name.trim().to_ascii_lowercase()
 }
 
+fn session_identity_key(mode: &SessionMode, name: &str, client_id: &str) -> (String, String) {
+    let identity = match mode {
+        SessionMode::Remote => session_name_key(name),
+        SessionMode::Local => client_id.trim().to_string(),
+    };
+    (mode_key(mode).to_string(), identity)
+}
+
 pub fn create_or_refresh(
     name: String,
     mode: SessionMode,
@@ -75,7 +83,7 @@ pub fn create_or_refresh(
     };
     let ttl_dur = Duration::from_secs(ttl);
     let now = Instant::now();
-    let key = (mode_key(&mode).to_string(), session_name_key(&name));
+    let key = session_identity_key(&mode, &name, &client_id);
 
     let mut store = store().lock().unwrap_or_else(|err| err.into_inner());
     if let Some(existing_id) = store.by_key.get(&key).cloned() {
@@ -512,7 +520,7 @@ pub fn delete_session(session_id: &str) -> Result<Option<String>, ()> {
     let Some(removed) = store.by_id.remove(session_id) else {
         return Err(());
     };
-    let key = (mode_key(&removed.mode).to_string(), session_name_key(&removed.name));
+    let key = session_identity_key(&removed.mode, &removed.name, &removed.client_id);
     if store.by_key.get(&key).map(|id| id.as_str()) == Some(session_id) {
         store.by_key.remove(&key);
     }
@@ -560,7 +568,7 @@ pub fn purge_expired() -> Vec<String> {
         let Some(removed) = store.by_id.remove(session_id) else {
             continue;
         };
-        let key = (mode_key(&removed.mode).to_string(), session_name_key(&removed.name));
+        let key = session_identity_key(&removed.mode, &removed.name, &removed.client_id);
         if store.by_key.get(&key).map(|id| id.as_str()) == Some(session_id.as_str()) {
             store.by_key.remove(&key);
         }
@@ -664,6 +672,29 @@ mod tests {
         assert_eq!(a, b);
         let session = get_session(&a).expect("session");
         assert_eq!(session.client_id, "client-b");
+    }
+
+    #[test]
+    fn create_or_refresh_local_uses_client_id_identity() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let (a, _) = create_or_refresh(
+            "Local".to_string(),
+            SessionMode::Local,
+            "client-a".to_string(),
+            "test".to_string(),
+            None,
+            None,
+        );
+        let (b, _) = create_or_refresh(
+            "Local".to_string(),
+            SessionMode::Local,
+            "client-b".to_string(),
+            "test".to_string(),
+            None,
+            None,
+        );
+        assert_ne!(a, b);
     }
 
     #[test]

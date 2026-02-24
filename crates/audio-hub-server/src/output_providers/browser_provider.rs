@@ -94,22 +94,8 @@ fn container_from_path(path: &std::path::Path) -> Option<&'static str> {
 #[async_trait]
 impl OutputProvider for BrowserProvider {
     fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
-        let sessions = Self::sessions(state);
-        let state_label = if sessions.is_empty() {
-            "idle"
-        } else {
-            "available"
-        };
-        vec![ProviderInfo {
-            id: Self::provider_id().to_string(),
-            kind: "browser".to_string(),
-            name: "Browser".to_string(),
-            state: state_label.to_string(),
-            capabilities: OutputCapabilities {
-                device_select: false,
-                volume: false,
-            },
-        }]
+        let _ = state;
+        Vec::new()
     }
 
     async fn outputs_for_provider(
@@ -117,36 +103,28 @@ impl OutputProvider for BrowserProvider {
         state: &AppState,
         provider_id: &str,
     ) -> Result<OutputsResponse, ProviderError> {
+        let _ = state;
         if provider_id != Self::provider_id() {
             return Err(ProviderError::BadRequest("unknown provider id".to_string()));
         }
-        let sessions = Self::sessions(state);
-        let active_id = Self::active_output_id(state);
-        let outputs = sessions
-            .iter()
-            .map(|s| Self::browser_output_info(s, &active_id))
-            .collect();
+        let outputs = Vec::new();
         Ok(OutputsResponse {
-            active_id,
+            active_id: None,
             outputs,
         })
     }
 
     async fn list_outputs(&self, state: &AppState) -> Vec<OutputInfo> {
-        let sessions = Self::sessions(state);
-        let active_id = Self::active_output_id(state);
-        sessions
-            .iter()
-            .map(|s| Self::browser_output_info(s, &active_id))
-            .collect()
+        let _ = state;
+        Vec::new()
     }
 
     fn can_handle_output_id(&self, output_id: &str) -> bool {
         output_id.starts_with("browser:")
     }
 
-    fn can_handle_provider_id(&self, _state: &AppState, provider_id: &str) -> bool {
-        provider_id == Self::provider_id()
+    fn can_handle_provider_id(&self, _state: &AppState, _provider_id: &str) -> bool {
+        false
     }
 
     fn inject_active_output_if_missing(

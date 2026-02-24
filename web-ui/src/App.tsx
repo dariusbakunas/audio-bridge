@@ -342,6 +342,7 @@ export default function App() {
   const albumsReloadQueuedRef = useRef(false);
   const albumsLoadingRef = useRef(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [browserOutputId, setBrowserOutputId] = useState<string | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
@@ -394,6 +395,11 @@ export default function App() {
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
   );
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.id === sessionId) ?? null,
+    [sessions, sessionId]
+  );
+  const isLocalSession = currentSession?.mode === "local";
   const canTogglePlayback = Boolean(sessionId && activeOutputId && status?.now_playing);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const isPaused = Boolean(status?.now_playing && status?.paused);
@@ -424,7 +430,9 @@ export default function App() {
   const playButtonTitle = !sessionId
     ? "Creating session..."
     : !activeOutputId
-    ? "Select an output to control playback."
+    ? (isLocalSession
+      ? "Preparing local browser output..."
+      : "Select an output to control playback.")
     : !status?.now_playing
       ? "Select an album track to play."
       : undefined;
@@ -793,7 +801,7 @@ export default function App() {
 
   const ensureSession = useCallback(async () => {
     const clientId = getOrCreateWebSessionClientId();
-    const created = await postJson<SessionCreateResponse>("/sessions", {
+    const defaultSession = await postJson<SessionCreateResponse>("/sessions", {
       name: WEB_DEFAULT_SESSION_NAME,
       mode: "remote",
       client_id: `${clientId}:default`,
@@ -801,15 +809,41 @@ export default function App() {
       owner: "web-ui",
       lease_ttl_sec: 0
     });
-    const nextSessionId = created.session_id;
+    await postJson<SessionCreateResponse>("/sessions", {
+      name: "Local",
+      mode: "local",
+      client_id: clientId,
+      app_version: __APP_VERSION__,
+      owner: "web-ui",
+      lease_ttl_sec: 0
+    });
+
+    const sessionsResponse = await fetchJson<SessionsListResponse>(
+      `/sessions?client_id=${encodeURIComponent(clientId)}`
+    );
+    const nextSessions = sessionsResponse.sessions ?? [];
+    setSessions(nextSessions);
+    await refreshSessionLocks();
+
+    const stored = (() => {
+      try {
+        return localStorage.getItem(WEB_SESSION_ID_KEY);
+      } catch {
+        return null;
+      }
+    })();
+    const nextSessionId =
+      (stored && nextSessions.some((session) => session.id === stored) ? stored : null) ??
+      nextSessions.find((session) => isDefaultSessionName(session.name))?.id ??
+      defaultSession.session_id;
     setSessionId(nextSessionId);
     try {
       localStorage.setItem(WEB_SESSION_ID_KEY, nextSessionId);
     } catch {
       // ignore storage failures
     }
-    await Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(nextSessionId)]);
-  }, [refreshSessionDetail, refreshSessionLocks, refreshSessions]);
+    await refreshSessionDetail(nextSessionId);
+  }, [refreshSessionDetail, refreshSessionLocks]);
 
   const handleSessionChange = useCallback(
     async (nextSessionId: string) => {
@@ -1016,6 +1050,7 @@ export default function App() {
 
   const handleSelectOutputForSession = useCallback(
     async (id: string) => {
+      if (isLocalSession) return;
       await handleSelectOutput(id, false);
       if (!sessionId) return;
       try {
@@ -1024,7 +1059,14 @@ export default function App() {
         // best-effort refresh
       }
     },
-    [handleSelectOutput, refreshSessionDetail, refreshSessionLocks, refreshSessions, sessionId]
+    [
+      handleSelectOutput,
+      isLocalSession,
+      refreshSessionDetail,
+      refreshSessionLocks,
+      refreshSessions,
+      sessionId
+    ]
   );
 
   useMetadataStream({
@@ -1282,6 +1324,7 @@ export default function App() {
         switch (payload?.type) {
           case "hello":
             browserSessionIdRef.current = payload.session_id ?? null;
+            setBrowserOutputId(payload.session_id ? `browser:${payload.session_id}` : null);
             break;
           case "play": {
             const url = payload.url as string | undefined;
@@ -1347,6 +1390,7 @@ export default function App() {
       };
       ws.onclose = () => {
         if (!mounted) return;
+        setBrowserOutputId(null);
         retryTimer = window.setTimeout(connect, 1500);
       };
     };
@@ -1364,6 +1408,31 @@ export default function App() {
       setStatus(null);
     }
   }, [sessionId, activeOutputId]);
+
+  useEffect(() => {
+    if (!serverConnected || !sessionId || !isLocalSession || !browserOutputId) return;
+    if (activeOutputId === browserOutputId) return;
+    postJson(`/sessions/${encodeURIComponent(sessionId)}/select-output`, {
+      output_id: browserOutputId,
+      force: false
+    })
+      .then(() =>
+        Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(sessionId)])
+      )
+      .catch((err) => {
+        reportError((err as Error).message);
+      });
+  }, [
+    activeOutputId,
+    browserOutputId,
+    isLocalSession,
+    refreshSessionDetail,
+    refreshSessionLocks,
+    refreshSessions,
+    reportError,
+    serverConnected,
+    sessionId
+  ]);
 
   useEffect(() => {
     const path = status?.now_playing ?? null;
@@ -2028,7 +2097,11 @@ export default function App() {
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}
           onQueueOpen={() => setQueueOpen((value) => !value)}
-          onSelectOutput={() => setOutputsOpen(true)}
+          onSelectOutput={() => {
+            if (!isLocalSession) {
+              setOutputsOpen(true);
+            }
+          }}
         />
       ) : null}
 
@@ -2096,7 +2169,7 @@ export default function App() {
         </Modal>
       ) : null}
 
-      {!showGate ? (
+      {!showGate && !isLocalSession ? (
         <OutputsModal
         open={outputsOpen}
         outputs={outputs}

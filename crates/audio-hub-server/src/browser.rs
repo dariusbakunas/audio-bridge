@@ -4,11 +4,11 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use actix::prelude::*;
 use crossbeam_channel::Receiver;
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::bridge::BridgeCommand;
 use crate::events::EventBus;
@@ -24,7 +24,6 @@ pub struct BrowserOutbound(pub String);
 #[derive(Clone)]
 pub struct BrowserProviderState {
     sessions: Arc<Mutex<HashMap<String, BrowserSession>>>,
-    counter: Arc<AtomicUsize>,
 }
 
 #[derive(Clone)]
@@ -40,7 +39,6 @@ impl BrowserProviderState {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            counter: Arc::new(AtomicUsize::new(1)),
         }
     }
 
@@ -50,7 +48,7 @@ impl BrowserProviderState {
         sender: Recipient<BrowserOutbound>,
         base_url: Option<String>,
     ) -> String {
-        let id = format!("browser-{}", self.counter.fetch_add(1, Ordering::Relaxed));
+        let id = Uuid::new_v4().to_string();
         let session = BrowserSession {
             id: id.clone(),
             name,
