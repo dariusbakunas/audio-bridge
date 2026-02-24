@@ -20,11 +20,12 @@ Each binary supports `--version`, which includes the crate version, git SHA, and
 
 ### Playback flow
 
-1. `web-ui` sends play/seek/queue commands to `audio-hub-server` using track/album ids.
-2. `audio-hub-server` resolves the selected output and exposes `/stream/track/{id}` for the current track.
-3. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
-4. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
-5. Status and queue updates stream from the hub over server-sent events (no polling).
+1. `web-ui` (or another client) creates/refreshes a playback session and binds an output to that session.
+2. The client sends session-scoped play/seek/queue commands (`/sessions/{id}/...`).
+3. `audio-hub-server` resolves the selected output and exposes `/stream/track/{id}` for the current track.
+4. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
+5. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
+6. Status and queue updates stream from the hub over session SSE endpoints (no polling).
 
 ```mermaid
 sequenceDiagram
@@ -103,14 +104,14 @@ sequenceDiagram
 
 ### Outputs + providers
 
-- Providers expose outputs (devices). The hub keeps one active output at a time.
+- Providers expose outputs (devices). Sessions bind outputs via locks so one output is used by at most one session at a time.
 - `bridge` outputs are discovered via mDNS and status streams over HTTP (SSE).
 - Local outputs (optional) reuse the same control path as bridge outputs.
 - Browser outputs are registered by the web UI and controlled via WebSocket (`/browser/ws`).
 
 ### Status + UI
 
-- The bridge reports playback + signal data; the hub caches it and proxies via `/outputs/{id}/status`.
+- The bridge reports playback + signal data; the hub caches it and serves session status via `/sessions/{id}/status` and `/sessions/{id}/status/stream`.
 
 ## What this is for
 
@@ -322,14 +323,29 @@ listen
 
 - `GET /library` (list a directory; use `?dir=...`)
 - `POST /library/rescan`
-- `POST /play`
-- `POST /pause`
-- `POST /seek`
-- `GET /queue`
-- `POST /queue`
-- `POST /queue/remove`
-- `POST /queue/clear`
-- `POST /queue/next`
+- `POST /sessions` (create/refresh session)
+- `GET /sessions`
+- `GET /sessions/locks`
+- `POST /sessions/{id}/select-output`
+- `POST /sessions/{id}/release-output`
+- `POST /sessions/{id}/heartbeat`
+- `GET /sessions/{id}/status`
+- `GET /sessions/{id}/status/stream`
+- `POST /sessions/{id}/pause`
+- `POST /sessions/{id}/seek`
+- `POST /sessions/{id}/stop`
+- `GET /sessions/{id}/queue`
+- `POST /sessions/{id}/queue`
+- `POST /sessions/{id}/queue/next/add`
+- `POST /sessions/{id}/queue/remove`
+- `POST /sessions/{id}/queue/play_from`
+- `POST /sessions/{id}/queue/clear`
+- `POST /sessions/{id}/queue/next`
+- `POST /sessions/{id}/queue/previous`
+- `GET /sessions/{id}/queue/stream`
+- `POST /local-playback/register`
+- `POST /local-playback/{session_id}/play`
+- `GET /local-playback/sessions`
 - `GET /outputs/{id}/status`
 - `GET /stream` (range-enabled)
 - `GET /providers`

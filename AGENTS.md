@@ -37,13 +37,28 @@
 - API handlers live under `crates/audio-hub-server/src/api/*`; OpenAPI `paths(...)` should use module-qualified handlers (e.g. `api::outputs::outputs_select`).
 - `rg` is not available in this environment; use `grep` for searches.
 
+## Session model (2026-02)
+- Playback control is session-scoped (`/sessions/{id}/...`), not global.
+- Outputs are locked per session. An output already locked by one session cannot be selected by another without `force`.
+- Session status/queue streams:
+  - `/sessions/{id}/status/stream`
+  - `/sessions/{id}/queue/stream`
+
 ## UI queue semantics (2026-02)
-- `/queue/stream` now refreshes on `StatusChanged` events because queue order depends on `now_playing`.
+- `/sessions/{id}/queue/stream` refreshes on `StatusChanged` events because queue order depends on `now_playing`.
 - Queue items include:
   - `now_playing: bool` (current track)
   - `played: bool` (recent history, currently last 10)
 - Queue list prepends last played tracks (oldest → newest) above the current track.
 - Previous reinserts the current track at the front of the queue before jumping back.
+
+## Local playback (2026-02)
+- Local playback is decoupled from output selection and remote session control.
+- Endpoints:
+  - `POST /local-playback/register`
+  - `POST /local-playback/{session_id}/play`
+  - `GET /local-playback/sessions`
+- Multiple local playback sessions can exist concurrently.
 
 ## Bridge stream resilience (2026-02)
 - Bridge HTTP range reader retries transient range failures (default: 5 attempts, 200ms backoff).
