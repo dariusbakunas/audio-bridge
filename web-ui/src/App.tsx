@@ -398,6 +398,8 @@ export default function App() {
   const localPathRef = useRef<string | null>(null);
   const notificationIdRef = useRef(0);
   const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
+  const activeSessionIdRef = useRef<string | null>(sessionId);
+  const isLocalSessionRef = useRef<boolean>(false);
 
   const closeTrackMenu = useCallback(() => {
     setTrackMenuPath(null);
@@ -659,6 +661,11 @@ export default function App() {
       document.body.style.overflow = previousOverflow;
     };
   }, [notificationsOpen]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = sessionId;
+    isLocalSessionRef.current = Boolean(isLocalSession);
+  }, [isLocalSession, sessionId]);
 
   const openTrackMatchForAlbum = useCallback(
     (path: string) => {
@@ -1399,6 +1406,12 @@ export default function App() {
     sourceKey: streamKey,
     sessionId,
     onEvent: (data: SetStateAction<StatusResponse | null>) => {
+      if (isLocalSessionRef.current) {
+        return;
+      }
+      if (!sessionId || activeSessionIdRef.current !== sessionId) {
+        return;
+      }
       setStatus(data);
       setUpdatedAt(new Date());
       markServerConnected();
@@ -1630,11 +1643,15 @@ export default function App() {
 
   useEffect(() => {
     if (!isLocalSession || !sessionId) return;
-    if (status?.now_playing) return;
     const currentQueueItem = queue.find(
       (item) => item.kind === "track" && item.now_playing
     );
-    if (!currentQueueItem || currentQueueItem.kind !== "track") return;
+    if (!currentQueueItem || currentQueueItem.kind !== "track") {
+      return;
+    }
+    if (status?.now_playing === currentQueueItem.path) {
+      return;
+    }
 
     const snapshot = loadLocalPlaybackSnapshot(sessionId);
     const path = currentQueueItem.path;
