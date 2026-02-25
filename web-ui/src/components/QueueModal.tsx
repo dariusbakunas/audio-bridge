@@ -44,7 +44,7 @@ export default function QueueModal({
 
   return (
     <div
-      className={`side-panel-backdrop${confirmOpen ? " confirm-open" : ""}`}
+      className={`side-panel-backdrop queue-backdrop${confirmOpen ? " confirm-open" : ""}`}
       onClick={onClose}
     >
       <aside

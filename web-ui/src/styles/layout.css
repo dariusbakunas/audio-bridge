@@ -385,17 +385,6 @@ h1 {
   backdrop-filter: blur(20px) saturate(150%);
 }
 
-@media (min-width: 900px) {
-  .app.queue-open .main {
-    margin-right: 384px;
-    width: calc(100% - var(--nav-width) - 384px);
-  }
-
-  .app.queue-open .view-header {
-    right: 384px;
-  }
-}
-
 .view-header-row {
   display: grid;
   grid-template-columns: auto auto 1fr;

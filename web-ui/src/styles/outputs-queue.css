@@ -144,6 +144,9 @@
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+  animation: queue-panel-in 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: right center;
+  will-change: transform, opacity;
 }
 
 .queue-panel .card-header {
@@ -161,6 +164,24 @@
   flex: 1;
   overflow: auto;
   padding: 12px 22px 20px;
+}
+
+@keyframes queue-panel-in {
+  0% {
+    transform: translateX(36px) scale(0.985);
+    opacity: 0;
+    filter: saturate(0.9);
+  }
+  68% {
+    transform: translateX(-4px) scale(1);
+    opacity: 1;
+    filter: saturate(1);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+    filter: saturate(1);
+  }
 }
 
 .queue-row {

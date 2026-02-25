@@ -694,7 +694,14 @@
   pointer-events: none;
 }
 
+.side-panel-backdrop.queue-backdrop {
+  background: rgba(7, 10, 14, 0.42);
+  pointer-events: auto;
+  animation: queue-backdrop-in 260ms ease-out;
+}
+
 .side-panel-backdrop.confirm-open {
+  background: rgba(7, 10, 14, 0.52);
   pointer-events: auto;
 }
 
@@ -732,6 +739,15 @@
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+
+@keyframes queue-backdrop-in {
+  from {
+    background: rgba(7, 10, 14, 0);
+  }
+  to {
+    background: rgba(7, 10, 14, 0.42);
   }
 }
 

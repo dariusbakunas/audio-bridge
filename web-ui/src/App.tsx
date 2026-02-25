@@ -2109,7 +2109,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     ? queue.some((item) => item.kind === "track" && Boolean(item.played))
     : Boolean(status?.has_previous);
   return (
-    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""} ${queueOpen ? "queue-open" : ""}`}>
+    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""}`}>
       {showGate ? (
         <ConnectionGate
           status={serverConnecting ? "connecting" : "disconnected"}
