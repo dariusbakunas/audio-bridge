@@ -1,6 +1,6 @@
 import { CSSProperties } from "react";
 import type { MouseEvent } from "react";
-import { MoreVertical } from "lucide-react";
+import { Activity, ChevronRight, List, MoreVertical, Pencil, Play, RefreshCw, Search } from "lucide-react";
 
 interface TrackMenuProps {
   open: boolean;
@@ -51,30 +51,37 @@ export default function TrackMenu({
           style={menuStyle}
         >
           <button className="track-menu-item" disabled={!canPlay} onClick={onPlay}>
+            <Play className="track-menu-icon" aria-hidden="true" />
             Play
           </button>
           <button className="track-menu-item" onClick={onQueue}>
+            <List className="track-menu-icon" aria-hidden="true" />
             Queue
           </button>
           <button className="track-menu-item" disabled={!canPlay} onClick={onPlayNext}>
+            <ChevronRight className="track-menu-icon" aria-hidden="true" />
             Play next
           </button>
           {onFixMatch ? (
             <button className="track-menu-item" onClick={onFixMatch}>
+              <Search className="track-menu-icon" aria-hidden="true" />
               Fix MusicBrainz match
             </button>
           ) : null}
           {onEditMetadata ? (
             <button className="track-menu-item" onClick={onEditMetadata}>
+              <Pencil className="track-menu-icon" aria-hidden="true" />
               Edit file metadata
             </button>
           ) : null}
           {onAnalyze ? (
             <button className="track-menu-item" onClick={onAnalyze}>
+              <Activity className="track-menu-icon" aria-hidden="true" />
               Analyze track
             </button>
           ) : null}
           <button className="track-menu-item" onClick={onRescan}>
+            <RefreshCw className="track-menu-icon" aria-hidden="true" />
             Rescan metadata
           </button>
         </div>

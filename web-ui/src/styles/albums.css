@@ -717,7 +717,9 @@
 }
 
 .track-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
@@ -729,6 +731,13 @@
   cursor: pointer;
 }
 
+.track-menu-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
 .track-menu-item:hover:not(:disabled) {
   background: var(--bg-overlay);
   border-color: var(--border-subtle);
@@ -737,4 +746,8 @@
 .track-menu-item:disabled {
   color: var(--muted-2);
   cursor: not-allowed;
+}
+
+.track-menu-item:disabled .track-menu-icon {
+  opacity: 0.45;
 }
