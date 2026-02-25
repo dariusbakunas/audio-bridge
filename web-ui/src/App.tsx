@@ -37,6 +37,7 @@ import {
   SessionCreateResponse,
   SessionDetailResponse,
   SessionLocksResponse,
+  SessionVolumeResponse,
   SessionsListResponse,
   SessionSummary,
   StatusResponse,
@@ -341,6 +342,8 @@ export default function App() {
   const [newSessionNeverExpires, setNewSessionNeverExpires] = useState<boolean>(false);
   const [createSessionBusy, setCreateSessionBusy] = useState<boolean>(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [sessionVolume, setSessionVolume] = useState<SessionVolumeResponse | null>(null);
+  const [volumeBusy, setVolumeBusy] = useState<boolean>(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
   const [trackMenuPath, setTrackMenuPath] = useState<string | null>(null);
@@ -412,6 +415,7 @@ export default function App() {
   const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
   const activeSessionIdRef = useRef<string | null>(sessionId);
   const isLocalSessionRef = useRef<boolean>(false);
+  const volumeRequestSeqRef = useRef(0);
 
   const closeTrackMenu = useCallback(() => {
     setTrackMenuPath(null);
@@ -482,6 +486,7 @@ export default function App() {
   const canTogglePlayback = Boolean(
     sessionId && status?.now_playing && (isLocalSession || activeOutputId)
   );
+  const canControlVolume = Boolean(serverConnected && sessionId && !isLocalSession && activeOutputId);
   const isPlaying = Boolean(status?.now_playing && !status?.paused);
   const isPaused = Boolean(status?.now_playing && status?.paused);
   const uiBuildId = useMemo(() => {
@@ -977,6 +982,23 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     setActiveOutputId(detail.active_output_id ?? null);
   }, []);
 
+  const refreshSessionVolume = useCallback(
+    async (id: string, silent = true) => {
+      try {
+        const volume = await fetchJson<SessionVolumeResponse>(
+          `/sessions/${encodeURIComponent(id)}/volume`
+        );
+        setSessionVolume(volume);
+      } catch (err) {
+        setSessionVolume(null);
+        if (!silent) {
+          reportError((err as Error).message);
+        }
+      }
+    },
+    [reportError]
+  );
+
   const ensureSession = useCallback(async () => {
     const clientId = getOrCreateWebSessionClientId();
     const defaultSession = await postJson<SessionCreateResponse>("/sessions", {
@@ -1028,6 +1050,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       setSessionId(nextSessionId);
       setActiveOutputId(null);
       setStatus(null);
+      setSessionVolume(null);
       setQueue([]);
       localPathRef.current = null;
       try {
@@ -1136,6 +1159,15 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [serverConnected, sessionId, refreshSessionDetail]);
 
   useEffect(() => {
+    if (!canControlVolume || !sessionId) {
+      setSessionVolume(null);
+      return;
+    }
+    volumeRequestSeqRef.current += 1;
+    refreshSessionVolume(sessionId, true);
+  }, [activeOutputId, canControlVolume, refreshSessionVolume, sessionId]);
+
+  useEffect(() => {
     if (!serverConnected || !sessionId) return;
     const sendHeartbeat = async () => {
       try {
@@ -1242,6 +1274,62 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     }
     await handlePauseRemote();
   }, [handlePauseRemote, isLocalSession]);
+
+  const handleSetVolume = useCallback(
+    async (value: number) => {
+      if (!sessionId || isLocalSession || !activeOutputId) return;
+      const clamped = Math.max(0, Math.min(100, Math.round(value)));
+      setSessionVolume((prev) => ({
+        value: clamped,
+        muted: prev?.muted ?? false,
+        source: prev?.source ?? "bridge",
+        available: true
+      }));
+      const requestSeq = ++volumeRequestSeqRef.current;
+      try {
+        const payload = await postJson<SessionVolumeResponse>(
+          `/sessions/${encodeURIComponent(sessionId)}/volume`,
+          { value: clamped }
+        );
+        if (requestSeq === volumeRequestSeqRef.current) {
+          setSessionVolume(payload);
+        }
+      } catch (err) {
+        if (requestSeq !== volumeRequestSeqRef.current) {
+          return;
+        }
+        reportError((err as Error).message);
+        await refreshSessionVolume(sessionId, true);
+      }
+    },
+    [activeOutputId, isLocalSession, refreshSessionVolume, reportError, sessionId]
+  );
+
+  const handleToggleMute = useCallback(async () => {
+    if (!sessionId || isLocalSession || !activeOutputId || !sessionVolume) return;
+    const nextMuted = !Boolean(sessionVolume.muted);
+    setVolumeBusy(true);
+    setSessionVolume({ ...sessionVolume, muted: nextMuted });
+    try {
+      const payload = await postJson<SessionVolumeResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/mute`,
+        { muted: nextMuted }
+      );
+      setSessionVolume(payload);
+    } catch (err) {
+      reportError((err as Error).message);
+      await refreshSessionVolume(sessionId, true);
+    } finally {
+      setVolumeBusy(false);
+    }
+  }, [
+    activeOutputId,
+    isLocalSession,
+    refreshSessionVolume,
+    reportError,
+    sessionId,
+    sessionVolume
+  ]);
 
   const handlePlay = useCallback(
     async (path: string) => {
@@ -2469,6 +2557,8 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasNext}
           queueOpen={queueOpen}
+          volume={sessionVolume}
+          volumeBusy={volumeBusy}
           showOutputAction={!isLocalSession}
           activeOutput={activeOutput}
           activeAlbumId={activeAlbumId}
@@ -2487,6 +2577,8 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           onNext={handleNext}
           onSignalOpen={() => setSignalOpen(true)}
           onQueueOpen={() => setQueueOpen((value) => !value)}
+          onVolumeChange={handleSetVolume}
+          onVolumeToggleMute={handleToggleMute}
           onSelectOutput={() => {
             if (!isLocalSession) {
               setOutputsOpen(true);

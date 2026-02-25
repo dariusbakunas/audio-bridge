@@ -97,6 +97,13 @@ export interface SessionDetailResponse extends SessionSummary {
   battery?: number | null;
 }
 
+export interface SessionVolumeResponse {
+  value: number;
+  muted: boolean;
+  source: string;
+  available: boolean;
+}
+
 export interface SessionLockInfo {
   key: string;
   session_id: string;

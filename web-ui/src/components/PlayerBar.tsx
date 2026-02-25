@@ -1,5 +1,6 @@
-import { OutputInfo, StatusResponse } from "../types";
-import { Activity, List, Volume2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { OutputInfo, SessionVolumeResponse, StatusResponse } from "../types";
+import { Activity, List, Speaker, Volume2, VolumeX } from "lucide-react";
 import PlayerControls from "./PlayerControls";
 
 interface PlayerBarProps {
@@ -14,6 +15,8 @@ interface PlayerBarProps {
   playButtonTitle?: string;
   queueHasItems: boolean;
   queueOpen: boolean;
+  volume: SessionVolumeResponse | null;
+  volumeBusy: boolean;
   showOutputAction?: boolean;
   activeOutput: OutputInfo | null;
   activeAlbumId: number | null;
@@ -26,6 +29,8 @@ interface PlayerBarProps {
   onNext: () => void;
   onSignalOpen: () => void;
   onQueueOpen: () => void;
+  onVolumeChange: (value: number) => void;
+  onVolumeToggleMute: () => void;
   onSelectOutput: () => void;
 }
 
@@ -41,6 +46,8 @@ export default function PlayerBar({
   playButtonTitle,
   queueHasItems,
   queueOpen,
+  volume,
+  volumeBusy,
   showOutputAction = true,
   activeOutput,
   activeAlbumId,
@@ -53,14 +60,82 @@ export default function PlayerBar({
   onNext,
   onSignalOpen,
   onQueueOpen,
+  onVolumeChange,
+  onVolumeToggleMute,
   onSelectOutput
 }: PlayerBarProps) {
+  const compactQuery = "(max-width: 1760px)";
+  const [compactVolume, setCompactVolume] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.matchMedia(compactQuery).matches : false
+  );
+  const [volumePopoverOpen, setVolumePopoverOpen] = useState<boolean>(false);
+  const [volumeDragging, setVolumeDragging] = useState<boolean>(false);
+  const volumeRootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(compactQuery);
+    const update = () => setCompactVolume(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => {
+      media.removeEventListener("change", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!compactVolume) {
+      setVolumePopoverOpen(false);
+    }
+  }, [compactVolume]);
+
+  useEffect(() => {
+    if (!volumePopoverOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (volumeRootRef.current && target && !volumeRootRef.current.contains(target)) {
+        setVolumePopoverOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setVolumePopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [volumePopoverOpen]);
+
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
   const outputRate = status?.output_sample_rate ?? status?.sample_rate;
   const sourceRate = status?.sample_rate;
   const sourceBitDepth = status?.source_bit_depth;
+  const volumeAvailable = Boolean(volume?.available);
+  const volumeValue = Math.max(0, Math.min(100, Math.round(volume?.value ?? 100)));
+  const [volumeDraft, setVolumeDraft] = useState<number>(volumeValue);
+  const volumeMuted = Boolean(volume?.muted);
+  const VolumeIcon = volumeMuted ? VolumeX : Volume2;
+  const volumeUnavailableHint = "Volume control is unavailable for the current output.";
+
+  useEffect(() => {
+    if (!volumeDragging) {
+      setVolumeDraft(volumeValue);
+    }
+  }, [volumeDragging, volumeValue]);
+
+  const commitVolume = () => {
+    if (!volumeAvailable) return;
+    setVolumeDragging(false);
+    onVolumeChange(volumeDraft);
+  };
+
+  const displayedVolume = volumeDragging ? volumeDraft : volumeValue;
   return (
     <div className="player-bar">
       <div className="player-progress">
@@ -173,10 +248,87 @@ export default function PlayerBar({
           ) : null}
           {showOutputAction ? (
             <button className="player-action player-action-output" onClick={onSelectOutput}>
-              <Volume2 className="icon" aria-hidden="true" />
+              <Speaker className="icon" aria-hidden="true" />
               <span className="player-action-label">{activeOutput?.name ?? "Select output"}</span>
             </button>
           ) : null}
+          {compactVolume ? (
+            <div
+              ref={volumeRootRef}
+              className={`player-volume compact${volumeAvailable ? "" : " disabled"}`}
+              title={volumeAvailable ? undefined : volumeUnavailableHint}
+            >
+              <button
+                className="icon-btn volume-toggle-btn"
+                aria-label="Volume"
+                onClick={() => setVolumePopoverOpen((value) => !value)}
+                disabled={!volumeAvailable}
+                title={volumeAvailable ? `Volume ${displayedVolume}%` : volumeUnavailableHint}
+              >
+                <VolumeIcon className="icon" aria-hidden="true" />
+              </button>
+              {volumePopoverOpen ? (
+                <div className="player-volume-popover" role="dialog" aria-label="Volume control">
+                  <input
+                    className="player-volume-slider-vertical"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={displayedVolume}
+                    onChange={(event) => setVolumeDraft(Number(event.target.value))}
+                    onPointerDown={() => setVolumeDragging(true)}
+                    onPointerUp={commitVolume}
+                    onBlur={commitVolume}
+                    disabled={!volumeAvailable}
+                    aria-label="Volume"
+                  />
+                  <button
+                    className="player-volume-popover-mute"
+                    type="button"
+                    onClick={onVolumeToggleMute}
+                    disabled={!volumeAvailable || volumeBusy}
+                  >
+                    {volumeMuted ? "Unmute" : "Mute"}
+                  </button>
+                  <span className="player-volume-popover-value">{displayedVolume}%</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              className={`player-volume${volumeAvailable ? "" : " disabled"}`}
+              title={volumeAvailable ? undefined : volumeUnavailableHint}
+            >
+              <button
+                className="icon-btn volume-toggle-btn"
+                aria-label={volumeMuted ? "Unmute" : "Mute"}
+                onClick={onVolumeToggleMute}
+                disabled={!volumeAvailable || volumeBusy}
+                title={volumeAvailable ? (volumeMuted ? "Unmute" : "Mute") : volumeUnavailableHint}
+              >
+                <VolumeIcon className="icon" aria-hidden="true" />
+              </button>
+              <input
+                className="player-volume-slider"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={displayedVolume}
+                onChange={(event) => setVolumeDraft(Number(event.target.value))}
+                onPointerDown={() => setVolumeDragging(true)}
+                onPointerUp={commitVolume}
+                onBlur={commitVolume}
+                disabled={!volumeAvailable}
+                aria-label="Volume"
+                title={volumeAvailable ? `Volume ${displayedVolume}%` : volumeUnavailableHint}
+              />
+              <span className="player-volume-value">
+                {volumeAvailable ? `${displayedVolume}%` : "--"}
+              </span>
+            </div>
+          )}
           <button
             className={`icon-btn queue-btn${queueOpen ? " active" : ""}`}
             aria-label="Queue"

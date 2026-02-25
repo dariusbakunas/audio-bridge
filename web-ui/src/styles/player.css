@@ -12,9 +12,9 @@
   gap: 24px;
   padding: 14px clamp(20px, 5vw, 72px) 20px;
   align-items: center;
-  z-index: 4;
+  z-index: 12;
   box-shadow: var(--shadow);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .player-left,
@@ -225,6 +225,94 @@
   gap: 10px;
 }
 
+.player-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  position: relative;
+}
+
+.player-volume.disabled {
+  opacity: 0.5;
+}
+
+.icon-btn.volume-toggle-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.player-volume-slider {
+  width: 112px;
+  accent-color: var(--accent);
+}
+
+.player-volume-value {
+  min-width: 34px;
+  text-align: right;
+  font-size: 0.68rem;
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player-volume-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(18, 21, 26, 0.98);
+  box-shadow: var(--shadow);
+  z-index: 40;
+  min-width: 48px;
+}
+
+.player-volume-slider-vertical {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 16px;
+  height: 112px;
+  accent-color: var(--accent);
+}
+
+.player-volume-popover-mute {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.player-volume-popover-mute:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.player-volume-popover-mute:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.player-volume-popover-value {
+  font-size: 0.65rem;
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+}
+
 .player-action {
   display: inline-flex;
   align-items: center;
@@ -311,7 +399,7 @@
   font-family: "JetBrains Mono", monospace;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1760px) {
   .player-actions {
     gap: 6px;
   }
@@ -326,5 +414,11 @@
   .player-action-signal .player-action-label,
   .player-action-output .player-action-label {
     display: none;
+  }
+
+  .player-volume {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
   }
 }
