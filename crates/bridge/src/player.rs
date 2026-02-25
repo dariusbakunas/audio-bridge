@@ -2,7 +2,7 @@
 //!
 //! Receives HTTP playback commands and streams audio via the audio-player pipeline.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -31,12 +31,53 @@ pub(crate) enum PlayerCommand {
     Resume,
     Stop,
     Seek { ms: u64 },
+    SetVolume { value: u8 },
+    SetMute { muted: bool },
 }
 
 /// Handle for sending commands to the playback worker.
 #[derive(Clone)]
 pub(crate) struct PlayerHandle {
     pub(crate) cmd_tx: Sender<PlayerCommand>,
+}
+
+/// Shared bridge volume state (user-facing percent + mute).
+#[derive(Debug)]
+pub(crate) struct BridgeVolumeState {
+    value: Arc<AtomicU8>,
+    muted: Arc<AtomicBool>,
+}
+
+impl BridgeVolumeState {
+    pub(crate) fn new(value: u8, muted: bool) -> Self {
+        Self {
+            value: Arc::new(AtomicU8::new(value.min(100))),
+            muted: Arc::new(AtomicBool::new(muted)),
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> (u8, bool) {
+        (
+            self.value.load(Ordering::Relaxed),
+            self.muted.load(Ordering::Relaxed),
+        )
+    }
+
+    pub(crate) fn set_value(&self, value: u8) {
+        self.value.store(value.min(100), Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
+    }
+
+    pub(crate) fn volume_percent_handle(&self) -> Arc<AtomicU8> {
+        self.value.clone()
+    }
+
+    pub(crate) fn muted_handle(&self) -> Arc<AtomicBool> {
+        self.muted.clone()
+    }
 }
 
 struct CurrentTrack {
@@ -56,6 +97,7 @@ pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     status: Arc<Mutex<BridgeStatusState>>,
+    volume: Arc<BridgeVolumeState>,
     playback: PlaybackConfig,
     tls_insecure: bool,
 ) -> PlayerHandle {
@@ -65,6 +107,7 @@ pub(crate) fn spawn_player(
             device_selected,
             exclusive_selected,
             status,
+            volume,
             playback,
             tls_insecure,
             cmd_rx,
@@ -78,6 +121,7 @@ fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     status: Arc<Mutex<BridgeStatusState>>,
+    volume: Arc<BridgeVolumeState>,
     playback: PlaybackConfig,
     tls_insecure: bool,
     cmd_rx: Receiver<PlayerCommand>,
@@ -121,6 +165,7 @@ fn player_thread_main(
                     &device_selected,
                     &exclusive_selected,
                     &status,
+                    &volume,
                     &playback,
                     tls_insecure,
                     &session_id,
@@ -156,6 +201,7 @@ fn player_thread_main(
                     &device_selected,
                     &exclusive_selected,
                     &status,
+                    &volume,
                     &playback,
                     tls_insecure,
                     &session_id,
@@ -167,6 +213,12 @@ fn player_thread_main(
                     paused,
                     true,
                 );
+            }
+            PlayerCommand::SetVolume { value } => {
+                volume.set_value(value);
+            }
+            PlayerCommand::SetMute { muted } => {
+                volume.set_muted(muted);
             }
         }
     }
@@ -207,6 +259,7 @@ fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
     exclusive_selected: &Arc<Mutex<bool>>,
     status: &Arc<Mutex<BridgeStatusState>>,
+    volume: &Arc<BridgeVolumeState>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
     session_id: &Arc<AtomicU64>,
@@ -231,6 +284,7 @@ fn start_new_session(
     let device_selected = device_selected.clone();
     let exclusive_selected = exclusive_selected.clone();
     let status = status.clone();
+    let volume = volume.clone();
     let playback = playback.clone();
     let session_id = session_id.clone();
     let cancel_for_thread = cancel.clone();
@@ -243,6 +297,7 @@ fn start_new_session(
             &device_selected,
             &exclusive_selected,
             &status,
+            &volume,
             &playback,
             tls_insecure,
             url,
@@ -272,6 +327,7 @@ fn play_one_http(
     device_selected: &Arc<Mutex<Option<String>>>,
     exclusive_selected: &Arc<Mutex<bool>>,
     status: &Arc<Mutex<BridgeStatusState>>,
+    volume: &Arc<BridgeVolumeState>,
     playback: &PlaybackConfig,
     tls_insecure: bool,
     url: String,
@@ -394,6 +450,8 @@ fn play_one_http(
             underrun_events: Some(underrun_events),
             buffered_frames: Some(buffered_frames),
             buffer_capacity_frames: Some(buffer_capacity_frames),
+            volume_percent: Some(volume.volume_percent_handle()),
+            muted: Some(volume.muted_handle()),
         },
     );
 

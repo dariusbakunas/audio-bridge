@@ -7,7 +7,7 @@
 //! - converts `f32` samples to the device sample format
 
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use anyhow::{anyhow, Result};
 use cpal::traits::DeviceTrait;
 
@@ -39,6 +39,10 @@ pub struct PlaybackConfig {
     pub buffered_frames: Option<Arc<AtomicU64>>,
     /// When set, stream errors will flip this cancel flag.
     pub cancel_on_error: Option<Arc<AtomicBool>>,
+    /// Optional user-facing volume percent (0..100).
+    pub volume_percent: Option<Arc<AtomicU8>>,
+    /// Optional mute flag.
+    pub muted: Option<Arc<AtomicBool>>,
 }
 
 /// Build a CPAL output stream that plays audio from `dstq`.
@@ -97,6 +101,8 @@ where
     let underrun_frames = cfg.underrun_frames.clone();
     let underrun_events = cfg.underrun_events.clone();
     let buffered_frames = cfg.buffered_frames.clone();
+    let volume_percent = cfg.volume_percent.clone();
+    let muted = cfg.muted.clone();
 
     let cancel_on_error = cfg.cancel_on_error.clone();
     let err_fn = move |err| {
@@ -121,6 +127,20 @@ where
             }
 
             let mut st = state_cb.lock().unwrap();
+            let muted_now = muted
+                .as_ref()
+                .map(|flag| flag.load(Ordering::Relaxed))
+                .unwrap_or(false);
+            let gain = if muted_now {
+                0.0
+            } else {
+                (volume_percent
+                    .as_ref()
+                    .map(|v| v.load(Ordering::Relaxed))
+                    .unwrap_or(100) as f32
+                    / 100.0)
+                    .clamp(0.0, 1.0)
+            };
 
             let frames = data.len() / channels_out;
             let mut filled_frames = 0usize;
@@ -156,7 +176,7 @@ where
                     }
                 }
                 for ch in 0..channels_out {
-                    let sample_f32 = next_sample_mapped_from_vec(&mut *st, channels_out, ch);
+                    let sample_f32 = next_sample_mapped_from_vec(&mut *st, channels_out, ch) * gain;
                     data[frame * channels_out + ch] =
                         <T as cpal::Sample>::from_sample::<f32>(sample_f32);
                 }

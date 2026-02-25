@@ -15,7 +15,7 @@ use futures_util::{Stream, stream::unfold};
 use crossbeam_channel::Sender;
 
 use audio_player::device;
-use crate::player::PlayerCommand;
+use crate::player::{BridgeVolumeState, PlayerCommand};
 use crate::status::{BridgeStatusState, StatusSnapshot};
 
 /// Health check response payload.
@@ -71,6 +71,25 @@ struct SeekRequest {
     ms: u64,
 }
 
+/// Volume snapshot payload.
+#[derive(serde::Serialize)]
+struct VolumeResponse {
+    value: u8,
+    muted: bool,
+}
+
+/// Request body for setting volume.
+#[derive(serde::Deserialize)]
+struct VolumeSetRequest {
+    value: u8,
+}
+
+/// Request body for setting mute state.
+#[derive(serde::Deserialize)]
+struct MuteRequest {
+    muted: bool,
+}
+
 const DEVICES_STREAM_INTERVAL: Duration = Duration::from_secs(2);
 const STATUS_STREAM_INTERVAL: Duration = Duration::from_secs(1);
 const PING_INTERVAL: Duration = Duration::from_secs(15);
@@ -78,6 +97,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(15);
 #[derive(Clone)]
 struct AppState {
     status: Arc<Mutex<BridgeStatusState>>,
+    volume: Arc<BridgeVolumeState>,
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
@@ -87,6 +107,7 @@ struct AppState {
 pub(crate) fn spawn_http_server(
     bind: SocketAddr,
     status: Arc<Mutex<BridgeStatusState>>,
+    volume: Arc<BridgeVolumeState>,
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
@@ -94,6 +115,7 @@ pub(crate) fn spawn_http_server(
     std::thread::spawn(move || {
         let state = AppState {
             status,
+            volume,
             device_selected,
             exclusive_selected,
             player_tx,
@@ -111,6 +133,9 @@ pub(crate) fn spawn_http_server(
                 .route("/devices/select", web::post().to(select_device))
                 .route("/status", web::get().to(status_snapshot))
                 .route("/status/stream", web::get().to(status_stream))
+                .route("/volume", web::get().to(volume_snapshot))
+                .route("/volume", web::post().to(set_volume))
+                .route("/mute", web::post().to(set_mute))
                 .route("/play", web::post().to(play))
                 .route("/pause", web::post().to(pause))
                 .route("/resume", web::post().to(resume))
@@ -346,6 +371,48 @@ async fn seek(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     }
 }
 
+async fn volume_snapshot(state: web::Data<AppState>) -> HttpResponse {
+    let (value, muted) = state.volume.snapshot();
+    HttpResponse::Ok().json(VolumeResponse { value, muted })
+}
+
+async fn set_volume(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
+    let req: VolumeSetRequest = match parse_json(&body) {
+        Ok(req) => req,
+        Err(resp) => return resp,
+    };
+    let value = req.value.min(100);
+    if state
+        .player_tx
+        .send(PlayerCommand::SetVolume { value })
+        .is_err()
+    {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline");
+    }
+    state.volume.set_value(value);
+    HttpResponse::Ok().json(VolumeResponse {
+        value,
+        muted: state.volume.snapshot().1,
+    })
+}
+
+async fn set_mute(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
+    let req: MuteRequest = match parse_json(&body) {
+        Ok(req) => req,
+        Err(resp) => return resp,
+    };
+    if state
+        .player_tx
+        .send(PlayerCommand::SetMute { muted: req.muted })
+        .is_err()
+    {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline");
+    }
+    state.volume.set_muted(req.muted);
+    let (value, muted) = state.volume.snapshot();
+    HttpResponse::Ok().json(VolumeResponse { value, muted })
+}
+
 fn parse_json<T: serde::de::DeserializeOwned>(body: &web::Bytes) -> Result<T, HttpResponse> {
     serde_json::from_slice(body)
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid json: {e}")))
@@ -498,5 +565,17 @@ mod tests {
     fn seek_request_parses_ms() {
         let req: SeekRequest = serde_json::from_str(r#"{"ms":1234}"#).unwrap();
         assert_eq!(req.ms, 1234);
+    }
+
+    #[test]
+    fn volume_set_request_parses_value() {
+        let req: VolumeSetRequest = serde_json::from_str(r#"{"value":73}"#).unwrap();
+        assert_eq!(req.value, 73);
+    }
+
+    #[test]
+    fn mute_request_parses_muted() {
+        let req: MuteRequest = serde_json::from_str(r#"{"muted":true}"#).unwrap();
+        assert!(req.muted);
     }
 }

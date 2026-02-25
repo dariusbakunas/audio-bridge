@@ -29,6 +29,10 @@ pub struct PlaybackSessionOptions {
     pub buffered_frames: Option<Arc<AtomicU64>>,
     /// Optional capacity of the output queue (frames).
     pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
+    /// Optional user-facing volume percent (0..100).
+    pub volume_percent: Option<Arc<std::sync::atomic::AtomicU8>>,
+    /// Optional mute flag.
+    pub muted: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 struct PlaybackState {
@@ -39,6 +43,8 @@ struct PlaybackState {
     underrun_events: Option<Arc<AtomicU64>>,
     buffered_frames: Option<Arc<AtomicU64>>,
     buffer_capacity_frames: Option<Arc<AtomicU64>>,
+    volume_percent: Option<Arc<std::sync::atomic::AtomicU8>>,
+    muted: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl PlaybackState {
@@ -51,6 +57,8 @@ impl PlaybackState {
             underrun_events: opts.underrun_events,
             buffered_frames: opts.buffered_frames,
             buffer_capacity_frames: opts.buffer_capacity_frames,
+            volume_percent: opts.volume_percent,
+            muted: opts.muted,
         }
     }
 
@@ -109,6 +117,8 @@ pub fn play_decoded_source(
             underrun_events: state.underrun_events.clone(),
             buffered_frames: state.buffered_frames.clone(),
             cancel_on_error: state.cancel.clone(),
+            volume_percent: state.volume_percent.clone(),
+            muted: state.muted.clone(),
         },
     )?;
     stream.play()?;

@@ -33,6 +33,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     ));
     let exclusive_selected = std::sync::Arc::new(std::sync::Mutex::new(false));
     let status = PlayerStatusState::shared();
+    let volume = std::sync::Arc::new(player::BridgeVolumeState::new(100, false));
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -53,12 +54,14 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         device_selected.clone(),
         exclusive_selected.clone(),
         status.clone(),
+        volume.clone(),
         config.playback.clone(),
         config.tls_insecure,
     );
     let _http = http_api::spawn_http_server(
         config.http_bind,
         status.clone(),
+        volume,
         device_selected.clone(),
         exclusive_selected.clone(),
         player_handle.cmd_tx,
@@ -128,6 +131,8 @@ fn play_one_local(
             underrun_events: None,
             buffered_frames: None,
             buffer_capacity_frames: None,
+            volume_percent: None,
+            muted: None,
         },
     )
 }

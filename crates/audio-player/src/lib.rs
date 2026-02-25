@@ -30,6 +30,8 @@
 //!         underrun_events: None,
 //!         buffered_frames: None,
 //!         buffer_capacity_frames: None,
+//!         volume_percent: None,
+//!         muted: None,
 //!     },
 //! ).expect("playback");
 //! ```

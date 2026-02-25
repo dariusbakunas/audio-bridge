@@ -265,6 +265,8 @@ fn play_one_file(
             underrun_events: Some(underrun_events),
             buffered_frames: None,
             buffer_capacity_frames: None,
+            volume_percent: None,
+            muted: None,
         },
     );
 

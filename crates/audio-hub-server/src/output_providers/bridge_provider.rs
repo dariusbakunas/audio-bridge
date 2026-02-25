@@ -13,6 +13,7 @@ use crate::models::{
     OutputInfo,
     OutputsResponse,
     ProviderInfo,
+    SessionVolumeResponse,
     StatusResponse,
     SupportedRates,
 };
@@ -186,7 +187,7 @@ impl OutputProvider for BridgeProvider {
                 },
                 capabilities: OutputCapabilities {
                     device_select: true,
-                    volume: false,
+                    volume: true,
                 },
             })
             .collect()
@@ -577,6 +578,62 @@ impl OutputProvider for BridgeProvider {
             .map_err(|e| ProviderError::Internal(format!("{e:#}")))
     }
 
+    async fn volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        let http_addr = bridge_http_addr_for_output(state, output_id)?;
+        let snapshot = BridgeTransportClient::new(http_addr)
+            .volume()
+            .await
+            .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
+        Ok(SessionVolumeResponse {
+            value: snapshot.value.min(100),
+            muted: snapshot.muted,
+            source: "bridge".to_string(),
+            available: true,
+        })
+    }
+
+    async fn set_volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        value: u8,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        let http_addr = bridge_http_addr_for_output(state, output_id)?;
+        let snapshot = BridgeTransportClient::new(http_addr)
+            .set_volume(value.min(100))
+            .await
+            .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
+        Ok(SessionVolumeResponse {
+            value: snapshot.value.min(100),
+            muted: snapshot.muted,
+            source: "bridge".to_string(),
+            available: true,
+        })
+    }
+
+    async fn set_mute_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        muted: bool,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        let http_addr = bridge_http_addr_for_output(state, output_id)?;
+        let snapshot = BridgeTransportClient::new(http_addr)
+            .set_mute(muted)
+            .await
+            .map_err(|e| ProviderError::Internal(format!("{e:#}")))?;
+        Ok(SessionVolumeResponse {
+            value: snapshot.value.min(100),
+            muted: snapshot.muted,
+            source: "bridge".to_string(),
+            available: true,
+        })
+    }
+
     async fn refresh_provider(
         &self,
         state: &AppState,
@@ -593,6 +650,21 @@ impl OutputProvider for BridgeProvider {
         state.events.outputs_changed();
         Ok(())
     }
+}
+
+fn bridge_http_addr_for_output(
+    state: &AppState,
+    output_id: &str,
+) -> Result<std::net::SocketAddr, ProviderError> {
+    let (bridge_id, _) = parse_output_id(output_id).map_err(ProviderError::BadRequest)?;
+    let bridges_state = state.providers.bridge.bridges.lock().unwrap();
+    let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
+    let merged = merge_bridges(&bridges_state.bridges, &discovered);
+    merged
+        .iter()
+        .find(|b| b.id == bridge_id)
+        .map(|b| b.http_addr)
+        .ok_or_else(|| ProviderError::BadRequest("unknown bridge id".to_string()))
 }
 
 /// Build output entries from bridges, tracking per-bridge failures.

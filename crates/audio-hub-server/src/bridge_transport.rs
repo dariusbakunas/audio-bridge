@@ -63,6 +63,25 @@ struct HttpSeekRequest {
     ms: u64,
 }
 
+/// JSON payload for bridge volume set requests.
+#[derive(Debug, serde::Serialize)]
+struct HttpVolumeSetRequest {
+    value: u8,
+}
+
+/// JSON payload for bridge mute requests.
+#[derive(Debug, serde::Serialize)]
+struct HttpMuteRequest {
+    muted: bool,
+}
+
+/// JSON payload for bridge volume snapshot.
+#[derive(Debug, serde::Deserialize, Clone, Copy)]
+pub struct HttpVolumeResponse {
+    pub value: u8,
+    pub muted: bool,
+}
+
 /// Async HTTP transport client for bridge control and status.
 #[derive(Clone)]
 pub struct BridgeTransportClient {
@@ -198,6 +217,59 @@ impl BridgeTransportClient {
             .error_for_status()
             .map_err(|e| anyhow::anyhow!("http seek failed: {e}"))?;
         Ok(())
+    }
+
+    /// Fetch current bridge volume snapshot.
+    pub async fn volume(&self) -> Result<HttpVolumeResponse> {
+        let endpoint = format!("http://{}/volume", self.http_addr);
+        let resp = self.client
+            .get(&endpoint)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("http volume request failed: {e}"))?;
+        let resp = resp
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("http volume request failed: {e}"))?;
+        resp.json::<HttpVolumeResponse>()
+            .await
+            .map_err(|e| anyhow::anyhow!("http volume decode failed: {e}"))
+    }
+
+    /// Set bridge volume percent (0..100).
+    pub async fn set_volume(&self, value: u8) -> Result<HttpVolumeResponse> {
+        let endpoint = format!("http://{}/volume", self.http_addr);
+        self.client
+            .post(&endpoint)
+            .timeout(Duration::from_secs(2))
+            .json(&HttpVolumeSetRequest {
+                value: value.min(100),
+            })
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("http set volume failed: {e}"))?
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("http set volume failed: {e}"))?
+            .json::<HttpVolumeResponse>()
+            .await
+            .map_err(|e| anyhow::anyhow!("http set volume decode failed: {e}"))
+    }
+
+    /// Set bridge mute state.
+    pub async fn set_mute(&self, muted: bool) -> Result<HttpVolumeResponse> {
+        let endpoint = format!("http://{}/mute", self.http_addr);
+        self.client
+            .post(&endpoint)
+            .timeout(Duration::from_secs(2))
+            .json(&HttpMuteRequest { muted })
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("http set mute failed: {e}"))?
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("http set mute failed: {e}"))?
+            .json::<HttpVolumeResponse>()
+            .await
+            .map_err(|e| anyhow::anyhow!("http set mute decode failed: {e}"))
     }
 
     /// Ask the bridge to play the specified path via the hub stream URL.
