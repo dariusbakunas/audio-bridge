@@ -950,10 +950,10 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [trackMenuPath, closeTrackMenu]);
 
   useEffect(() => {
-    if (!isPlaying && signalOpen) {
+    if (!status?.now_playing && signalOpen) {
       setSignalOpen(false);
     }
-  }, [isPlaying, signalOpen]);
+  }, [status?.now_playing, signalOpen]);
 
   const refreshSessions = useCallback(async () => {
     const clientId = getOrCreateWebSessionClientId();
@@ -2463,7 +2463,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           nowPlayingCover={nowPlayingCover}
           nowPlayingCoverFailed={nowPlayingCoverFailed}
           showSignalAction={!isLocalSession}
-          showSignalPath={isPlaying}
+          showSignalPath={Boolean(status?.now_playing)}
           canTogglePlayback={canTogglePlayback}
           canGoPrevious={canGoPrevious}
           playButtonTitle={playButtonTitle}
