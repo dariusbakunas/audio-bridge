@@ -67,6 +67,7 @@ pub use sessions::{
     sessions_heartbeat,
     sessions_locks,
     sessions_list,
+    sessions_mute_set,
     sessions_pause,
     sessions_queue_add,
     sessions_queue_add_next,
@@ -82,6 +83,8 @@ pub use sessions::{
     sessions_select_output,
     sessions_status,
     sessions_status_stream,
+    sessions_volume,
+    sessions_volume_set,
     sessions_stop,
 };
 pub use streams::{

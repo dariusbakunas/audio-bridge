@@ -778,6 +778,32 @@ pub struct SessionDeleteResponse {
     pub released_output_id: Option<String>,
 }
 
+/// Session-scoped volume snapshot.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionVolumeResponse {
+    /// User-facing percent volume (0..100).
+    pub value: u8,
+    /// Whether output is muted.
+    pub muted: bool,
+    /// Volume control source.
+    pub source: String,
+    /// Whether volume control is available for this output.
+    pub available: bool,
+}
+
+/// Request payload to set session volume.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionVolumeSetRequest {
+    /// User-facing percent volume (0..100).
+    pub value: u8,
+}
+
+/// Request payload to set session mute.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SessionMuteRequest {
+    pub muted: bool,
+}
+
 /// Output settings (disabled outputs and renames).
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema, Default)]
 pub struct OutputSettings {

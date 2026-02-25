@@ -588,6 +588,62 @@ impl SessionPlaybackManager {
             })
     }
 
+    pub async fn volume(
+        &self,
+        state: &AppState,
+        session_id: &str,
+    ) -> Result<crate::models::SessionVolumeResponse, SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        state
+            .output
+            .controller
+            .volume_for_output(state, &output_id)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
+    pub async fn set_volume(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        value: u8,
+    ) -> Result<crate::models::SessionVolumeResponse, SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        state
+            .output
+            .controller
+            .set_volume_for_output(state, &output_id, value)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
+    pub async fn set_mute(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        muted: bool,
+    ) -> Result<crate::models::SessionVolumeResponse, SessionPlaybackError> {
+        let output_id = self.bound_output_id(session_id)?;
+        state
+            .output
+            .controller
+            .set_mute_for_output(state, &output_id, muted)
+            .await
+            .map_err(|err| SessionPlaybackError::CommandFailed {
+                session_id: session_id.to_string(),
+                output_id,
+                reason: controller_error_reason(&err),
+            })
+    }
+
     fn synthetic_status(
         &self,
         state: &AppState,

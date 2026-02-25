@@ -4,7 +4,7 @@
 
 use actix_web::HttpResponse;
 
-use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, StatusResponse};
+use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, SessionVolumeResponse, StatusResponse};
 use crate::output_providers::registry::OutputRegistry;
 use crate::state::{AppState};
 
@@ -78,6 +78,44 @@ impl OutputController {
     ) -> Result<StatusResponse, OutputControllerError> {
         self.registry
             .status_for_output(state, output_id)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
+    }
+
+    /// Fetch volume for a specific output id.
+    pub(crate) async fn volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<SessionVolumeResponse, OutputControllerError> {
+        self.registry
+            .volume_for_output(state, output_id)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
+    }
+
+    /// Set volume for a specific output id.
+    pub(crate) async fn set_volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        value: u8,
+    ) -> Result<SessionVolumeResponse, OutputControllerError> {
+        self.registry
+            .set_volume_for_output(state, output_id, value)
+            .await
+            .map_err(|e| OutputControllerError::Http(e.into_response()))
+    }
+
+    /// Set mute for a specific output id.
+    pub(crate) async fn set_mute_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        muted: bool,
+    ) -> Result<SessionVolumeResponse, OutputControllerError> {
+        self.registry
+            .set_mute_for_output(state, output_id, muted)
             .await
             .map_err(|e| OutputControllerError::Http(e.into_response()))
     }

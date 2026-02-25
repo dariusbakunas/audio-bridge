@@ -5,7 +5,7 @@
 use actix_web::HttpResponse;
 use async_trait::async_trait;
 
-use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, StatusResponse};
+use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, SessionVolumeResponse, StatusResponse};
 use crate::output_providers::bridge_provider::BridgeProvider;
 use crate::output_providers::cast_provider::CastProvider;
 use crate::output_providers::local_provider::LocalProvider;
@@ -83,6 +83,38 @@ pub(crate) trait OutputProvider: Send + Sync {
         _provider_id: &str,
     ) -> Result<(), ProviderError> {
         Ok(())
+    }
+    /// Return volume for the requested output id.
+    async fn volume_for_output(
+        &self,
+        _state: &AppState,
+        _output_id: &str,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        Err(ProviderError::Unavailable(
+            "volume control unavailable for this output".to_string(),
+        ))
+    }
+    /// Set volume for the requested output id.
+    async fn set_volume_for_output(
+        &self,
+        _state: &AppState,
+        _output_id: &str,
+        _value: u8,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        Err(ProviderError::Unavailable(
+            "volume control unavailable for this output".to_string(),
+        ))
+    }
+    /// Set mute state for the requested output id.
+    async fn set_mute_for_output(
+        &self,
+        _state: &AppState,
+        _output_id: &str,
+        _muted: bool,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        Err(ProviderError::Unavailable(
+            "volume control unavailable for this output".to_string(),
+        ))
     }
 }
 
@@ -218,6 +250,50 @@ impl OutputRegistry {
         for provider in &self.providers {
             if provider.can_handle_output_id(output_id) {
                 return provider.status_for_output(state, output_id).await;
+            }
+        }
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
+    }
+
+    /// Return volume for the requested output id.
+    pub(crate) async fn volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        for provider in &self.providers {
+            if provider.can_handle_output_id(output_id) {
+                return provider.volume_for_output(state, output_id).await;
+            }
+        }
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
+    }
+
+    /// Set volume for the requested output id.
+    pub(crate) async fn set_volume_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        value: u8,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        for provider in &self.providers {
+            if provider.can_handle_output_id(output_id) {
+                return provider.set_volume_for_output(state, output_id, value).await;
+            }
+        }
+        Err(ProviderError::BadRequest("invalid output id".to_string()))
+    }
+
+    /// Set mute for the requested output id.
+    pub(crate) async fn set_mute_for_output(
+        &self,
+        state: &AppState,
+        output_id: &str,
+        muted: bool,
+    ) -> Result<SessionVolumeResponse, ProviderError> {
+        for provider in &self.providers {
+            if provider.can_handle_output_id(output_id) {
+                return provider.set_mute_for_output(state, output_id, muted).await;
             }
         }
         Err(ProviderError::BadRequest("invalid output id".to_string()))

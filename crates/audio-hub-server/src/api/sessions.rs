@@ -30,10 +30,13 @@ use crate::models::{
     SessionHeartbeatRequest,
     SessionLockInfo,
     SessionLocksResponse,
+    SessionMuteRequest,
     SessionReleaseOutputResponse,
     SessionSelectOutputRequest,
     SessionSelectOutputResponse,
     SessionSummary,
+    SessionVolumeResponse,
+    SessionVolumeSetRequest,
     SessionsListResponse,
     StatusResponse,
 };
@@ -539,6 +542,101 @@ pub async fn sessions_status(
             Some(cached) => HttpResponse::Ok().json(cached),
             None => err.into_response(),
         },
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/sessions/{id}/volume",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    responses(
+        (status = 200, description = "Volume state for session output", body = SessionVolumeResponse),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[get("/sessions/{id}/volume")]
+/// Return volume state for the output bound to this session.
+pub async fn sessions_volume(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    match state.output.session_playback.volume(&state, &session_id).await {
+        Ok(resp) => HttpResponse::Ok().json(resp),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/volume",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = SessionVolumeSetRequest,
+    responses(
+        (status = 200, description = "Volume set", body = SessionVolumeResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[post("/sessions/{id}/volume")]
+/// Set volume for the output bound to this session.
+pub async fn sessions_volume_set(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<SessionVolumeSetRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    let value = body.into_inner().value.min(100);
+    match state
+        .output
+        .session_playback
+        .set_volume(&state, &session_id, value)
+        .await
+    {
+        Ok(resp) => HttpResponse::Ok().json(resp),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/sessions/{id}/mute",
+    params(
+        ("id" = String, Path, description = "Session id")
+    ),
+    request_body = SessionMuteRequest,
+    responses(
+        (status = 200, description = "Mute state set", body = SessionVolumeResponse),
+        (status = 404, description = "Session not found"),
+        (status = 409, description = "Session output is in use by another session"),
+        (status = 503, description = "Session has no output selected or output is unavailable")
+    )
+)]
+#[post("/sessions/{id}/mute")]
+/// Set mute state for the output bound to this session.
+pub async fn sessions_mute_set(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: web::Json<SessionMuteRequest>,
+) -> impl Responder {
+    let session_id = id.into_inner();
+    let muted = body.into_inner().muted;
+    match state
+        .output
+        .session_playback
+        .set_mute(&state, &session_id, muted)
+        .await
+    {
+        Ok(resp) => HttpResponse::Ok().json(resp),
+        Err(err) => err.into_response(),
     }
 }
 
