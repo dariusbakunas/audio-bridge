@@ -312,88 +312,42 @@ impl SessionPlaybackManager {
     ) -> Result<crate::models::StatusResponse, SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
         if let Some(target) = self.bridge_target(state, &output_id) {
-            let status = BridgeTransportClient::new(target.http_addr)
-                .status()
-                .await
-                .map_err(|err| SessionPlaybackError::StatusFailed {
-                    session_id: session_id.to_string(),
-                    output_id: target.output_id.clone(),
-                    reason: format!("status_failed {err:#}"),
-                })?;
-            let should_use_queue_fallback = status.now_playing.is_none()
-                && (!status.paused || status.elapsed_ms.is_some() || status.duration_ms.is_some());
-            let queue_now_playing = if should_use_queue_fallback {
-                crate::session_registry::queue_snapshot(session_id)
-                    .ok()
-                    .and_then(|snapshot| snapshot.now_playing)
-                    .map(|path| path.to_string_lossy().to_string())
-            } else {
-                None
-            };
-            let now_playing_path = status.now_playing.clone().or(queue_now_playing);
-            let session_has_previous = crate::session_registry::queue_snapshot(session_id)
+            let bridge_id = parse_output_id(&target.output_id)
                 .ok()
-                .map(|snapshot| !snapshot.history.is_empty());
-            let resolved_path = now_playing_path
-                .as_deref()
-                .and_then(parse_now_playing_path)
-                .map(PathBuf::from);
-            let (title, artist, album, format) = if let Some(path) = resolved_path.as_ref() {
-                let lib = state.library.read().unwrap();
-                match lib.find_track_by_path(&path) {
-                    Some(crate::models::LibraryEntry::Track {
-                        file_name,
-                        artist,
-                        album,
-                        format,
-                        ..
-                    }) => {
-                        let path_str = path.to_string_lossy();
-                        let title = state
-                            .metadata
-                            .db
-                            .track_record_by_path(path_str.as_ref())
-                            .ok()
-                            .flatten()
-                            .and_then(|record| record.title)
-                            .or_else(|| Some(file_name));
-                        (title, artist, album, Some(format))
-                    }
-                    _ => (None, None, None, None),
-                }
-            } else {
-                (None, None, None, None)
-            };
-            return Ok(crate::models::StatusResponse {
-                now_playing: now_playing_path,
-                paused: status.paused,
-                bridge_online: true,
-                elapsed_ms: status.elapsed_ms,
-                duration_ms: status.duration_ms,
-                source_codec: status.source_codec,
-                source_bit_depth: status.source_bit_depth,
-                container: status.container,
-                output_sample_format: status.output_sample_format,
-                resampling: status.resampling,
-                resample_from_hz: status.resample_from_hz,
-                resample_to_hz: status.resample_to_hz,
-                sample_rate: status.sample_rate,
-                channels: status.channels,
-                output_sample_rate: status.sample_rate,
-                output_device: status.device,
-                title,
-                artist,
-                album,
-                format,
-                output_id: Some(target.output_id),
-                bitrate_kbps: None,
-                underrun_frames: status.underrun_frames,
-                underrun_events: status.underrun_events,
-                buffer_size_frames: status.buffer_size_frames,
-                buffered_frames: status.buffered_frames,
-                buffer_capacity_frames: status.buffer_capacity_frames,
-                has_previous: session_has_previous,
+                .map(|(bridge_id, _)| bridge_id);
+            let cached_status = bridge_id.as_ref().and_then(|bridge_id| {
+                state
+                    .providers
+                    .bridge
+                    .status_cache
+                    .lock()
+                    .ok()
+                    .and_then(|cache| cache.get(bridge_id).cloned())
             });
+            let status = if let Some(cached) = cached_status {
+                cached
+            } else {
+                let fetched = BridgeTransportClient::new(target.http_addr)
+                    .status()
+                    .await
+                    .map_err(|err| SessionPlaybackError::StatusFailed {
+                        session_id: session_id.to_string(),
+                        output_id: target.output_id.clone(),
+                        reason: format!("status_failed {err:#}"),
+                    })?;
+                if let Some(bridge_id) = bridge_id.as_ref() {
+                    if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+                        cache.insert(bridge_id.clone(), fetched.clone());
+                    }
+                }
+                fetched
+            };
+            return Ok(self.build_bridge_status_response(
+                state,
+                session_id,
+                target.output_id,
+                status,
+            ));
         }
         match state
             .output
@@ -406,6 +360,89 @@ impl SessionPlaybackManager {
                 Ok(status)
             }
             Err(err) => Ok(self.synthetic_status(state, session_id, &output_id, Some(err))),
+        }
+    }
+
+    fn build_bridge_status_response(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        output_id: String,
+        status: audio_bridge_types::BridgeStatus,
+    ) -> crate::models::StatusResponse {
+        let should_use_queue_fallback = status.now_playing.is_none()
+            && (!status.paused || status.elapsed_ms.is_some() || status.duration_ms.is_some());
+        let queue_now_playing = if should_use_queue_fallback {
+            crate::session_registry::queue_snapshot(session_id)
+                .ok()
+                .and_then(|snapshot| snapshot.now_playing)
+                .map(|path| path.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        let now_playing_path = status.now_playing.clone().or(queue_now_playing);
+        let session_has_previous = crate::session_registry::queue_snapshot(session_id)
+            .ok()
+            .map(|snapshot| !snapshot.history.is_empty());
+        let resolved_path = now_playing_path
+            .as_deref()
+            .and_then(parse_now_playing_path)
+            .map(PathBuf::from);
+        let (title, artist, album, format) = if let Some(path) = resolved_path.as_ref() {
+            let lib = state.library.read().unwrap();
+            match lib.find_track_by_path(&path) {
+                Some(crate::models::LibraryEntry::Track {
+                    file_name,
+                    artist,
+                    album,
+                    format,
+                    ..
+                }) => {
+                    let path_str = path.to_string_lossy();
+                    let title = state
+                        .metadata
+                        .db
+                        .track_record_by_path(path_str.as_ref())
+                        .ok()
+                        .flatten()
+                        .and_then(|record| record.title)
+                        .or_else(|| Some(file_name));
+                    (title, artist, album, Some(format))
+                }
+                _ => (None, None, None, None),
+            }
+        } else {
+            (None, None, None, None)
+        };
+        crate::models::StatusResponse {
+            now_playing: now_playing_path,
+            paused: status.paused,
+            bridge_online: true,
+            elapsed_ms: status.elapsed_ms,
+            duration_ms: status.duration_ms,
+            source_codec: status.source_codec,
+            source_bit_depth: status.source_bit_depth,
+            container: status.container,
+            output_sample_format: status.output_sample_format,
+            resampling: status.resampling,
+            resample_from_hz: status.resample_from_hz,
+            resample_to_hz: status.resample_to_hz,
+            sample_rate: status.sample_rate,
+            channels: status.channels,
+            output_sample_rate: status.sample_rate,
+            output_device: status.device,
+            title,
+            artist,
+            album,
+            format,
+            output_id: Some(output_id),
+            bitrate_kbps: None,
+            underrun_frames: status.underrun_frames,
+            underrun_events: status.underrun_events,
+            buffer_size_frames: status.buffer_size_frames,
+            buffered_frames: status.buffered_frames,
+            buffer_capacity_frames: status.buffer_capacity_frames,
+            has_previous: session_has_previous,
         }
     }
 
