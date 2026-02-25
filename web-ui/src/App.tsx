@@ -131,6 +131,10 @@ type LocalPlaybackCommand = {
 
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
+const TRACK_MENU_GAP_PX = 4;
+const TRACK_MENU_MARGIN_PX = 8;
+const TRACK_MENU_MIN_WIDTH_PX = 220;
+const TRACK_MENU_ESTIMATED_HEIGHT_PX = 320;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
@@ -343,6 +347,7 @@ export default function App() {
   const [trackMenuPosition, setTrackMenuPosition] = useState<{
     top: number;
     right: number;
+    up: boolean;
   } | null>(null);
   const [queueOpen, setQueueOpen] = useState<boolean>(false);
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
@@ -419,9 +424,31 @@ export default function App() {
           return;
         }
         const rect = target.getBoundingClientRect();
+        const playerBarTop =
+          document.querySelector(".player-bar")?.getBoundingClientRect().top ?? window.innerHeight;
+        const bottomLimit = Math.min(window.innerHeight, playerBarTop - TRACK_MENU_MARGIN_PX);
+        const minTop = TRACK_MENU_MARGIN_PX;
+        const spaceBelow = bottomLimit - rect.bottom;
+        const placeAbove = spaceBelow < TRACK_MENU_ESTIMATED_HEIGHT_PX;
+        const top = placeAbove
+          ? Math.max(
+              minTop + TRACK_MENU_ESTIMATED_HEIGHT_PX,
+              Math.min(rect.top - TRACK_MENU_GAP_PX, bottomLimit)
+            )
+          : Math.max(
+              minTop,
+              Math.min(rect.bottom + TRACK_MENU_GAP_PX, bottomLimit - TRACK_MENU_ESTIMATED_HEIGHT_PX)
+            );
+        const maxRight = Math.max(
+          TRACK_MENU_MARGIN_PX,
+          window.innerWidth - TRACK_MENU_MIN_WIDTH_PX - TRACK_MENU_MARGIN_PX
+        );
+        const unclampedRight = window.innerWidth - rect.right;
+        const right = Math.min(Math.max(unclampedRight, TRACK_MENU_MARGIN_PX), maxRight);
         setTrackMenuPosition({
-          top: rect.bottom + 6,
-          right: window.innerWidth - rect.right
+          top,
+          right,
+          up: placeAbove
         });
         setTrackMenuPath(path);
       },

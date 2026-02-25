@@ -19,7 +19,7 @@ interface AlbumDetailViewProps {
   onPlayAlbum: () => void;
   onPlayTrack: (track: TrackSummary) => void;
   trackMenuPath: string | null;
-  trackMenuPosition: { top: number; right: number } | null;
+  trackMenuPosition: { top: number; right: number; up: boolean } | null;
   onToggleMenu: (path: string, target: Element) => void;
   onMenuPlay: (path: string) => void;
   onMenuQueue: (path: string) => void;
@@ -235,7 +235,11 @@ export default function AlbumDetailView({
                   ? (isPaused ? Play : Pause)
                   : Play;
                 const menuStyle = menuOpen && trackMenuPosition
-                  ? { top: trackMenuPosition.top, right: trackMenuPosition.right }
+                  ? {
+                      top: trackMenuPosition.top,
+                      right: trackMenuPosition.right,
+                      transform: trackMenuPosition.up ? "translateY(-100%)" : undefined
+                    }
                   : undefined;
                 return (
                   <div key={track.id} className="album-track-block">

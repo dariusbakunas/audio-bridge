@@ -703,7 +703,12 @@
 
 .track-menu {
   position: fixed;
-  min-width: 220px;
+  min-width: 0;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   padding: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
@@ -712,12 +717,14 @@
 }
 
 .track-menu-item {
+  display: block;
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
   color: var(--ink);
   text-align: left;
   padding: 8px 10px;
+  white-space: nowrap;
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
