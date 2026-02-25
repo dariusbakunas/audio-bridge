@@ -70,6 +70,12 @@ export default function AlbumDetailView({
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
   const albumNotes = albumProfile?.notes?.text?.trim() ?? "";
+  const hasMultipleDiscs =
+    new Set(
+      tracks
+        .map((track) => track.disc_number)
+        .filter((disc): disc is number => disc !== null && disc !== undefined)
+    ).size > 1;
   const displayYear = album?.original_year ?? album?.year ?? null;
   const editionLabel = album?.edition_label?.trim() ?? "";
   const editionYear = album?.edition_year ?? null;
@@ -228,7 +234,7 @@ export default function AlbumDetailView({
               {tracks.map((track, index) => {
                 const prevDisc = index > 0 ? tracks[index - 1]?.disc_number ?? null : null;
                 const disc = track.disc_number ?? null;
-                const showDiscHeader = disc !== null && disc !== prevDisc;
+                const showDiscHeader = hasMultipleDiscs && disc !== null && disc !== prevDisc;
                 const menuOpen = trackMenuPath === track.path;
                 const isNowPlaying = nowPlayingPath ? track.path === nowPlayingPath : false;
                 const PlaybackIcon = isNowPlaying
