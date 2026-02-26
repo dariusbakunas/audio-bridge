@@ -44,6 +44,13 @@
   - `/sessions/{id}/status/stream`
   - `/sessions/{id}/queue/stream`
 
+## Session volume (2026-02)
+- Session-scoped volume endpoints:
+  - `GET /sessions/{id}/volume`
+  - `POST /sessions/{id}/volume` (`{ value: 0..100 }`)
+  - `POST /sessions/{id}/mute` (`{ muted: bool }`)
+- Volume support is provider-specific (bridge supports it; others may report unavailable).
+
 ## UI queue semantics (2026-02)
 - `/sessions/{id}/queue/stream` refreshes on `StatusChanged` events because queue order depends on `now_playing`.
 - Queue items include:
@@ -67,3 +74,12 @@
 - Playback end reason exposed via `BridgeStatus.end_reason`:
   - `eof`, `error`, `stopped`
 - Hub auto-advance only on `end_reason = eof`.
+
+## Bridge/Cast status notes (2026-02)
+- Bridge-side volume/mute endpoints:
+  - `GET /volume`
+  - `POST /volume`
+  - `POST /mute`
+- Cast device status can arrive sparsely/in bursts; session status SSE applies cast-only periodic refresh (1s) to keep UI responsive.
+- Cast session auto-advance should only trigger on explicit `idleReason=FINISHED` (`end_reason=eof`), not generic idle transitions.
+- Bridge elapsed/status sample-rate must reflect actual stream rate (not nominal hardware rate) to keep `elapsed_ms`/seek restoration accurate.
