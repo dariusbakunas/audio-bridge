@@ -19,10 +19,14 @@
 - Tests (workspace): `cargo test`
 - Clean: `make clean`
 - Live integration tests (MusicBrainz + Cover Art Archive): `cargo test -p audio-hub-server live_ -- --ignored --nocapture`
+- Docker image (hub server): `docker build -f Dockerfile.server -t audio-hub-server:local .`
+- Docker compose (hub server): `AUDIO_HUB_MEDIA_DIR=/path/to/music docker compose up --build -d`
+- Docker Hub multi-arch publish: push tag `vX.Y.Z` or `X.Y.Z` (workflow `.github/workflows/docker-image.yml`, requires `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` secrets)
 
 ## Run (quick start)
 - Receiver (Pi/target): `cargo run --release -p bridge -- --http-bind 0.0.0.0:5556 listen`
 - Server (host): `cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/audio-hub-server/config.example.toml`
+- Server (container): `docker run --network host -v $(pwd)/crates/audio-hub-server/config.example.toml:/config/config.toml -v /path/to/music:/music audio-hub-server:local`
 
 ## Web UI
 - Dev: `cd web-ui && npm install && npm run dev`
@@ -40,6 +44,7 @@
 ## Session model (2026-02)
 - Playback control is session-scoped (`/sessions/{id}/...`), not global.
 - Outputs are locked per session. An output already locked by one session cannot be selected by another without `force`.
+- `active_output` config startup default is removed; output selection should happen via session APIs/UI.
 - Session status/queue streams:
   - `/sessions/{id}/status/stream`
   - `/sessions/{id}/queue/stream`

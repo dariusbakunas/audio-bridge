@@ -1,0 +1,11 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: audio-hub-server:local
+    network_mode: host
+    volumes:
+      - ./crates/audio-hub-server/config.example.toml:/config/config.toml
+      - ${AUDIO_HUB_MEDIA_DIR:-./music}:/music
+    restart: unless-stopped

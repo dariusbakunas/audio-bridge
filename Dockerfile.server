@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:20-bookworm-slim AS web-ui-builder
+WORKDIR /src/web-ui
+COPY web-ui/package*.json ./
+RUN npm ci
+COPY web-ui/ ./
+RUN npm run build
+
+FROM rust:1.88-bookworm AS rust-builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release -p audio-hub-server
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=rust-builder /src/target/release/audio-hub-server /usr/local/bin/audio-hub-server
+COPY --from=web-ui-builder /src/web-ui/dist ./web-ui/dist
+COPY crates/audio-hub-server/config.example.toml /app/config.example.toml
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/audio-hub-server"]
+CMD ["--bind", "0.0.0.0:8080", "--config", "/config/config.toml"]

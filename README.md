@@ -155,6 +155,56 @@ cargo run --release -p audio-hub-server -- --bind 0.0.0.0:8080 --config crates/a
 
 Then open the web UI at `http://<SERVER_IP>:8080/` (or `https://...` when TLS is enabled).
 
+## Docker (audio-hub-server)
+
+Build the image:
+
+```bash
+docker build -f Dockerfile.server -t audio-hub-server:local .
+```
+
+Run it (mount your config + media library):
+
+```bash
+docker run --rm \
+  --network host \
+  -v "$(pwd)/crates/audio-hub-server/config.example.toml:/config/config.toml" \
+  -v "/path/to/music:/music" \
+  audio-hub-server:local
+```
+
+Or use compose:
+
+```bash
+export AUDIO_HUB_MEDIA_DIR=/path/to/music
+docker compose up --build -d
+```
+
+Notes:
+- `docker run` example uses host networking, so no `-p` flag is needed.
+- `--config /config/config.toml` is required by the server entrypoint.
+- The image includes `web-ui/dist`, so the dashboard is served at `/` out of the box.
+- Mount config read/write so UI-persisted output settings can be written back to config.
+- Update the mounted config so `media_dir` points to the container path (for example `/music`).
+- Mount media read/write so the server can write metadata DB/artifacts and album marker files.
+- Compose uses `network_mode: host` (no port mapping required in `docker-compose.yml`).
+- Host networking is intended for Linux hosts; Docker Desktop (macOS/Windows) has limitations.
+
+### Docker Hub publish (GitHub Actions)
+
+The repository includes `.github/workflows/docker-image.yml` for multi-platform image publishing (`linux/amd64`, `linux/arm64`) to Docker Hub on version tags.
+
+Configure these GitHub Actions repository secrets:
+- `DOCKERHUB_USERNAME` (your Docker Hub username)
+- `DOCKERHUB_TOKEN` (Docker Hub access token)
+
+Then push a version tag (for example `v0.12.0` or `0.12.0`) to publish:
+
+```bash
+git tag v0.12.0
+git push origin v0.12.0
+```
+
 ## Web UI (experimental)
 
 The hub server can serve a lightweight web dashboard if `web-ui/dist` is present next to the repo (or next to the binary).
@@ -214,7 +264,7 @@ VITE_API_BASE=https://<SERVER_IP>:8443 npm run tauri:build
 
 ## Server config
 
-Use a TOML config to define the media path, outputs, and default output:
+Use a TOML config to define the media path and outputs:
 
 ```toml
 # Example audio-hub-server config
@@ -224,7 +274,6 @@ Use a TOML config to define the media path, outputs, and default output:
 # tls_cert: path to a PEM-encoded TLS certificate (optional)
 # tls_key: path to a PEM-encoded TLS private key (optional)
 # bridges: list of bridge devices to connect to
-# active_output: output id to use by default (bridge:{bridge_id}:{device_id})
 # local_outputs: enable local outputs on the hub host
 # local_id/name/device: optional overrides for local outputs
 # musicbrainz: optional metadata enrichment settings (requires user_agent)
@@ -233,7 +282,6 @@ Use a TOML config to define the media path, outputs, and default output:
 bind = "0.0.0.0:8443"
 public_base_url = "https://192.168.1.10:8443"
 media_dir = "/srv/music"
-active_output = "bridge:living-room:Built-in Output"
 # local_outputs = true
 # local_id = "local"
 # local_name = "Local Host"

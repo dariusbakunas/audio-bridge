@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+target
+web-ui/node_modules
+web-ui/dist
+metadata.sqlite
+certs
+docs
+*.log
+.DS_Store
