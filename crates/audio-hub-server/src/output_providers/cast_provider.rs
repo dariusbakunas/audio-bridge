@@ -237,14 +237,17 @@ impl OutputProvider for CastProvider {
         output_id: &str,
     ) -> Result<(), ProviderError> {
         let cmd_tx = Self::ensure_worker_for_output(state, output_id)?;
+        let has_session_owner = crate::session_registry::output_lock_owner(output_id).is_some();
 
         {
             let player = state.providers.bridge.player.lock().unwrap();
             let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Quit);
         }
-        let resume_info = {
+        let resume_info = if has_session_owner {
+            None
+        } else {
             let status = state.playback.manager.status().inner().lock().unwrap();
-            (status.now_playing.clone(), status.elapsed_ms, status.paused)
+            Some((status.now_playing.clone(), status.elapsed_ms, status.paused))
         };
         {
             let mut player = state.providers.bridge.player.lock().unwrap();
@@ -256,21 +259,22 @@ impl OutputProvider for CastProvider {
             bridges.active_bridge_id = None;
         }
 
-        if let (Some(path), Some(elapsed_ms)) = (resume_info.0, resume_info.1) {
-            let ext_hint = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            let start_paused = resume_info.2;
-            let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
-                crate::bridge::BridgeCommand::Play {
-                    path,
-                    ext_hint,
-                    seek_ms: Some(elapsed_ms),
-                    start_paused,
-                },
-            );
+        if let Some((now_playing, elapsed_ms, paused)) = resume_info {
+            if let (Some(path), Some(elapsed_ms)) = (now_playing, elapsed_ms) {
+                let ext_hint = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let _ = state.providers.bridge.player.lock().unwrap().cmd_tx.send(
+                    crate::bridge::BridgeCommand::Play {
+                        path,
+                        ext_hint,
+                        seek_ms: Some(elapsed_ms),
+                        start_paused: paused,
+                    },
+                );
+            }
         }
         Ok(())
     }

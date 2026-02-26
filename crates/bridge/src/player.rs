@@ -404,7 +404,7 @@ fn play_one_http(
             s.end_reason = None;
             s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
             s.device = device.description().ok().map(|d| d.to_string());
-            s.sample_rate = Some(nominal_rate.unwrap_or(stream_config.sample_rate));
+            s.sample_rate = Some(status_sample_rate(stream_config.sample_rate, nominal_rate));
             s.channels = Some(src_spec.channels.count() as u16);
             s.duration_ms = duration_ms;
             s.source_codec = source_info.codec.clone();
@@ -499,6 +499,13 @@ fn played_frames_from_seek(
     Some(target_ms.saturating_mul(sample_rate_hz as u64) / 1000)
 }
 
+fn status_sample_rate(stream_sample_rate: u32, _nominal_rate: Option<u32>) -> u32 {
+    // Elapsed time is derived from played_frames / sample_rate. We must use the
+    // actual stream sample rate (not hardware nominal rate) to keep elapsed_ms
+    // and seek restoration accurate.
+    stream_sample_rate
+}
+
 /// Infer a file extension from the URL path if present.
 fn infer_ext_from_url(url: &str) -> Option<String> {
     let tail = url.split('?').next().unwrap_or(url);
@@ -574,5 +581,11 @@ mod tests {
     #[test]
     fn played_frames_from_seek_returns_none_for_zero_rate() {
         assert!(played_frames_from_seek(1_000, Some(2_000), 0).is_none());
+    }
+
+    #[test]
+    fn status_sample_rate_prefers_stream_rate_over_nominal() {
+        assert_eq!(status_sample_rate(44_100, Some(96_000)), 44_100);
+        assert_eq!(status_sample_rate(48_000, None), 48_000);
     }
 }

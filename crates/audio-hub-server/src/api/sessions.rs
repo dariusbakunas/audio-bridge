@@ -391,10 +391,11 @@ pub async fn sessions_select_output(
     }
 
     if let Some(path) = resume_path {
+        let resume_seek_ms = resume_elapsed_ms.filter(|ms| *ms > 0);
         if let Err(err) = state
             .output
             .session_playback
-            .play_path(&state, &session_id, path)
+            .play_path_with_options(&state, &session_id, path, resume_seek_ms, resume_paused)
             .await
         {
             tracing::warn!(
@@ -403,30 +404,6 @@ pub async fn sessions_select_output(
                 error = ?err,
                 "session output switch playback migration failed"
             );
-        } else {
-            if let Some(ms) = resume_elapsed_ms.filter(|ms| *ms > 0) {
-                if let Err(err) = state.output.session_playback.seek(&state, &session_id, ms).await
-                {
-                    tracing::warn!(
-                        session_id = %session_id,
-                        output_id = %output_id,
-                        elapsed_ms = ms,
-                        error = ?err,
-                        "session output switch seek restore failed"
-                    );
-                }
-            }
-            if resume_paused {
-                if let Err(err) = state.output.session_playback.pause_toggle(&state, &session_id).await
-                {
-                    tracing::warn!(
-                        session_id = %session_id,
-                        output_id = %output_id,
-                        error = ?err,
-                        "session output switch pause restore failed"
-                    );
-                }
-            }
         }
     }
 

@@ -187,6 +187,8 @@ impl SessionPlaybackManager {
         session_id: &str,
         target: BridgeTarget,
         path: PathBuf,
+        seek_ms: Option<u64>,
+        start_paused: bool,
     ) -> Result<String, SessionPlaybackError> {
         let client = BridgeTransportClient::new_with_base(
             target.http_addr,
@@ -236,8 +238,8 @@ impl SessionPlaybackManager {
                     Some(ext_hint.as_str())
                 },
                 title.as_deref(),
-                None,
-                false,
+                seek_ms,
+                start_paused,
             )
             .await
             .map_err(|err| SessionPlaybackError::DispatchFailed {
@@ -255,6 +257,19 @@ impl SessionPlaybackManager {
         session_id: &str,
         path: PathBuf,
     ) -> Result<String, SessionPlaybackError> {
+        self
+            .play_path_with_options(state, session_id, path, None, false)
+            .await
+    }
+
+    pub async fn play_path_with_options(
+        &self,
+        state: &AppState,
+        session_id: &str,
+        path: PathBuf,
+        seek_ms: Option<u64>,
+        start_paused: bool,
+    ) -> Result<String, SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
         if let Some(tx) = self.cast_worker(state, &output_id) {
             let ext_hint = path
@@ -265,8 +280,8 @@ impl SessionPlaybackManager {
             tx.send(BridgeCommand::Play {
                 path,
                 ext_hint,
-                seek_ms: None,
-                start_paused: false,
+                seek_ms,
+                start_paused,
             })
             .map_err(|err| SessionPlaybackError::DispatchFailed {
                 session_id: session_id.to_string(),
@@ -278,7 +293,7 @@ impl SessionPlaybackManager {
         }
         if let Some(target) = self.bridge_target(state, &output_id) {
             return self
-                .bridge_play_path(state, session_id, target, path)
+                .bridge_play_path(state, session_id, target, path, seek_ms, start_paused)
                 .await;
         }
 
@@ -324,23 +339,22 @@ impl SessionPlaybackManager {
                     .ok()
                     .and_then(|cache| cache.get(bridge_id).cloned())
             });
-            let status = if let Some(cached) = cached_status {
-                cached
-            } else {
-                let fetched = BridgeTransportClient::new(target.http_addr)
-                    .status()
-                    .await
-                    .map_err(|err| SessionPlaybackError::StatusFailed {
-                        session_id: session_id.to_string(),
-                        output_id: target.output_id.clone(),
-                        reason: format!("status_failed {err:#}"),
-                    })?;
+            let live_status = BridgeTransportClient::new(target.http_addr).status().await.ok();
+            let status = if let Some(fetched) = live_status {
                 if let Some(bridge_id) = bridge_id.as_ref() {
                     if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
                         cache.insert(bridge_id.clone(), fetched.clone());
                     }
                 }
                 fetched
+            } else if let Some(cached) = cached_status {
+                cached
+            } else {
+                return Err(SessionPlaybackError::StatusFailed {
+                    session_id: session_id.to_string(),
+                    output_id: target.output_id.clone(),
+                    reason: "status_failed bridge status unavailable".to_string(),
+                });
             };
             return Ok(self.build_bridge_status_response(
                 state,
