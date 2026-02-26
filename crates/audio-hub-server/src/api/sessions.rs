@@ -58,6 +58,7 @@ pub struct SessionSeekBody {
 }
 
 const SESSION_STATUS_PING_INTERVAL: Duration = Duration::from_secs(15);
+const SESSION_STATUS_CAST_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 struct SessionStatusStreamState {
     state: web::Data<AppState>,
@@ -651,7 +652,7 @@ pub async fn sessions_status_stream(
     let mut pending = VecDeque::new();
     pending.push_back(session_sse_event("status", &initial_json));
 
-    let mut interval = tokio::time::interval(SESSION_STATUS_PING_INTERVAL);
+    let mut interval = tokio::time::interval(SESSION_STATUS_CAST_REFRESH_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let receiver = state.events.subscribe();
 
@@ -673,7 +674,9 @@ pub async fn sessions_status_stream(
 
                 let mut refresh = false;
                 match recv_session_signal(&mut ctx.receiver, &mut ctx.interval).await {
-                    SessionStreamSignal::Tick => {}
+                    SessionStreamSignal::Tick => {
+                        refresh = session_should_periodic_refresh(&ctx.session_id);
+                    }
                     SessionStreamSignal::Event(result) => match result {
                         Ok(HubEvent::StatusChanged) => refresh = true,
                         Ok(HubEvent::OutputsChanged) => refresh = true,
@@ -894,6 +897,13 @@ fn require_session(session_id: &str) -> Result<(), HttpResponse> {
     } else {
         Err(HttpResponse::NotFound().body("session not found"))
     }
+}
+
+fn session_should_periodic_refresh(session_id: &str) -> bool {
+    crate::session_registry::get_session(session_id)
+        .and_then(|s| s.active_output_id)
+        .map(|id| id.starts_with("cast:"))
+        .unwrap_or(false)
 }
 
 fn is_local_session(session_id: &str) -> bool {

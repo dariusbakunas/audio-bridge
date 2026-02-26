@@ -2548,6 +2548,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       {!showGate ? (
         <PlayerBar
           status={status}
+          updatedAt={updatedAt}
           nowPlayingCover={nowPlayingCover}
           nowPlayingCoverFailed={nowPlayingCoverFailed}
           showSignalAction={!isLocalSession}

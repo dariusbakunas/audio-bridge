@@ -157,6 +157,8 @@ pub fn spawn_cast_worker(
         let mut last_status_poll = Instant::now();
         let mut last_duration_ms: Option<u64> = None;
         let mut session_auto_advance_in_flight = false;
+        let mut pending_pause_toggle = false;
+        let mut stop_in_flight = false;
 
         let _ = conn.send_json(RECEIVER_ID, NAMESPACE_CONNECTION, &json!({ "type": "CONNECT" }));
 
@@ -166,23 +168,44 @@ pub fn spawn_cast_worker(
                     BridgeCommand::Quit => break,
                     BridgeCommand::PauseToggle => {
                         if let Some(session) = session.as_ref() {
-                            let paused = status.inner().lock().ok().map(|s| s.paused).unwrap_or(false);
-                            let cmd_type = if paused { "PLAY" } else { "PAUSE" };
                             if let Some(media_session_id) = session.media_session_id {
+                                let paused = cast_current_paused(&output_id, &cast_statuses, &status);
+                                tracing::info!(
+                                    output_id = %output_id,
+                                    cast_id = %device.id,
+                                    transport_id = %session.transport_id,
+                                    media_session_id,
+                                    paused,
+                                    "cast pause toggle requested"
+                                );
+                                send_cast_pause_toggle(
+                                    &mut conn,
+                                    &session.transport_id,
+                                    media_session_id,
+                                    paused,
+                                    &mut request_id,
+                                );
+                            } else {
+                                pending_pause_toggle = true;
+                                tracing::info!(
+                                    output_id = %output_id,
+                                    cast_id = %device.id,
+                                    transport_id = %session.transport_id,
+                                    "cast pause toggle queued: media session not ready"
+                                );
                                 let _ = conn.send_json(
                                     &session.transport_id,
                                     NAMESPACE_MEDIA,
                                     &json!({
-                                        "type": cmd_type,
+                                        "type": "GET_STATUS",
                                         "requestId": next_request_id(&mut request_id),
-                                        "mediaSessionId": media_session_id,
                                     }),
                                 );
                             }
-                            status.on_pause_toggle();
                         }
                     }
                     BridgeCommand::Stop => {
+                        stop_in_flight = true;
                         if let Some(session) = session.as_ref() {
                             if let Some(media_session_id) = session.media_session_id {
                                 let _ = conn.send_json(
@@ -199,6 +222,7 @@ pub fn spawn_cast_worker(
                         current_path = None;
                     }
                     BridgeCommand::StopSilent => {
+                        stop_in_flight = true;
                         if let Some(session) = session.as_ref() {
                             if let Some(media_session_id) = session.media_session_id {
                                 let _ = conn.send_json(
@@ -232,7 +256,7 @@ pub fn spawn_cast_worker(
                         }
                     }
                     BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
-                        current_path = Some(path.clone());
+                        stop_in_flight = false;
                         pending_play = Some((path, ext_hint, seek_ms, start_paused));
                         ensure_session(&mut conn, &mut session, &device, &mut request_id);
                     }
@@ -243,6 +267,7 @@ pub fn spawn_cast_worker(
 
             if let Some((path, ext_hint, seek_ms, start_paused)) = pending_play.take() {
                 if let Some(session) = session.as_ref() {
+                    current_path = Some(path.clone());
                     let url = build_stream_url_for(&path, &public_base_url, metadata.as_ref());
                     let content_type = content_type_for_ext(&ext_hint);
                     let meta = track_metadata(&path, metadata.as_ref());
@@ -266,7 +291,7 @@ pub fn spawn_cast_worker(
                 let _ = conn.send_json(RECEIVER_ID, NAMESPACE_HEARTBEAT, &json!({ "type": "PING" }));
                 last_ping = Instant::now();
             }
-            if last_status_poll.elapsed() > Duration::from_millis(1000) {
+            if last_status_poll.elapsed() > Duration::from_millis(500) {
                 if let Some(session) = session.as_ref() {
                     let _ = conn.send_json(
                         &session.transport_id,
@@ -298,6 +323,8 @@ pub fn spawn_cast_worker(
                         &mut session_auto_advance_in_flight,
                         &mut request_id,
                         &bridge_state,
+                        &mut pending_pause_toggle,
+                        &mut stop_in_flight,
                     );
                 }
                 Ok(None) => {}
@@ -365,6 +392,8 @@ fn handle_message(
     session_auto_advance_in_flight: &mut bool,
     request_id: &mut i64,
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
+    pending_pause_toggle: &mut bool,
+    stop_in_flight: &mut bool,
 ) {
     let is_active = is_active_cast_output(bridge_state, &device.id);
     if msg.payload_type != proto::cast_message::PayloadType::String as i32 {
@@ -414,9 +443,47 @@ fn handle_message(
         }
         NAMESPACE_MEDIA => {
             if msg_type == "MEDIA_STATUS" {
+                tracing::debug!(
+                    output_id = %output_id,
+                    cast_id = %device.id,
+                    active_output = is_active,
+                    pending_pause_toggle = *pending_pause_toggle,
+                    "cast media status received"
+                );
                 if let Some(status_info) = parse_media_status(&value) {
+                    tracing::debug!(
+                        output_id = %output_id,
+                        cast_id = %device.id,
+                        player_state = ?status_info.player_state,
+                        idle_reason = ?status_info.idle_reason,
+                        media_session_id = ?status_info.media_session_id,
+                        current_time_s = ?status_info.current_time_s,
+                        duration_s = ?status_info.duration_s,
+                        "cast media status parsed"
+                    );
                     if let Some(sess) = session.as_mut() {
                         sess.media_session_id = status_info.media_session_id.or(sess.media_session_id);
+                        if *pending_pause_toggle {
+                            if let Some(media_session_id) = sess.media_session_id {
+                                let paused = cast_current_paused(output_id, cast_statuses, status);
+                                tracing::info!(
+                                    output_id = %output_id,
+                                    cast_id = %device.id,
+                                    transport_id = %sess.transport_id,
+                                    media_session_id,
+                                    paused,
+                                    "cast flushing queued pause toggle"
+                                );
+                                send_cast_pause_toggle(
+                                    conn,
+                                    &sess.transport_id,
+                                    media_session_id,
+                                    paused,
+                                    request_id,
+                                );
+                                *pending_pause_toggle = false;
+                            }
+                        }
                     }
                     apply_media_status(
                         device,
@@ -431,12 +498,59 @@ fn handle_message(
                         cast_statuses,
                         cast_status_updated_at,
                         session_auto_advance_in_flight,
+                        stop_in_flight,
                     );
                 }
             }
         }
         _ => {}
     }
+}
+
+fn send_cast_pause_toggle(
+    conn: &mut CastConnection,
+    transport_id: &str,
+    media_session_id: i64,
+    paused: bool,
+    request_id: &mut i64,
+) {
+    let cmd_type = if paused { "PLAY" } else { "PAUSE" };
+    tracing::debug!(
+        transport_id = %transport_id,
+        media_session_id,
+        paused,
+        cmd_type,
+        "cast pause command dispatch"
+    );
+    let _ = conn.send_json(
+        transport_id,
+        NAMESPACE_MEDIA,
+        &json!({
+            "type": cmd_type,
+            "requestId": next_request_id(request_id),
+            "mediaSessionId": media_session_id,
+        }),
+    );
+    let _ = conn.send_json(
+        transport_id,
+        NAMESPACE_MEDIA,
+        &json!({
+            "type": "GET_STATUS",
+            "requestId": next_request_id(request_id),
+        }),
+    );
+}
+
+fn cast_current_paused(
+    output_id: &str,
+    cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
+    status: &StatusStore,
+) -> bool {
+    cast_statuses
+        .lock()
+        .ok()
+        .and_then(|map| map.get(output_id).map(|s| s.paused))
+        .unwrap_or_else(|| status.inner().lock().ok().map(|s| s.paused).unwrap_or(false))
 }
 
 fn is_active_cast_output(
@@ -461,10 +575,23 @@ fn apply_media_status(
     cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
     cast_status_updated_at: &Arc<Mutex<std::collections::HashMap<String, Instant>>>,
     session_auto_advance_in_flight: &mut bool,
+    stop_in_flight: &mut bool,
 ) {
-    let had_current_path = current_path.is_some();
     let is_idle = matches!(info.player_state.as_deref(), Some("IDLE"));
-    let should_clear = is_idle && info.idle_reason.is_some();
+    let end_reason = match info.idle_reason.as_deref() {
+        Some("FINISHED") => Some(PlaybackEndReason::Eof),
+        Some("CANCELLED") => Some(PlaybackEndReason::Stopped),
+        Some("ERROR") => Some(PlaybackEndReason::Error),
+        Some("STOPPED") => Some(PlaybackEndReason::Stopped),
+        _ => None,
+    };
+    let should_clear = is_idle
+        && match end_reason {
+            Some(PlaybackEndReason::Eof) => true,
+            Some(PlaybackEndReason::Stopped) => *stop_in_flight,
+            Some(PlaybackEndReason::Error) => true,
+            None => false,
+        };
     let (elapsed_ms, duration_ms) = if should_clear {
         (None, None)
     } else {
@@ -474,20 +601,18 @@ fn apply_media_status(
         )
     };
 
-    let end_reason = match info.idle_reason.as_deref() {
-        Some("FINISHED") => Some(PlaybackEndReason::Eof),
-        Some("CANCELLED") => Some(PlaybackEndReason::Stopped),
-        Some("ERROR") => Some(PlaybackEndReason::Error),
-        Some("STOPPED") => Some(PlaybackEndReason::Stopped),
-        _ => None,
-    };
-
     let mut remote = BridgeStatus::default();
     if should_clear {
         *current_path = None;
     }
     remote.now_playing = current_path.as_ref().map(|path| path.to_string_lossy().to_string());
-    remote.paused = matches!(info.player_state.as_deref(), Some("PAUSED"));
+    let prior_paused = status
+        .inner()
+        .lock()
+        .ok()
+        .map(|s| s.paused)
+        .unwrap_or(false);
+    remote.paused = cast_paused_state(info.player_state.as_deref(), should_clear, prior_paused);
     remote.elapsed_ms = elapsed_ms;
     remote.duration_ms = duration_ms;
     remote.device = Some(device.name.clone());
@@ -502,10 +627,12 @@ fn apply_media_status(
     let bound_session_id = crate::session_registry::output_lock_owner(output_id);
     if !is_idle {
         *session_auto_advance_in_flight = false;
+        *stop_in_flight = false;
     }
-    let idle_without_reason = is_idle && end_reason.is_none();
-    let should_session_advance = end_reason == Some(PlaybackEndReason::Eof)
-        || (idle_without_reason && had_current_path);
+    if should_clear {
+        *stop_in_flight = false;
+    }
+    let should_session_advance = end_reason == Some(PlaybackEndReason::Eof);
     if should_session_advance && !*session_auto_advance_in_flight {
         if let Some(session_id) = bound_session_id.as_deref() {
             if let Ok(Some(next_path)) = crate::session_registry::queue_next_path(session_id) {
@@ -600,6 +727,21 @@ fn parse_media_status(payload: &Value) -> Option<MediaStatus> {
         duration_s,
         idle_reason,
     })
+}
+
+fn cast_paused_state(player_state: Option<&str>, should_clear: bool, prior_paused: bool) -> bool {
+    match player_state {
+        Some("PAUSED") => true,
+        Some("PLAYING") | Some("BUFFERING") => false,
+        Some("IDLE") => {
+            if should_clear {
+                true
+            } else {
+                prior_paused
+            }
+        }
+        _ => prior_paused,
+    }
 }
 
 fn load_payload(
@@ -750,5 +892,20 @@ impl ServerCertVerifier for NoCertificateVerification {
             SignatureScheme::RSA_PKCS1_SHA384,
             SignatureScheme::RSA_PKCS1_SHA512,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cast_paused_state;
+
+    #[test]
+    fn cast_paused_state_handles_idle_transitions() {
+        assert!(cast_paused_state(Some("PAUSED"), false, false));
+        assert!(!cast_paused_state(Some("PLAYING"), false, true));
+        assert!(!cast_paused_state(Some("BUFFERING"), false, true));
+        assert!(!cast_paused_state(Some("IDLE"), false, false));
+        assert!(cast_paused_state(Some("IDLE"), false, true));
+        assert!(cast_paused_state(Some("IDLE"), true, false));
     }
 }

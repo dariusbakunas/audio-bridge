@@ -5,6 +5,7 @@ import PlayerControls from "./PlayerControls";
 
 interface PlayerBarProps {
   status: StatusResponse | null;
+  updatedAt: Date | null;
   nowPlayingCover: string | null;
   nowPlayingCoverFailed: boolean;
   placeholderCover: string;
@@ -36,6 +37,7 @@ interface PlayerBarProps {
 
 export default function PlayerBar({
   status,
+  updatedAt,
   nowPlayingCover,
   nowPlayingCoverFailed,
   placeholderCover,
@@ -68,6 +70,7 @@ export default function PlayerBar({
   const [compactVolume, setCompactVolume] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.matchMedia(compactQuery).matches : false
   );
+  const [clockMs, setClockMs] = useState<number>(() => Date.now());
   const [volumePopoverOpen, setVolumePopoverOpen] = useState<boolean>(false);
   const [volumeDragging, setVolumeDragging] = useState<boolean>(false);
   const volumeRootRef = useRef<HTMLDivElement | null>(null);
@@ -110,6 +113,18 @@ export default function PlayerBar({
     };
   }, [volumePopoverOpen]);
 
+  useEffect(() => {
+    if (!status?.now_playing || status?.paused) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setClockMs(Date.now());
+    }, 500);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [status?.now_playing, status?.paused]);
+
   const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
@@ -136,6 +151,18 @@ export default function PlayerBar({
   };
 
   const displayedVolume = volumeDragging ? volumeDraft : volumeValue;
+  const displayedElapsedMs = (() => {
+    if (status?.elapsed_ms === null || status?.elapsed_ms === undefined) {
+      return status?.elapsed_ms ?? null;
+    }
+    if (status?.paused || !updatedAt) {
+      return status.elapsed_ms;
+    }
+    const base = status.elapsed_ms;
+    const extra = Math.max(0, clockMs - updatedAt.getTime());
+    const advanced = base + extra;
+    return status.duration_ms ? Math.min(advanced, status.duration_ms) : advanced;
+  })();
   return (
     <div className="player-bar">
       <div className="player-progress">
@@ -144,8 +171,8 @@ export default function PlayerBar({
           className="player-progress-fill"
           style={{
             width:
-              status?.duration_ms && status?.elapsed_ms
-                ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
+              status?.duration_ms && displayedElapsedMs !== null && displayedElapsedMs !== undefined
+                ? `${Math.min(100, (displayedElapsedMs / status.duration_ms) * 100)}%`
                 : "0%"
           }}
         />
@@ -153,8 +180,8 @@ export default function PlayerBar({
           className="player-progress-handle"
           style={{
             left:
-              status?.duration_ms && status?.elapsed_ms
-                ? `${Math.min(100, (status.elapsed_ms / status.duration_ms) * 100)}%`
+              status?.duration_ms && displayedElapsedMs !== null && displayedElapsedMs !== undefined
+                ? `${Math.min(100, (displayedElapsedMs / status.duration_ms) * 100)}%`
                 : "0%"
           }}
         />
@@ -218,7 +245,7 @@ export default function PlayerBar({
           isPaused={showPlayIcon}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasItems}
-          elapsedLabel={formatMs(status?.elapsed_ms)}
+          elapsedLabel={formatMs(displayedElapsedMs)}
           durationLabel={formatMs(status?.duration_ms)}
           onPrimaryAction={onPrimaryAction}
           onPrevious={onPrevious}
