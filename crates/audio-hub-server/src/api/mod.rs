@@ -15,9 +15,8 @@ pub use library::{
     list_library,
     rescan_library,
     rescan_track,
-    stream_track,
     stream_track_id,
-    transcode_track,
+    transcode_track_id,
 };
 pub use logs::{logs_clear, LogsClearResponse};
 pub use local_playback::{
@@ -34,7 +33,6 @@ pub use metadata::{
     albums_list,
     albums_metadata,
     albums_metadata_update,
-    art_for_track,
     artist_image_clear,
     artist_image_set,
     artist_profile,
@@ -186,7 +184,7 @@ mod tests {
             .await;
 
         let req = test::TestRequest::get()
-            .uri("/tracks/metadata?path=missing.flac")
+            .uri("/tracks/metadata?track_id=999999")
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);

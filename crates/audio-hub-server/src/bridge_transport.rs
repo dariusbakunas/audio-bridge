@@ -285,11 +285,10 @@ impl BridgeTransportClient {
             .public_base_url
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("public base url not configured"))?;
-        let url = if let Some(track_id) = self.track_id_for_path(path) {
-            build_stream_url_for_id(track_id, base_url)
-        } else {
-            build_stream_url_for(path, base_url)
-        };
+        let track_id = self
+            .track_id_for_path(path)
+            .ok_or_else(|| anyhow::anyhow!("track id not found for path {}", path.display()))?;
+        let url = build_stream_url_for_id(track_id, base_url);
         let endpoint = format!("http://{}/play", self.http_addr);
         let payload = HttpPlayRequest {
             url: &url,
@@ -430,15 +429,6 @@ impl BridgeTransportClient {
     }
 }
 
-fn build_stream_url_for(path: &PathBuf, public_base_url: &str) -> String {
-    let path_str = path.to_string_lossy();
-    let encoded = urlencoding::encode(&path_str);
-    format!(
-        "{}/stream?path={encoded}",
-        public_base_url.trim_end_matches('/')
-    )
-}
-
 fn build_stream_url_for_id(track_id: i64, public_base_url: &str) -> String {
     format!(
         "{}/stream/track/{track_id}",
@@ -451,12 +441,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_stream_url_for_encodes_and_trims() {
-        let path = PathBuf::from("/music/My Song.flac");
-        let url = build_stream_url_for(&path, "http://host/");
-        assert_eq!(
-            url,
-            "http://host/stream?path=%2Fmusic%2FMy%20Song.flac"
-        );
+    fn build_stream_url_for_id_uses_track_endpoint() {
+        let url = build_stream_url_for_id(42, "http://host/");
+        assert_eq!(url, "http://host/stream/track/42");
     }
 }

@@ -40,11 +40,11 @@ export function usePlaybackActions({
   }, [rescanBusy, setRescanBusy, setError]);
 
   const handleRescanTrack = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       if (rescanBusy) return;
       setRescanBusy(true);
       try {
-        await postJson("/library/rescan/track", { path });
+        await postJson("/library/rescan/track", { track_id: trackId });
         setError(null);
       } catch (err) {
         setError((err as Error).message);
@@ -90,11 +90,11 @@ export function usePlaybackActions({
   );
 
   const handlePlay = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       try {
         const sid = requireSessionId();
         const base = `/sessions/${encodeURIComponent(sid)}/queue`;
-        await postJson(`${base}/next/add`, { paths: [path] });
+        await postJson(`${base}/next/add`, { track_ids: [trackId] });
         await postJson(`${base}/next`);
       } catch (err) {
         setError((err as Error).message);
@@ -105,10 +105,17 @@ export function usePlaybackActions({
 
   const handlePlayAlbumTrack = useCallback(
     async (track: TrackSummary) => {
-      if (!track.path) return;
-      await handlePlay(track.path);
+      try {
+        const sid = requireSessionId();
+        const base = `/sessions/${encodeURIComponent(sid)}/queue`;
+        if (!track.id) return;
+        await postJson(`${base}/next/add`, { track_ids: [track.id] });
+        await postJson(`${base}/next`);
+      } catch (err) {
+        setError((err as Error).message);
+      }
     },
-    [handlePlay]
+    [sessionId, setError]
   );
 
   const handlePlayAlbumById = useCallback(
@@ -119,10 +126,10 @@ export function usePlaybackActions({
         const tracks = await fetchJson<TrackListResponse>(
           `/tracks?album_id=${albumId}&limit=500`
         );
-        const paths = (tracks.items ?? [])
-          .map((track) => track.path)
-          .filter((path): path is string => Boolean(path));
-        if (!paths.length) {
+        const trackIds = (tracks.items ?? [])
+          .map((track) => track.id)
+          .filter((id): id is number => Number.isFinite(id));
+        if (!trackIds.length) {
           throw new Error("Album has no playable tracks.");
         }
         const base = `/sessions/${encodeURIComponent(sid)}/queue`;
@@ -130,7 +137,7 @@ export function usePlaybackActions({
           clear_queue: true,
           clear_history: false
         });
-        await postJson(base, { paths });
+        await postJson(base, { track_ids: trackIds });
         await postJson(`${base}/next`);
       } catch (err) {
         setError((err as Error).message);

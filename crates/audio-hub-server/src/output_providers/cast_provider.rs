@@ -123,7 +123,7 @@ impl CastProvider {
 
     fn idle_status(output_id: &str, device_name: Option<String>, bridge_online: bool) -> StatusResponse {
         StatusResponse {
-            now_playing: None,
+            now_playing_track_id: None,
             paused: true,
             bridge_online,
             elapsed_ms: None,
@@ -429,7 +429,14 @@ fn status_from_remote(
         .duration_ms
         .and_then(|duration_ms| now_playing_path.as_ref().and_then(|p| estimate_bitrate_kbps(p, duration_ms)));
     StatusResponse {
-        now_playing: remote.now_playing,
+        now_playing_track_id: now_playing_path.as_ref().and_then(|path| {
+            state
+                .metadata
+                .db
+                .track_id_for_path(&path.to_string_lossy())
+                .ok()
+                .flatten()
+        }),
         paused: remote.paused,
         bridge_online: true,
         elapsed_ms: remote.elapsed_ms,

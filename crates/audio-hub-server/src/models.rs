@@ -106,10 +106,8 @@ pub type StatusResponse = PlaybackStatus;
 pub enum QueueItem {
     /// Queued track with metadata.
     Track {
-        /// Track id if known.
-        id: Option<i64>,
-        /// Absolute path to the track.
-        path: String,
+        /// Track id.
+        id: i64,
         /// Filename for display.
         file_name: String,
         /// Track title if available.
@@ -133,7 +131,7 @@ pub enum QueueItem {
         played: bool,
     },
     /// Queue entry that no longer exists on disk.
-    Missing { path: String },
+    Missing { id: Option<i64> },
 }
 
 /// Response payload for the queue listing.
@@ -195,8 +193,8 @@ pub struct TrackResolveResponse {
 /// Current metadata fields for a track path.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct TrackMetadataResponse {
-    /// Absolute track path.
-    pub path: String,
+    /// Track id from the metadata DB.
+    pub track_id: i64,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
@@ -211,12 +209,8 @@ pub struct TrackMetadataResponse {
 /// Update request for writing tag metadata to a track file.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct TrackMetadataUpdateRequest {
-    /// Optional track id from the metadata DB.
-    #[serde(default)]
-    pub track_id: Option<i64>,
-    /// Absolute track path.
-    #[serde(default)]
-    pub path: Option<String>,
+    /// Track id from the metadata DB.
+    pub track_id: i64,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -251,12 +245,8 @@ pub struct TrackMetadataFieldsResponse {
 /// Request payload for on-demand track analysis.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct TrackAnalysisRequest {
-    /// Optional track id from the metadata DB.
-    #[serde(default)]
-    pub track_id: Option<i64>,
-    /// Absolute track path.
-    #[serde(default)]
-    pub path: Option<String>,
+    /// Track id from the metadata DB.
+    pub track_id: i64,
     /// Max seconds to analyze (defaults to 30).
     #[serde(default)]
     pub max_seconds: Option<f32>,
@@ -448,8 +438,8 @@ pub struct AlbumImageClearRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MusicBrainzMatchApplyRequest {
     Track {
-        /// Absolute track path.
-        path: String,
+        /// Track id from the metadata DB.
+        track_id: i64,
         /// Recording MBID to apply.
         recording_mbid: String,
         /// Optional artist MBID to apply.
@@ -500,26 +490,22 @@ pub struct TrackListResponse {
 /// Payload to add items to the queue.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueueAddRequest {
-    /// Paths to enqueue.
-    pub paths: Vec<String>,
+    /// Track ids to enqueue.
+    pub track_ids: Vec<i64>,
 }
 
 /// Payload to remove a single item from the queue.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueueRemoveRequest {
-    /// Path of the item to remove.
-    pub path: String,
+    /// Track id of the item to remove.
+    pub track_id: i64,
 }
 
 /// Payload to play a queued item and drop preceding items.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct QueuePlayFromRequest {
-    /// Path of the queued item to play.
-    #[serde(default)]
-    pub path: Option<String>,
     /// Track id of the queued item to play.
-    #[serde(default)]
-    pub track_id: Option<i64>,
+    pub track_id: i64,
 }
 
 /// Payload to clear the queue, with an optional history reset.
@@ -611,19 +597,14 @@ pub struct LocalPlaybackRegisterResponse {
 /// Resolve-stream request for local playback.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct LocalPlaybackPlayRequest {
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub track_id: Option<i64>,
+    pub track_id: i64,
 }
 
 /// Resolved stream URL for local playback.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct LocalPlaybackPlayResponse {
     pub url: String,
-    pub path: String,
-    #[serde(default)]
-    pub track_id: Option<i64>,
+    pub track_id: i64,
 }
 
 /// Session summary for local playback sessions.

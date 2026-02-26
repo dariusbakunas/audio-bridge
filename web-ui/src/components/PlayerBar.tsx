@@ -114,7 +114,7 @@ export default function PlayerBar({
   }, [volumePopoverOpen]);
 
   useEffect(() => {
-    if (!status?.now_playing || status?.paused) {
+    if (!status?.now_playing_track_id || status?.paused) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -123,9 +123,9 @@ export default function PlayerBar({
     return () => {
       window.clearInterval(timer);
     };
-  }, [status?.now_playing, status?.paused]);
+  }, [status?.now_playing_track_id, status?.paused]);
 
-  const showPlayIcon = !status?.now_playing || Boolean(status?.paused);
+  const showPlayIcon = !status?.now_playing_track_id || Boolean(status?.paused);
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
   const outputRate = status?.output_sample_rate ?? status?.sample_rate;
@@ -187,7 +187,7 @@ export default function PlayerBar({
         />
       </div>
       <div className="player-left">
-        {status?.title || status?.now_playing ? (
+        {status?.title || status?.now_playing_track_id ? (
           activeAlbumId ? (
             <button
               className="album-art album-art-button"
@@ -231,10 +231,10 @@ export default function PlayerBar({
         ) : null}
         <div>
           <div className="track-title">
-            {status?.title ?? status?.now_playing ?? "Nothing playing"}
+            {status?.title ?? "Nothing playing"}
           </div>
           <div className="muted small">
-            {status?.artist ?? (status?.now_playing ? "Unknown artist" : "Select a track to start")}
+            {status?.artist ?? (status?.now_playing_track_id ? "Unknown artist" : "Select a track to start")}
           </div>
         </div>
       </div>

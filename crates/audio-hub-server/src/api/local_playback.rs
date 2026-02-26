@@ -81,46 +81,29 @@ pub async fn local_playback_play(
     let _ = crate::local_playback_sessions::touch_session(&session_id);
     let payload = body.into_inner();
 
-    let resolved_path = match (payload.path.as_deref(), payload.track_id) {
-        (Some(path), None) => {
+    let _resolved_path = match state.metadata.db.track_path_for_id(payload.track_id) {
+        Ok(Some(path)) => {
             let candidate = PathBuf::from(path);
             match state.output.controller.canonicalize_under_root(&state, &candidate) {
                 Ok(path) => path,
                 Err(err) => return err.into_response(),
             }
         }
-        (None, Some(track_id)) => match state.metadata.db.track_path_for_id(track_id) {
-            Ok(Some(path)) => {
-                let candidate = PathBuf::from(path);
-                match state.output.controller.canonicalize_under_root(&state, &candidate) {
-                    Ok(path) => path,
-                    Err(err) => return err.into_response(),
-                }
-            }
-            Ok(None) => return HttpResponse::NotFound().body("track not found"),
-            Err(_) => return HttpResponse::InternalServerError().finish(),
-        },
-        _ => return HttpResponse::BadRequest().body("provide exactly one of path or track_id"),
+        Ok(None) => return HttpResponse::NotFound().body("track not found"),
+        Err(_) => return HttpResponse::InternalServerError().finish(),
     };
 
     let conn = req.connection_info();
     let base_url = format!("{}://{}", conn.scheme(), conn.host());
-    let url = crate::stream_url::build_stream_url_for(
-        &resolved_path,
-        &base_url,
-        Some(&state.metadata.db),
+    let url = format!(
+        "{}/stream/track/{}",
+        base_url.trim_end_matches('/'),
+        payload.track_id
     );
-    let track_id = state
-        .metadata
-        .db
-        .track_id_for_path(&resolved_path.to_string_lossy())
-        .ok()
-        .flatten();
 
     HttpResponse::Ok().json(LocalPlaybackPlayResponse {
         url,
-        path: resolved_path.to_string_lossy().to_string(),
-        track_id,
+        track_id: payload.track_id,
     })
 }
 

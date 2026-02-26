@@ -83,21 +83,13 @@ pub struct TrackListQuery {
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
-pub struct ArtQuery {
-    pub path: String,
-}
-
-#[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct TrackResolveQuery {
-    pub path: String,
+    pub track_id: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct TrackMetadataQuery {
-    #[serde(default)]
-    pub track_id: Option<i64>,
-    #[serde(default)]
-    pub path: Option<String>,
+    pub track_id: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
@@ -168,7 +160,12 @@ pub async fn tracks_resolve(
     query: web::Query<TrackResolveQuery>,
 ) -> impl Responder {
     let metadata_service = state.metadata_service();
-    match metadata_service.album_id_for_track_path(&query.path) {
+    let path = match state.metadata.db.track_path_for_id(query.track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    match metadata_service.album_id_for_track_path(&path) {
         Ok(Some(album_id)) => HttpResponse::Ok().json(TrackResolveResponse {
             album_id: Some(album_id),
         }),
@@ -194,13 +191,7 @@ pub async fn tracks_metadata(
 ) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
-    let record = if let Some(track_id) = query.track_id {
-        metadata_service.track_record_by_id(track_id)
-    } else if let Some(path) = query.path.as_deref() {
-        metadata_service.track_record_by_path(path)
-    } else {
-        return HttpResponse::BadRequest().body("track_id or path is required");
-    };
+    let record = metadata_service.track_record_by_id(query.track_id);
     match record {
         Ok(Some(record)) => {
             let mut extra_tags = std::collections::BTreeMap::new();
@@ -215,7 +206,7 @@ pub async fn tracks_metadata(
                 }
             }
             HttpResponse::Ok().json(TrackMetadataResponse {
-                path: record.path,
+                track_id: query.track_id,
                 title: record.title,
                 artist: record.artist,
                 album: record.album,
@@ -247,16 +238,10 @@ pub async fn tracks_metadata_fields(
     query: web::Query<TrackMetadataQuery>,
 ) -> impl Responder {
     let root = state.library.read().unwrap().root().to_path_buf();
-    let path = if let Some(track_id) = query.track_id {
-        match state.metadata.db.track_path_for_id(track_id) {
-            Ok(Some(path)) => path,
-            Ok(None) => return HttpResponse::NotFound().finish(),
-            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-        }
-    } else if let Some(path) = query.path.as_ref() {
-        path.clone()
-    } else {
-        return HttpResponse::BadRequest().body("track_id or path is required");
+    let path = match state.metadata.db.track_path_for_id(query.track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
@@ -290,16 +275,10 @@ pub async fn tracks_metadata_update(
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
-    let path = if let Some(track_id) = request.track_id {
-        match state.metadata.db.track_path_for_id(track_id) {
-            Ok(Some(path)) => path,
-            Ok(None) => return HttpResponse::NotFound().finish(),
-            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-        }
-    } else if let Some(path) = request.path.as_ref() {
-        path.clone()
-    } else {
-        return HttpResponse::BadRequest().body("track_id or path is required");
+    let path = match state.metadata.db.track_path_for_id(request.track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
@@ -423,16 +402,10 @@ pub async fn tracks_analysis(
 ) -> impl Responder {
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
-    let path = if let Some(track_id) = request.track_id {
-        match state.metadata.db.track_path_for_id(track_id) {
-            Ok(Some(path)) => path,
-            Ok(None) => return HttpResponse::NotFound().finish(),
-            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-        }
-    } else if let Some(path) = request.path.as_ref() {
-        path.clone()
-    } else {
-        return HttpResponse::BadRequest().body("track_id or path is required");
+    let path = match state.metadata.db.track_path_for_id(request.track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
@@ -1143,30 +1116,6 @@ pub async fn media_asset(
     }
 }
 
-#[utoipa::path(
-    get,
-    path = "/art",
-    params(ArtQuery),
-    responses(
-        (status = 200, description = "Cover art image"),
-        (status = 404, description = "Cover art not found")
-    )
-)]
-#[get("/art")]
-pub async fn art_for_track(
-    state: web::Data<AppState>,
-    query: web::Query<ArtQuery>,
-    req: HttpRequest,
-) -> impl Responder {
-    let metadata_service = state.metadata_service();
-    let cover_rel = match metadata_service.cover_path_for_track(&query.path) {
-        Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
-        Err(err) => return HttpResponse::InternalServerError().body(err),
-    };
-    serve_cover_art(&state, &cover_rel, &req)
-}
-
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
 pub struct CoverPath {
     pub id: i64,
@@ -1429,7 +1378,7 @@ pub async fn musicbrainz_match_apply(
     };
     match body.into_inner() {
         MusicBrainzMatchApplyRequest::Track {
-            path,
+            track_id,
             recording_mbid,
             artist_mbid,
             album_mbid,
@@ -1437,7 +1386,7 @@ pub async fn musicbrainz_match_apply(
             override_existing,
         } => {
             tracing::info!(
-                path = %path,
+                track_id = track_id,
                 recording_mbid = %recording_mbid,
                 artist_mbid = ?artist_mbid,
                 album_mbid = ?album_mbid,
@@ -1445,7 +1394,7 @@ pub async fn musicbrainz_match_apply(
                 override_existing = ?override_existing,
                 "manual musicbrainz match apply (track)"
             );
-            let record = match state.metadata.db.track_record_by_path(&path) {
+            let record = match state.metadata.db.track_record_by_id(track_id) {
                 Ok(Some(record)) => record,
                 Ok(None) => return HttpResponse::NotFound().finish(),
                 Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),

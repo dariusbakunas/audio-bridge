@@ -13,7 +13,7 @@ interface QueueModalProps {
   canPlay: boolean;
   isPaused: boolean;
   onPause: () => void;
-  onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
+  onPlayFrom: (trackId: number) => void;
   onClear: (clearQueue: boolean, clearHistory: boolean) => void;
 }
 

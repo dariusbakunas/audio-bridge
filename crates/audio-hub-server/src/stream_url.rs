@@ -2,25 +2,20 @@
 
 use std::path::PathBuf;
 
+use anyhow::Result;
 use crate::metadata_db::MetadataDb;
 
 pub fn build_stream_url_for(
     path: &PathBuf,
     public_base_url: &str,
     metadata: Option<&MetadataDb>,
-) -> String {
-    if let Some(track_id) = metadata
-        .and_then(|db| db.track_id_for_path(&path.to_string_lossy()).ok().flatten())
-    {
-        return format!(
-            "{}/stream/track/{track_id}",
-            public_base_url.trim_end_matches('/')
-        );
-    }
-    let path_str = path.to_string_lossy();
-    let encoded = urlencoding::encode(&path_str);
-    format!(
-        "{}/stream?path={encoded}",
+) -> Result<String> {
+    let track_id = metadata
+        .ok_or_else(|| anyhow::anyhow!("metadata database is required to build stream url"))?
+        .track_id_for_path(&path.to_string_lossy())?
+        .ok_or_else(|| anyhow::anyhow!("track id not found for path {}", path.display()))?;
+    Ok(format!(
+        "{}/stream/track/{track_id}",
         public_base_url.trim_end_matches('/')
-    )
+    ))
 }

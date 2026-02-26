@@ -4,7 +4,7 @@ import { action } from "storybook/actions";
 import "../styles.css";
 
 const status: StatusResponse = {
-  now_playing: "/music/Radiohead/In Rainbows/01 - 15 Step.flac",
+  now_playing_track_id: 101,
   paused: false,
   elapsed_ms: 63210,
   duration_ms: 224000,

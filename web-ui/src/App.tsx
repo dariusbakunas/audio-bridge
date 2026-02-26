@@ -82,14 +82,13 @@ interface LogEventEntry {
 }
 
 type MatchTarget = {
-  path: string;
+  trackId?: number;
   title: string;
   artist: string;
   album?: string | null;
 };
 
 type EditTarget = {
-  path?: string;
   trackId?: number;
   label: string;
   defaults: {
@@ -125,8 +124,7 @@ type ToastNotification = {
 
 type LocalPlaybackCommand = {
   url: string;
-  path: string;
-  track_id?: number | null;
+  track_id: number;
 };
 
 const MAX_METADATA_EVENTS = 200;
@@ -142,7 +140,7 @@ const WEB_DEFAULT_SESSION_NAME = "Default";
 const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
 
 type LocalPlaybackSnapshot = {
-  path: string;
+  track_id: number;
   paused: boolean;
   elapsed_ms: number | null;
   duration_ms: number | null;
@@ -161,7 +159,7 @@ function loadLocalPlaybackSnapshot(sessionId: string): LocalPlaybackSnapshot | n
     const raw = localStorage.getItem(localPlaybackSnapshotKey(sessionId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LocalPlaybackSnapshot;
-    if (!parsed?.path) return null;
+    if (!parsed?.track_id) return null;
     return parsed;
   } catch {
     return null;
@@ -218,12 +216,6 @@ function formatRateRange(output: OutputInfo): string {
 
 function normalizeMatch(value?: string | null): string {
   return value?.trim().toLowerCase() ?? "";
-}
-
-function fileNameFromPath(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const parts = normalized.split("/");
-  return parts[parts.length - 1] || path;
 }
 
 // Folders view removed.
@@ -345,7 +337,7 @@ export default function App() {
   const [volumeBusy, setVolumeBusy] = useState<boolean>(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
-  const [trackMenuPath, setTrackMenuPath] = useState<string | null>(null);
+  const [trackMenuTrackId, setTrackMenuTrackId] = useState<number | null>(null);
   const [trackMenuPosition, setTrackMenuPosition] = useState<{
     top: number;
     right: number;
@@ -409,7 +401,7 @@ export default function App() {
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const localPathRef = useRef<string | null>(null);
+  const localTrackIdRef = useRef<number | null>(null);
   const notificationIdRef = useRef(0);
   const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
   const activeSessionIdRef = useRef<string | null>(sessionId);
@@ -417,12 +409,12 @@ export default function App() {
   const volumeRequestSeqRef = useRef(0);
 
   const closeTrackMenu = useCallback(() => {
-    setTrackMenuPath(null);
+    setTrackMenuTrackId(null);
     setTrackMenuPosition(null);
   }, []);
   const toggleTrackMenu = useCallback(
-      (path: string, target: Element) => {
-        if (trackMenuPath === path) {
+      (trackId: number, target: Element) => {
+        if (trackMenuTrackId === trackId) {
           closeTrackMenu();
           return;
         }
@@ -453,13 +445,13 @@ export default function App() {
           right,
           up: placeAbove
         });
-        setTrackMenuPath(path);
+        setTrackMenuTrackId(trackId);
       },
-      [trackMenuPath, closeTrackMenu]
+      [trackMenuTrackId, closeTrackMenu]
   );
   const runTrackMenuAction = useCallback(
-      (action: (path: string) => void | Promise<void>, path: string) => {
-        action(path);
+      (action: (trackId: number) => void | Promise<void>, trackId: number) => {
+        action(trackId);
         closeTrackMenu();
       },
       [closeTrackMenu]
@@ -483,11 +475,11 @@ export default function App() {
   );
   const isLocalSession = currentSession?.mode === "local";
   const canTogglePlayback = Boolean(
-    sessionId && status?.now_playing && (isLocalSession || activeOutputId)
+    sessionId && status?.now_playing_track_id && (isLocalSession || activeOutputId)
   );
   const canControlVolume = Boolean(serverConnected && sessionId && !isLocalSession && activeOutputId);
-  const isPlaying = Boolean(status?.now_playing && !status?.paused);
-  const isPaused = Boolean(status?.now_playing && status?.paused);
+  const isPlaying = Boolean(status?.now_playing_track_id && !status?.paused);
+  const isPaused = Boolean(status?.now_playing_track_id && status?.paused);
   const uiBuildId = useMemo(() => {
     if (__BUILD_MODE__ === "development") {
       return "dev";
@@ -551,7 +543,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     ? (isLocalSession
       ? "Local session is ready."
       : "Select an output to control playback.")
-    : !status?.now_playing
+    : !status?.now_playing_track_id
       ? "Select an album track to play."
       : undefined;
   const selectedAlbum = useMemo(
@@ -732,13 +724,13 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [isLocalSession, sessionId]);
 
   const openTrackMatchForAlbum = useCallback(
-    (path: string) => {
-      const track = albumTracks.find((item) => item.path === path);
-      const title = track?.title ?? track?.file_name ?? path;
+    (trackId: number) => {
+      const track = albumTracks.find((item) => item.id === trackId);
+      const title = track?.title ?? track?.file_name ?? "Unknown track";
       const artist = track?.artist ?? "Unknown artist";
       const album = track?.album ?? selectedAlbum?.title ?? "";
       setMatchTarget({
-        path,
+        trackId: track?.id ?? trackId,
         title,
         artist,
         album
@@ -765,15 +757,14 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [selectedAlbum]);
 
   const openTrackEditorForAlbum = useCallback(
-    (path: string) => {
-      const track = albumTracks.find((item) => item.path === path);
-      const title = track?.title ?? track?.file_name ?? path;
+    (trackId: number) => {
+      const track = albumTracks.find((item) => item.id === trackId);
+      const title = track?.title ?? track?.file_name ?? "Unknown track";
       const artist = track?.artist ?? "";
       const album = track?.album ?? selectedAlbum?.title ?? "";
       const label = artist ? `${title} — ${artist}` : title;
       setEditTarget({
-        path,
-        trackId: track?.id,
+        trackId: track?.id ?? trackId,
         label,
         defaults: {
           title,
@@ -922,7 +913,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [applyViewState]);
 
   useEffect(() => {
-    if (!trackMenuPath) return;
+    if (!trackMenuTrackId) return;
 
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target as Element | null;
@@ -936,13 +927,13 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     return () => {
       document.removeEventListener("click", handleDocumentClick);
     };
-  }, [trackMenuPath, closeTrackMenu]);
+  }, [trackMenuTrackId, closeTrackMenu]);
 
   useEffect(() => {
-    if (!status?.now_playing && signalOpen) {
+    if (!status?.now_playing_track_id && signalOpen) {
       setSignalOpen(false);
     }
-  }, [status?.now_playing, signalOpen]);
+  }, [status?.now_playing_track_id, signalOpen]);
 
   const refreshSessions = useCallback(async () => {
     const clientId = getOrCreateWebSessionClientId();
@@ -1036,7 +1027,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       setStatus(null);
       setSessionVolume(null);
       setQueue([]);
-      localPathRef.current = null;
       try {
         localStorage.setItem(WEB_SESSION_ID_KEY, nextSessionId);
       } catch {
@@ -1247,7 +1237,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   const handlePause = useCallback(async () => {
     if (isLocalSession) {
       const audio = audioRef.current;
-      if (!audio || !localPathRef.current) return;
+      if (!audio || !localTrackIdRef.current) return;
       if (audio.paused) {
         await audio.play().catch(() => {});
       } else {
@@ -1316,13 +1306,13 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   ]);
 
   const handlePlay = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       try {
         if (!isLocalSession || !sessionId) {
-          await handlePlayRemote(path);
+          await handlePlayRemote(trackId);
           return;
         }
-        await postJson(`/sessions/${encodeURIComponent(sessionId)}/queue/next/add`, { paths: [path] });
+        await postJson(`/sessions/${encodeURIComponent(sessionId)}/queue/next/add`, { track_ids: [trackId] });
         const payload = await requestLocalCommand("/queue/next");
         await applyLocalPlayback(payload);
       } catch (err) {
@@ -1359,15 +1349,14 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [handlePreviousRemote, isLocalSession, reportError]);
 
   const handleQueuePlayFrom = useCallback(
-    async (payload: { trackId?: number; path?: string }) => {
+    async (trackId: number) => {
       try {
         if (!isLocalSession || !sessionId) {
-          await handleQueuePlayFromRemote(payload);
+          await handleQueuePlayFromRemote(trackId);
           return;
         }
         const endpoint = `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`;
-        const body = payload.trackId ? { track_id: payload.trackId } : { path: payload.path };
-        const command = await postJson<LocalPlaybackCommand>(endpoint, body as any);
+        const command = await postJson<LocalPlaybackCommand>(endpoint, { track_id: trackId });
         await applyLocalPlayback(command);
       } catch (err) {
         reportError((err as Error).message);
@@ -1383,9 +1372,11 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           await handlePlayAlbumTrackRemote(track);
           return;
         }
-        if (!track.path) return;
+        if (!track.id) {
+          return;
+        }
         await postJson(`/sessions/${encodeURIComponent(sessionId)}/queue/next/add`, {
-          paths: [track.path]
+          track_ids: [track.id]
         });
         const payload = await requestLocalCommand("/queue/next");
         await applyLocalPlayback(payload);
@@ -1409,10 +1400,10 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           return;
         }
         const tracks = await fetchJson<TrackListResponse>(`/tracks?album_id=${albumId}&limit=500`);
-        const paths = (tracks.items ?? [])
-          .map((track) => track.path)
-          .filter((path): path is string => Boolean(path));
-        if (!paths.length) {
+        const trackIds = (tracks.items ?? [])
+          .map((track) => track.id)
+          .filter((id): id is number => Number.isFinite(id));
+        if (!trackIds.length) {
           throw new Error("Album has no playable tracks.");
         }
         const base = `/sessions/${encodeURIComponent(sessionId)}/queue`;
@@ -1420,7 +1411,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           clear_queue: true,
           clear_history: false
         });
-        await postJson(base, { paths });
+        await postJson(base, { track_ids: trackIds });
         const payload = await requestLocalCommand("/queue/next");
         await applyLocalPlayback(payload);
       } catch (err) {
@@ -1635,12 +1626,12 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       if (!isLocalSession) return;
       const audio = audioRef.current;
       if (!audio) return;
-      const hasTrack = Boolean(localPathRef.current);
+      const hasTrack = Boolean(localTrackIdRef.current);
       setStatus((prev) => {
         const next: StatusResponse = {
           ...(prev ?? {}),
           ...base,
-          now_playing: hasTrack ? localPathRef.current : null,
+          now_playing_track_id: hasTrack ? localTrackIdRef.current : null,
           paused: hasTrack ? audio.paused : true,
           elapsed_ms:
             hasTrack && Number.isFinite(audio.currentTime)
@@ -1667,11 +1658,11 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     async (payload: LocalPlaybackCommand | null) => {
       const audio = audioRef.current;
       if (!audio) return;
-      if (!payload?.url || !payload.path) {
+      if (!payload?.url || !payload.track_id) {
         audio.pause();
         audio.removeAttribute("src");
         audio.load();
-        localPathRef.current = null;
+        localTrackIdRef.current = null;
         updateLocalStatusFromAudio();
         return;
       }
@@ -1680,10 +1671,10 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         reportError("Rejected local playback URL.");
         return;
       }
-      localPathRef.current = payload.path;
       const queueTrack = queue.find(
-        (item) => item.kind === "track" && item.path === payload.path
+        (item) => item.kind === "track" && item.id === payload.track_id
       );
+      localTrackIdRef.current = payload.track_id;
       audio.src = safeUrl;
       audio.load();
       await audio.play().catch(() => {});
@@ -1691,7 +1682,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         title:
           queueTrack?.kind === "track"
             ? (queueTrack.title ?? queueTrack.file_name)
-            : fileNameFromPath(payload.path),
+            : null,
         artist: queueTrack?.kind === "track" ? (queueTrack.artist ?? null) : null,
         album: queueTrack?.kind === "track" ? (queueTrack.album ?? null) : null
       });
@@ -1709,7 +1700,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         `/sessions/${encodeURIComponent(sessionId)}${endpoint}`,
         body as any
       );
-      if (!response || !response.url || !response.path) {
+      if (!response || !response.url || !response.track_id) {
         return null;
       }
       return response;
@@ -1751,12 +1742,12 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
 
   useEffect(() => {
     if (!isLocalSession || !sessionId) return;
-    const currentPath = status?.now_playing ?? null;
-    if (!currentPath) {
+    const currentTrackId = localTrackIdRef.current;
+    if (!currentTrackId) {
       return;
     }
     saveLocalPlaybackSnapshot(sessionId, {
-      path: currentPath,
+      track_id: currentTrackId,
       paused: Boolean(status?.paused ?? true),
       elapsed_ms: status?.elapsed_ms ?? null,
       duration_ms: status?.duration_ms ?? null,
@@ -1772,31 +1763,23 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     status?.artist,
     status?.duration_ms,
     status?.elapsed_ms,
-    status?.now_playing,
     status?.paused,
     status?.title
   ]);
 
 
   useEffect(() => {
-    const path = status?.now_playing ?? null;
-    if (!path) {
+    const nowPlayingTrackId = status?.now_playing_track_id ?? null;
+    if (!nowPlayingTrackId) {
       setNowPlayingCover(null);
       setNowPlayingCoverFailed(false);
       setNowPlayingAlbumId(null);
       return;
     }
-    const queueMatch = queue.find(
-      (item) => item.kind === "track" && item.path === path && item.id
-    ) as { id?: number } | undefined;
-    if (queueMatch?.id) {
-      setNowPlayingCover(apiUrl(`/tracks/${queueMatch.id}/cover`));
-    } else {
-      setNowPlayingCover(apiUrl(`/art?path=${encodeURIComponent(path)}`));
-    }
+    setNowPlayingCover(apiUrl(`/tracks/${nowPlayingTrackId}/cover`));
     setNowPlayingCoverFailed(false);
     let active = true;
-    fetchJson<TrackResolveResponse>(`/tracks/resolve?path=${encodeURIComponent(path)}`)
+    fetchJson<TrackResolveResponse>(`/tracks/resolve?track_id=${nowPlayingTrackId}`)
       .then((response) => {
         if (!active) return;
         setNowPlayingAlbumId(response?.album_id ?? null);
@@ -1808,18 +1791,18 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     return () => {
       active = false;
     };
-  }, [queue, status?.now_playing]);
+  }, [status?.now_playing_track_id]);
 
   useEffect(() => {
     if (!isLocalSession) return;
-    const path = status?.now_playing ?? null;
-    if (!path) return;
+    const nowPlayingTrackId = status?.now_playing_track_id ?? null;
+    if (!nowPlayingTrackId) return;
     const queueTrack = queue.find(
-      (item) => item.kind === "track" && item.path === path
+      (item) => item.kind === "track" && item.id === nowPlayingTrackId
     );
     if (!queueTrack || queueTrack.kind !== "track") return;
 
-    const nextTitle = queueTrack.title ?? queueTrack.file_name ?? fileNameFromPath(path);
+    const nextTitle = queueTrack.title ?? queueTrack.file_name;
     const nextArtist = queueTrack.artist ?? null;
     const nextAlbum = queueTrack.album ?? null;
     if (
@@ -1839,7 +1822,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           }
         : prev
     );
-  }, [isLocalSession, queue, status?.album, status?.artist, status?.now_playing, status?.title]);
+  }, [isLocalSession, queue, status?.album, status?.artist, status?.now_playing_track_id, status?.title]);
 
   useEffect(() => {
     if (!isLocalSession || !sessionId) return;
@@ -1849,26 +1832,25 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     if (!currentQueueItem || currentQueueItem.kind !== "track") {
       return;
     }
-    if (status?.now_playing === currentQueueItem.path) {
+    if (status?.now_playing_track_id === currentQueueItem.id) {
       return;
     }
 
     const snapshot = loadLocalPlaybackSnapshot(sessionId);
-    const path = currentQueueItem.path;
-    const title = currentQueueItem.title ?? currentQueueItem.file_name ?? fileNameFromPath(path);
+    const title = currentQueueItem.title ?? currentQueueItem.file_name;
     const artist = currentQueueItem.artist ?? null;
     const album = currentQueueItem.album ?? null;
     const elapsedMs =
-      snapshot?.path === path ? (snapshot.elapsed_ms ?? null) : null;
+      snapshot?.track_id === currentQueueItem.id ? (snapshot.elapsed_ms ?? null) : null;
     const durationMs =
-      snapshot?.path === path
+      snapshot?.track_id === currentQueueItem.id
         ? (snapshot.duration_ms ?? currentQueueItem.duration_ms ?? null)
         : (currentQueueItem.duration_ms ?? null);
 
-    localPathRef.current = path;
+    localTrackIdRef.current = currentQueueItem.id;
     setStatus((prev) => ({
       ...(prev ?? {}),
-      now_playing: path,
+      now_playing_track_id: currentQueueItem.id,
       paused: true,
       elapsed_ms: elapsedMs,
       duration_ms: durationMs,
@@ -1877,16 +1859,16 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       album
     }));
     setUpdatedAt(new Date());
-  }, [isLocalSession, queue, sessionId, status?.now_playing]);
+  }, [isLocalSession, queue, sessionId, status?.now_playing_track_id]);
 
   useEffect(() => {
     if (!isLocalSession) return;
     const hasLocalNowPlaying = queue.some((item) => item.kind === "track" && item.now_playing);
     if (hasLocalNowPlaying) return;
-    if (!status?.now_playing) return;
+    if (!status?.now_playing_track_id) return;
     setStatus(null);
-    localPathRef.current = null;
-  }, [isLocalSession, queue, status?.now_playing]);
+    localTrackIdRef.current = null;
+  }, [isLocalSession, queue, status?.now_playing_track_id]);
 
   useQueueStream({
     enabled: serverConnected && Boolean(sessionId),
@@ -2052,19 +2034,19 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [albumViewId, loadCatalogProfiles, serverConnected]);
 
   const handlePlayMedia = useCallback(async () => {
-    if (status?.now_playing) {
+    if (status?.now_playing_track_id) {
       if (status.paused) {
         await handlePause();
       }
       return;
     }
-  }, [handlePause, status?.now_playing, status?.paused]);
+  }, [handlePause, status?.now_playing_track_id, status?.paused]);
 
   const handlePauseMedia = useCallback(async () => {
-    if (status?.now_playing && !status?.paused) {
+    if (status?.now_playing_track_id && !status?.paused) {
       await handlePause();
     }
-  }, [handlePause, status?.now_playing, status?.paused]);
+  }, [handlePause, status?.now_playing_track_id, status?.paused]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -2133,15 +2115,21 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   ]);
 
   async function handlePrimaryAction() {
-    if (status?.now_playing) {
+    if (status?.now_playing_track_id) {
       if (isLocalSession && status.paused && sessionId) {
         const audio = audioRef.current;
         const hasSource = Boolean(audio?.src);
         if (!hasSource) {
           try {
+            const currentQueueTrack = queue.find(
+              (item) => item.kind === "track" && item.now_playing && item.id
+            ) as { id?: number } | undefined;
+            if (!currentQueueTrack?.id) {
+              throw new Error("Track ID is required to resume local playback.");
+            }
             const payload = await postJson<LocalPlaybackCommand>(
               `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`,
-              { path: status.now_playing }
+              { track_id: currentQueueTrack.id }
             );
             await applyLocalPlayback(payload);
             const seekMs = status.elapsed_ms ?? null;
@@ -2411,22 +2399,38 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
               isPaused={isPaused}
               onPause={handlePause}
               formatMs={formatMs}
-              nowPlayingPath={status?.now_playing ?? null}
+              nowPlayingTrackId={status?.now_playing_track_id ?? null}
               onPlayAlbum={() => {
                 if (!selectedAlbum) return;
                 handlePlayAlbumById(selectedAlbum.id);
               }}
               onPlayTrack={handlePlayAlbumTrack}
-              trackMenuPath={trackMenuPath}
+              trackMenuTrackId={trackMenuTrackId}
               trackMenuPosition={trackMenuPosition}
               onToggleMenu={toggleTrackMenu}
-              onMenuPlay={(path) => runTrackMenuAction(handlePlay, path)}
-              onMenuQueue={(path) => runTrackMenuAction(handleQueue, path)}
-              onMenuPlayNext={(path) => runTrackMenuAction(handlePlayNext, path)}
-              onMenuRescan={(path) => runTrackMenuAction(handleRescanTrack, path)}
-              onFixTrackMatch={(path) => runTrackMenuAction(openTrackMatchForAlbum, path)}
-              onEditTrackMetadata={(path) =>
-                runTrackMenuAction(openTrackEditorForAlbum, path)
+              onMenuPlay={(trackId) =>
+                runTrackMenuAction((id) => {
+                  handlePlay(id);
+                }, trackId)
+              }
+              onMenuQueue={(trackId) =>
+                runTrackMenuAction((id) => {
+                  handleQueue(id);
+                }, trackId)
+              }
+              onMenuPlayNext={(trackId) =>
+                runTrackMenuAction((id) => {
+                  handlePlayNext(id);
+                }, trackId)
+              }
+              onMenuRescan={(trackId) =>
+                runTrackMenuAction((id) => {
+                  handleRescanTrack(id);
+                }, trackId)
+              }
+              onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
+              onEditTrackMetadata={(trackId) =>
+                runTrackMenuAction(openTrackEditorForAlbum, trackId)
               }
               onAnalyzeTrack={(track) => {
                 runTrackMenuAction(() => {
@@ -2435,7 +2439,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
                     title: track.title ?? track.file_name,
                     artist: track.artist ?? null
                   });
-                }, track.path);
+                }, track.id);
               }}
               onEditAlbumMetadata={openAlbumEditor}
               onEditCatalogMetadata={() => setCatalogOpen(true)}
@@ -2524,7 +2528,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           nowPlayingCover={nowPlayingCover}
           nowPlayingCoverFailed={nowPlayingCoverFailed}
           showSignalAction={!isLocalSession}
-          showSignalPath={Boolean(status?.now_playing)}
+          showSignalPath={Boolean(status?.now_playing_track_id)}
           canTogglePlayback={canTogglePlayback}
           canGoPrevious={canGoPrevious}
           playButtonTitle={playButtonTitle}
@@ -2656,7 +2660,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         kind="track"
         targetLabel={matchLabel}
         defaults={matchDefaults}
-        trackPath={matchTarget?.path ?? null}
+        trackId={matchTarget?.trackId ?? null}
         onClose={() => setMatchTarget(null)}
         />
       ) : null}
@@ -2665,7 +2669,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         <TrackMetadataModal
         open={Boolean(editTarget)}
         trackId={editTarget?.trackId ?? null}
-        trackPath={editTarget?.path ?? null}
         targetLabel={editLabel}
         defaults={editDefaults}
         onClose={() => setEditTarget(null)}

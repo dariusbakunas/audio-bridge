@@ -18,21 +18,21 @@ interface AlbumDetailViewProps {
   onPause: () => void;
   onPlayAlbum: () => void;
   onPlayTrack: (track: TrackSummary) => void;
-  trackMenuPath: string | null;
+  trackMenuTrackId: number | null;
   trackMenuPosition: { top: number; right: number; up: boolean } | null;
-  onToggleMenu: (path: string, target: Element) => void;
-  onMenuPlay: (path: string) => void;
-  onMenuQueue: (path: string) => void;
-  onMenuPlayNext: (path: string) => void;
-  onMenuRescan: (path: string) => void;
-  onFixTrackMatch: (path: string) => void;
-  onEditTrackMetadata: (path: string) => void;
+  onToggleMenu: (trackId: number, target: Element) => void;
+  onMenuPlay: (trackId: number) => void;
+  onMenuQueue: (trackId: number) => void;
+  onMenuPlayNext: (trackId: number) => void;
+  onMenuRescan: (trackId: number) => void;
+  onFixTrackMatch: (trackId: number) => void;
+  onEditTrackMetadata: (trackId: number) => void;
   onAnalyzeTrack: (track: TrackSummary) => void;
   onEditAlbumMetadata: () => void;
   onEditCatalogMetadata: () => void;
   onReadAlbumNotes: () => void;
   albumProfile?: AlbumProfileResponse | null;
-  nowPlayingPath?: string | null;
+  nowPlayingTrackId?: number | null;
 }
 
 export default function AlbumDetailView({
@@ -49,7 +49,7 @@ export default function AlbumDetailView({
   onPause,
   onPlayAlbum,
   onPlayTrack,
-  trackMenuPath,
+  trackMenuTrackId,
   trackMenuPosition,
   onToggleMenu,
   onMenuPlay,
@@ -63,7 +63,7 @@ export default function AlbumDetailView({
   onEditCatalogMetadata,
   onReadAlbumNotes,
   albumProfile,
-  nowPlayingPath
+  nowPlayingTrackId
 }: AlbumDetailViewProps) {
   const heroRef = useRef<HTMLDivElement | null>(null);
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
@@ -235,8 +235,8 @@ export default function AlbumDetailView({
                 const prevDisc = index > 0 ? tracks[index - 1]?.disc_number ?? null : null;
                 const disc = track.disc_number ?? null;
                 const showDiscHeader = hasMultipleDiscs && disc !== null && disc !== prevDisc;
-                const menuOpen = trackMenuPath === track.path;
-                const isNowPlaying = nowPlayingPath ? track.path === nowPlayingPath : false;
+                const menuOpen = trackMenuTrackId === track.id;
+                const isNowPlaying = nowPlayingTrackId ? track.id === nowPlayingTrackId : false;
                 const PlaybackIcon = isNowPlaying
                   ? (isPaused ? Play : Pause)
                   : Play;
@@ -298,13 +298,13 @@ export default function AlbumDetailView({
                           open={menuOpen}
                           canPlay={canPlay}
                           menuStyle={menuStyle}
-                          onToggle={(event) => onToggleMenu(track.path, event.currentTarget)}
-                          onPlay={() => onMenuPlay(track.path)}
-                          onQueue={() => onMenuQueue(track.path)}
-                          onPlayNext={() => onMenuPlayNext(track.path)}
-                          onFixMatch={() => onFixTrackMatch(track.path)}
-                          onEditMetadata={() => onEditTrackMetadata(track.path)}
-                          onRescan={() => onMenuRescan(track.path)}
+                          onToggle={(event) => onToggleMenu(track.id, event.currentTarget)}
+                          onPlay={() => onMenuPlay(track.id)}
+                          onQueue={() => onMenuQueue(track.id)}
+                          onPlayNext={() => onMenuPlayNext(track.id)}
+                          onFixMatch={() => onFixTrackMatch(track.id)}
+                          onEditMetadata={() => onEditTrackMetadata(track.id)}
+                          onRescan={() => onMenuRescan(track.id)}
                           onAnalyze={() => onAnalyzeTrack(track)}
                         />
                       </div>

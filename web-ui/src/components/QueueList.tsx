@@ -11,7 +11,7 @@ interface QueueListProps {
   isPaused: boolean;
   onPause: () => void;
   listRef?: Ref<HTMLDivElement>;
-  onPlayFrom: (payload: { trackId?: number; path?: string }) => void;
+  onPlayFrom: (trackId: number) => void;
 }
 
 export default function QueueList({
@@ -34,7 +34,7 @@ export default function QueueList({
         const coverUrl = item.kind === "track"
           ? item.id
             ? apiUrl(`/tracks/${item.id}/cover`)
-            : apiUrl(`/art?path=${encodeURIComponent(item.path)}`)
+            : ""
           : "";
         const title = item.kind === "track" ? item.title ?? item.file_name : "";
         return (
@@ -85,10 +85,8 @@ export default function QueueList({
                           onPause();
                           return;
                         }
-                        onPlayFrom({
-                          trackId: item.id ?? undefined,
-                          path: item.id ? undefined : item.path
-                        });
+                        if (!item.id) return;
+                        onPlayFrom(item.id);
                       }}
                     >
                       <PlaybackIcon className="icon" aria-hidden="true" />
@@ -109,7 +107,7 @@ export default function QueueList({
                 </div>
               </>
             ) : (
-              <span className="muted">Missing: {item.path}</span>
+              <span className="muted">Missing track</span>
             )}
           </div>
         );

@@ -268,7 +268,13 @@ pub fn spawn_cast_worker(
             if let Some((path, ext_hint, seek_ms, start_paused)) = pending_play.take() {
                 if let Some(session) = session.as_ref() {
                     current_path = Some(path.clone());
-                    let url = build_stream_url_for(&path, &public_base_url, metadata.as_ref());
+                    let url = match build_stream_url_for(&path, &public_base_url, metadata.as_ref()) {
+                        Ok(url) => url,
+                        Err(err) => {
+                            tracing::warn!(error = %err, path = %path.display(), "cast stream url build failed");
+                            continue;
+                        }
+                    };
                     let content_type = content_type_for_ext(&ext_hint);
                     let meta = track_metadata(&path, metadata.as_ref());
                     let payload = load_payload(

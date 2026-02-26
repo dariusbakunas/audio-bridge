@@ -16,7 +16,6 @@ const CORE_FIELDS = new Set([
 interface TrackMetadataModalProps {
   open: boolean;
   trackId?: number | null;
-  trackPath?: string | null;
   targetLabel: string;
   defaults: {
     title?: string | null;
@@ -43,7 +42,6 @@ function parseOptionalInt(value: string, allowZero = false): number | undefined 
 export default function TrackMetadataModal({
   open,
   trackId,
-  trackPath,
   targetLabel,
   defaults,
   onClose,
@@ -84,14 +82,12 @@ export default function TrackMetadataModal({
     setExtraTags({});
     setEnabledFields({});
 
-    if (!trackId && !trackPath) {
+    if (!trackId) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    const query = trackId
-      ? `track_id=${trackId}`
-      : `path=${encodeURIComponent(trackPath ?? "")}`;
+    const query = `track_id=${trackId}`;
     const metadataPromise = fetchJson<TrackMetadataResponse>(`/tracks/metadata?${query}`);
     const fieldsPromise = fetchJson<TrackMetadataFieldsResponse>(`/tracks/metadata/fields?${query}`);
     Promise.allSettled([metadataPromise, fieldsPromise])
@@ -125,7 +121,6 @@ export default function TrackMetadataModal({
   }, [
     open,
     trackId,
-    trackPath,
     defaults.title,
     defaults.artist,
     defaults.album,
@@ -136,7 +131,7 @@ export default function TrackMetadataModal({
   ]);
 
   const handleSave = async () => {
-    if (!trackId && !trackPath) return;
+    if (!trackId) return;
     const yearValue = parseOptionalInt(year);
     const trackValue = parseOptionalInt(trackNumber);
     const discValue = parseOptionalInt(discNumber);
@@ -153,9 +148,7 @@ export default function TrackMetadataModal({
       return;
     }
 
-    const payload: Record<string, unknown> = trackId
-      ? { track_id: trackId }
-      : { path: trackPath ?? "" };
+    const payload: Record<string, unknown> = { track_id: trackId };
     const clearFields: string[] = [];
     const titleValue = title.trim();
     const artistValue = artist.trim();

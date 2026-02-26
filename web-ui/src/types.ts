@@ -8,7 +8,7 @@ export interface OutputInfo {
 }
 
 export interface StatusResponse {
-  now_playing?: string | null;
+  now_playing_track_id?: number | null;
   paused?: boolean | null;
   elapsed_ms?: number | null;
   duration_ms?: number | null;
@@ -116,8 +116,7 @@ export interface SessionLocksResponse {
 
 export interface QueueItemTrack {
   kind: "track";
-  id?: number | null;
-  path: string;
+  id: number;
   file_name: string;
   title?: string | null;
   duration_ms?: number | null;
@@ -131,7 +130,7 @@ export interface QueueItemTrack {
 
 export interface QueueItemMissing {
   kind: "missing";
-  path: string;
+  id?: number | null;
 }
 
 export type QueueItem = QueueItemTrack | QueueItemMissing;
@@ -183,7 +182,6 @@ export interface AlbumSummary {
 
 export interface TrackSummary {
   id: number;
-  path: string;
   file_name: string;
   title?: string | null;
   artist?: string | null;
@@ -211,7 +209,7 @@ export interface TrackResolveResponse {
 }
 
 export interface TrackMetadataResponse {
-  path: string;
+  track_id: number;
   title?: string | null;
   artist?: string | null;
   album?: string | null;
@@ -245,8 +243,7 @@ export interface TrackAnalysisResponse {
 }
 
 export interface TrackAnalysisRequest {
-  track_id?: number | null;
-  path?: string | null;
+  track_id: number;
   max_seconds?: number;
   width?: number;
   height?: number;

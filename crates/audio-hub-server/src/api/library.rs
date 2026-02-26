@@ -22,18 +22,9 @@ pub struct LibraryQuery {
     pub dir: Option<String>,
 }
 
-/// Query parameters for stream requests.
+/// Query parameters for transcode-by-id stream requests.
 #[derive(Deserialize, ToSchema)]
-pub struct StreamQuery {
-    /// Absolute path to the media file.
-    pub path: String,
-}
-
-/// Query parameters for transcode stream requests.
-#[derive(Deserialize, ToSchema)]
-pub struct TranscodeQuery {
-    /// Absolute path to the media file.
-    pub path: String,
+pub struct TranscodeByIdQuery {
     /// Output format (mp3, opus, aac, wav).
     pub format: Option<String>,
     /// Optional audio bitrate in kbps (ignored for wav).
@@ -78,30 +69,6 @@ pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQ
 
 #[utoipa::path(
     get,
-    path = "/stream",
-    params(
-        ("path" = String, Query, description = "Track path under the library root")
-    ),
-    responses(
-        (status = 200, description = "Full file stream"),
-        (status = 206, description = "Partial content"),
-        (status = 404, description = "Not found"),
-        (status = 416, description = "Invalid range")
-    )
-)]
-#[get("/stream")]
-/// Stream a track with HTTP range support.
-pub async fn stream_track(
-    state: web::Data<AppState>,
-    req: HttpRequest,
-    query: web::Query<StreamQuery>,
-) -> impl Responder {
-    let path = PathBuf::from(&query.path);
-    stream_file(&state, req, path).await
-}
-
-#[utoipa::path(
-    get,
     path = "/stream/track/{id}",
     params(
         ("id" = i64, Path, description = "Track id")
@@ -120,13 +87,25 @@ pub async fn stream_track_id(
     req: HttpRequest,
     id: web::Path<i64>,
 ) -> impl Responder {
-    let track_id = id.into_inner();
-    let path = match state.metadata.db.track_path_for_id(track_id) {
-        Ok(Some(path)) => PathBuf::from(path),
-        Ok(None) => return HttpResponse::NotFound().finish(),
-        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    let path = match path_for_track_id(&state, id.into_inner()) {
+        Ok(path) => path,
+        Err(resp) => return resp,
     };
     stream_file(&state, req, path).await
+}
+
+fn path_for_track_id(state: &web::Data<AppState>, track_id: i64) -> Result<PathBuf, HttpResponse> {
+    let raw = match state.metadata.db.track_path_for_id(track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return Err(HttpResponse::NotFound().finish()),
+        Err(err) => return Err(HttpResponse::InternalServerError().body(err.to_string())),
+    };
+    let candidate = PathBuf::from(raw);
+    state
+        .output
+        .controller
+        .canonicalize_under_root(state, &candidate)
+        .map_err(|err| err.into_response())
 }
 
 async fn stream_file(
@@ -211,33 +190,36 @@ async fn stream_file(
 
 #[utoipa::path(
     get,
-    path = "/stream/transcode",
+    path = "/stream/transcode/track/{id}",
     params(
-        ("path" = String, Query, description = "Track path under the library root"),
+        ("id" = i64, Path, description = "Track id"),
         ("format" = Option<String>, Query, description = "Output format: mp3, opus, aac, wav"),
         ("bitrate_kbps" = Option<u32>, Query, description = "Optional bitrate in kbps")
     ),
     responses(
         (status = 200, description = "Transcoded audio stream"),
         (status = 400, description = "Invalid request"),
+        (status = 404, description = "Track not found"),
         (status = 500, description = "Transcode failed")
     )
 )]
-#[get("/stream/transcode")]
-/// Stream a transcoded audio track (requires ffmpeg in PATH).
-pub async fn transcode_track(
+#[get("/stream/transcode/track/{id}")]
+/// Stream a transcoded audio track by track id (requires ffmpeg in PATH).
+pub async fn transcode_track_id(
     state: web::Data<AppState>,
-    query: web::Query<TranscodeQuery>,
+    id: web::Path<i64>,
+    query: web::Query<TranscodeByIdQuery>,
 ) -> impl Responder {
-    let path = std::path::PathBuf::from(&query.path);
-    let path = match state.output.controller.canonicalize_under_root(&state, &path) {
-        Ok(dir) => dir,
-        Err(err) => return err.into_response(),
+    let path = match path_for_track_id(&state, id.into_inner()) {
+        Ok(path) => path,
+        Err(resp) => return resp,
     };
-
     let format = query.format.as_deref().unwrap_or("mp3");
     let bitrate_kbps = query.bitrate_kbps;
+    transcode_file(path, format, bitrate_kbps).await
+}
 
+async fn transcode_file(path: PathBuf, format: &str, bitrate_kbps: Option<u32>) -> HttpResponse {
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-hide_banner")
         .arg("-loglevel")
@@ -350,7 +332,7 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct RescanTrackRequest {
-    pub path: String,
+    pub track_id: i64,
 }
 
 #[utoipa::path(
@@ -369,9 +351,14 @@ pub async fn rescan_track(
     state: web::Data<AppState>,
     body: web::Json<RescanTrackRequest>,
 ) -> impl Responder {
-    let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &body.path) {
+    let path = match state.metadata.db.track_path_for_id(body.track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => return HttpResponse::NotFound().body("track not found"),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    let root = state.library.read().unwrap().root().to_path_buf();
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
         Err(response) => return response,
     };

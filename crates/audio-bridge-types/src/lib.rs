@@ -37,7 +37,7 @@ pub struct BridgeStatus {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PlaybackStatus {
-    pub now_playing: Option<String>,
+    pub now_playing_track_id: Option<i64>,
     pub paused: bool,
     pub bridge_online: bool,
     pub elapsed_ms: Option<u64>,

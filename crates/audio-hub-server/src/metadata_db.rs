@@ -71,7 +71,6 @@ pub struct AlbumSummary {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct TrackSummary {
     pub id: i64,
-    pub path: String,
     pub file_name: String,
     pub title: Option<String>,
     pub artist: Option<String>,
@@ -1441,7 +1440,7 @@ impl MetadataDb {
         let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
         let mut stmt = conn.prepare(
             r#"
-            SELECT t.id, t.path, t.file_name, t.title, ar.name, al.title,
+            SELECT t.id, t.file_name, t.title, ar.name, al.title,
                    t.track_number, t.disc_number, t.duration_ms, t.format,
                    t.sample_rate, t.bit_depth, t.mbid, al.cover_art_path
             FROM tracks t
@@ -1458,25 +1457,24 @@ impl MetadataDb {
             params![album_id, artist_id, search_like, limit, offset],
             |row| {
                 let track_id: i64 = row.get(0)?;
-                let cover_path: Option<String> = row.get(13)?;
+                let cover_path: Option<String> = row.get(12)?;
                 let cover_art_url = cover_path
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
                     .map(|_| format!("/tracks/{}/cover", track_id));
                 Ok(TrackSummary {
                     id: track_id,
-                    path: row.get(1)?,
-                    file_name: row.get(2)?,
-                    title: row.get(3)?,
-                    artist: row.get(4)?,
-                    album: row.get(5)?,
-                    track_number: row.get::<_, Option<i64>>(6)?.map(|v| v as u32),
-                    disc_number: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
-                    duration_ms: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
-                    format: row.get(9)?,
-                    sample_rate: row.get::<_, Option<i64>>(10)?.map(|v| v as u32),
-                    bit_depth: row.get::<_, Option<i64>>(11)?.map(|v| v as u32),
-                    mbid: row.get(12)?,
+                    file_name: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    album: row.get(4)?,
+                    track_number: row.get::<_, Option<i64>>(5)?.map(|v| v as u32),
+                    disc_number: row.get::<_, Option<i64>>(6)?.map(|v| v as u32),
+                    duration_ms: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
+                    format: row.get(8)?,
+                    sample_rate: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
+                    bit_depth: row.get::<_, Option<i64>>(10)?.map(|v| v as u32),
+                    mbid: row.get(11)?,
                     cover_art_url,
                 })
             },

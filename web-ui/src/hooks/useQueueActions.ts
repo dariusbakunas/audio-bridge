@@ -34,10 +34,10 @@ export function useQueueActions({ sessionId, setError }: QueueActionsOptions) {
   }, [sessionId, setError]);
 
   const handleQueue = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       try {
         const sid = requireSessionId();
-        await postJson(`/sessions/${encodeURIComponent(sid)}/queue`, { paths: [path] });
+        await postJson(`/sessions/${encodeURIComponent(sid)}/queue`, { track_ids: [trackId] });
       } catch (err) {
         setError((err as Error).message);
       }
@@ -47,17 +47,17 @@ export function useQueueActions({ sessionId, setError }: QueueActionsOptions) {
 
   const handleQueueAlbumTrack = useCallback(
     async (track: TrackSummary) => {
-      if (!track.path) return;
-      await handleQueue(track.path);
+      if (!track.id) return;
+      await handleQueue(track.id);
     },
     [handleQueue]
   );
 
   const handlePlayNext = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       try {
         const sid = requireSessionId();
-        await postJson(`/sessions/${encodeURIComponent(sid)}/queue/next/add`, { paths: [path] });
+        await postJson(`/sessions/${encodeURIComponent(sid)}/queue/next/add`, { track_ids: [trackId] });
       } catch (err) {
         setError((err as Error).message);
       }
@@ -66,10 +66,10 @@ export function useQueueActions({ sessionId, setError }: QueueActionsOptions) {
   );
 
   const handleQueueRemove = useCallback(
-    async (path: string) => {
+    async (trackId: number) => {
       try {
         const sid = requireSessionId();
-        await postJson(`/sessions/${encodeURIComponent(sid)}/queue/remove`, { path });
+        await postJson(`/sessions/${encodeURIComponent(sid)}/queue/remove`, { track_id: trackId });
       } catch (err) {
         setError((err as Error).message);
       }
@@ -93,17 +93,11 @@ export function useQueueActions({ sessionId, setError }: QueueActionsOptions) {
   );
 
   const handleQueuePlayFrom = useCallback(
-    async (payload: { trackId?: number; path?: string }) => {
+    async (trackId: number) => {
       try {
         const sid = requireSessionId();
         const endpoint = `/sessions/${encodeURIComponent(sid)}/queue/play_from`;
-        if (payload.trackId) {
-          await postJson(endpoint, { track_id: payload.trackId });
-        } else if (payload.path) {
-          await postJson(endpoint, { path: payload.path });
-        } else {
-          throw new Error("Missing track id or path for queue playback.");
-        }
+        await postJson(endpoint, { track_id: trackId });
       } catch (err) {
         setError((err as Error).message);
       }

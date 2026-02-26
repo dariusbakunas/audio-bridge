@@ -395,6 +395,10 @@ impl SessionPlaybackManager {
             None
         };
         let now_playing_path = status.now_playing.clone().or(queue_now_playing);
+        let now_playing_track_id_from_status = status
+            .now_playing
+            .as_deref()
+            .and_then(parse_now_playing_track_id);
         let session_has_previous = crate::session_registry::queue_snapshot(session_id)
             .ok()
             .map(|snapshot| !snapshot.history.is_empty());
@@ -428,8 +432,18 @@ impl SessionPlaybackManager {
         } else {
             (None, None, None, None)
         };
+        let now_playing_track_id = now_playing_track_id_from_status.or_else(|| {
+            resolved_path.as_ref().and_then(|path| {
+                state
+                    .metadata
+                    .db
+                    .track_id_for_path(&path.to_string_lossy())
+                    .ok()
+                    .flatten()
+            })
+        });
         crate::models::StatusResponse {
-            now_playing: now_playing_path,
+            now_playing_track_id,
             paused: status.paused,
             bridge_online: true,
             elapsed_ms: status.elapsed_ms,
@@ -671,9 +685,10 @@ impl SessionPlaybackManager {
             .as_ref()
             .map(|s| !s.history.is_empty())
             .unwrap_or(false);
-        let (now_playing, title, artist, album, format, sample_rate, duration_ms) = match now_path {
+        let (now_playing_track_id, title, artist, album, format, sample_rate, duration_ms) = match now_path {
             Some(path) => {
                 let now = path.to_string_lossy().to_string();
+                let track_id = state.metadata.db.track_id_for_path(&now).ok().flatten();
                 let lib = state.library.read().unwrap();
                 match lib.find_track_by_path(&path) {
                     Some(crate::models::LibraryEntry::Track {
@@ -694,7 +709,7 @@ impl SessionPlaybackManager {
                             .and_then(|record| record.title)
                             .or_else(|| Some(file_name));
                         (
-                            Some(now),
+                            track_id,
                             title,
                             artist,
                             album,
@@ -703,14 +718,14 @@ impl SessionPlaybackManager {
                             duration_ms,
                         )
                     }
-                    _ => (Some(now), None, None, None, None, None, None),
+                    _ => (track_id, None, None, None, None, None, None),
                 }
             }
             None => (None, None, None, None, None, None, None),
         };
         let provider_online = source_error.is_none();
         crate::models::StatusResponse {
-            now_playing,
+            now_playing_track_id,
             paused: false,
             bridge_online: provider_online,
             elapsed_ms: None,
@@ -753,7 +768,7 @@ impl SessionPlaybackManager {
         if status.has_previous.is_none() {
             status.has_previous = Some(!snapshot.history.is_empty());
         }
-        if status.now_playing.is_some() {
+        if status.now_playing_track_id.is_some() {
             return;
         }
         if status.paused && status.elapsed_ms.is_none() && status.duration_ms.is_none() {
@@ -763,7 +778,15 @@ impl SessionPlaybackManager {
             return;
         };
         let now = path.to_string_lossy().to_string();
-        status.now_playing = Some(now.clone());
+        status.now_playing_track_id = state
+            .metadata
+            .db
+            .track_id_for_path(&now)
+            .ok()
+            .flatten();
+        if status.now_playing_track_id.is_none() {
+            return;
+        }
         let lib = state.library.read().unwrap();
         if let Some(crate::models::LibraryEntry::Track {
             file_name,
@@ -824,6 +847,28 @@ fn parse_now_playing_path(raw: &str) -> Option<String> {
                 let candidate = decoded.trim().to_string();
                 Path::new(&candidate).is_absolute().then_some(candidate)
             });
+    }
+    None
+}
+
+fn parse_now_playing_track_id(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(id) = trimmed.parse::<i64>() {
+        return Some(id);
+    }
+    let url = reqwest::Url::parse(trimmed).ok()?;
+    let mut segments = url.path_segments()?;
+    let mut prev = None::<String>;
+    for segment in &mut segments {
+        if prev.as_deref() == Some("track") {
+            if let Ok(id) = segment.parse::<i64>() {
+                return Some(id);
+            }
+        }
+        prev = Some(segment.to_string());
     }
     None
 }

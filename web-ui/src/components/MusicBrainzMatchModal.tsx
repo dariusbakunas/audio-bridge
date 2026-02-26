@@ -16,7 +16,7 @@ interface MusicBrainzMatchModalProps {
     artist: string;
     album?: string | null;
   };
-  trackPath?: string | null;
+  trackId?: number | null;
   albumId?: number | null;
   onClose: () => void;
   onApplied?: () => void;
@@ -27,7 +27,7 @@ export default function MusicBrainzMatchModal({
   kind,
   targetLabel,
   defaults,
-  trackPath,
+  trackId,
   albumId,
   onClose,
   onApplied
@@ -58,10 +58,10 @@ export default function MusicBrainzMatchModal({
   const hasRequiredIds = useMemo(() => {
     if (!selected) return false;
     if (kind === "track") {
-      return Boolean(selected.recording_mbid && trackPath);
+      return Boolean(selected.recording_mbid && trackId);
     }
     return Boolean(selected.release_mbid && albumId !== null && albumId !== undefined);
-  }, [selected, kind, trackPath, albumId]);
+  }, [selected, kind, trackId, albumId]);
 
   const handleSearch = async () => {
     if (!canSearch) return;
@@ -97,7 +97,7 @@ export default function MusicBrainzMatchModal({
       if (kind === "track") {
         await postJson("/metadata/match/apply", {
           kind: "track",
-          path: trackPath,
+          track_id: trackId,
           recording_mbid: selected.recording_mbid,
           artist_mbid: selected.artist_mbid ?? undefined,
           album_mbid: selected.release_mbid ?? undefined,

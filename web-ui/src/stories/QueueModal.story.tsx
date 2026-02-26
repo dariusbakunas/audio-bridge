@@ -7,7 +7,6 @@ const items: QueueItem[] = [
   {
     kind: "track",
     id: 101,
-    path: "/music/Radiohead/In Rainbows/01 - 15 Step.flac",
     file_name: "01 - 15 Step.flac",
     duration_ms: 224000,
     sample_rate: 44100,
@@ -18,7 +17,6 @@ const items: QueueItem[] = [
   {
     kind: "track",
     id: 102,
-    path: "/music/Radiohead/In Rainbows/02 - Bodysnatchers.flac",
     file_name: "02 - Bodysnatchers.flac",
     duration_ms: 241000,
     sample_rate: 44100,
@@ -28,7 +26,7 @@ const items: QueueItem[] = [
   },
   {
     kind: "missing",
-    path: "/music/Unknown/ghost.flac"
+    id: null
   }
 ];
 

@@ -31,7 +31,6 @@ const album: AlbumSummary = {
 const tracks: TrackSummary[] = [
   {
     id: 1,
-    path: "/music/Radiohead/In Rainbows/01 - 15 Step.flac",
     file_name: "01 - 15 Step.flac",
     title: "15 Step",
     artist: "Radiohead",
@@ -40,7 +39,6 @@ const tracks: TrackSummary[] = [
   },
   {
     id: 2,
-    path: "/music/Radiohead/In Rainbows/02 - Bodysnatchers.flac",
     file_name: "02 - Bodysnatchers.flac",
     title: "Bodysnatchers",
     artist: "Radiohead",
@@ -49,7 +47,6 @@ const tracks: TrackSummary[] = [
   },
   {
     id: 3,
-    path: "/music/Radiohead/In Rainbows/03 - Nude.flac",
     file_name: "03 - Nude.flac",
     title: "Nude",
     artist: "Radiohead",
@@ -87,7 +84,7 @@ export function Default() {
         onPause={action("pause")}
         onPlayAlbum={action("play-album")}
         onPlayTrack={action("play-track")}
-        trackMenuPath={null}
+        trackMenuTrackId={null}
         trackMenuPosition={null}
         onToggleMenu={action("toggle-menu")}
         onMenuPlay={action("menu-play")}
@@ -97,6 +94,10 @@ export function Default() {
         onFixTrackMatch={action("fix-track-match")}
         onEditTrackMetadata={action("edit-track-metadata")}
         onEditAlbumMetadata={action("edit-album-metadata")}
+        onAnalyzeTrack={action("analyze-track")}
+        onEditCatalogMetadata={action("edit-catalog-metadata")}
+        onReadAlbumNotes={action("read-album-notes")}
+        nowPlayingTrackId={1}
       />
     </div>
   );
@@ -119,7 +120,7 @@ export function EmptyTracks() {
         onPause={action("pause")}
         onPlayAlbum={action("play-album")}
         onPlayTrack={action("play-track")}
-        trackMenuPath={null}
+        trackMenuTrackId={null}
         trackMenuPosition={null}
         onToggleMenu={action("toggle-menu")}
         onMenuPlay={action("menu-play")}
@@ -129,6 +130,10 @@ export function EmptyTracks() {
         onFixTrackMatch={action("fix-track-match")}
         onEditTrackMetadata={action("edit-track-metadata")}
         onEditAlbumMetadata={action("edit-album-metadata")}
+        onAnalyzeTrack={action("analyze-track")}
+        onEditCatalogMetadata={action("edit-catalog-metadata")}
+        onReadAlbumNotes={action("read-album-notes")}
+        nowPlayingTrackId={null}
       />
     </div>
   );

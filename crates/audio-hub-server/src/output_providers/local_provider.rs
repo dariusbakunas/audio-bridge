@@ -271,7 +271,14 @@ impl OutputProvider for LocalProvider {
                     None => (None, None, None, None, None, None),
                 };
             let resp = StatusResponse {
-                now_playing: status.now_playing.as_ref().map(|p| p.to_string_lossy().to_string()),
+                now_playing_track_id: status.now_playing.as_ref().and_then(|p| {
+                    state
+                        .metadata
+                        .db
+                        .track_id_for_path(&p.to_string_lossy())
+                        .ok()
+                        .flatten()
+                }),
                 paused: status.paused,
                 bridge_online: true,
                 elapsed_ms: status.elapsed_ms,
