@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
-import { toast, ToastContainer } from "react-toastify";
 import {
   Bell,
   ChevronLeft,
@@ -650,21 +649,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     };
     setNotifications((prev) => [entry, ...prev].slice(0, 200));
     setUnreadCount((prev) => prev + 1);
-    const toastId = `${level}:${message}`;
-    switch (level) {
-      case "success":
-        toast.success(message, { toastId });
-        break;
-      case "info":
-        toast.info(message, { toastId });
-        break;
-      case "warn":
-        toast.warn(message, { toastId });
-        break;
-      default:
-        toast.error(message, { toastId });
-        break;
-    }
   }, []);
 
   const reportError = useCallback(
@@ -2495,18 +2479,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           />
         </main>
       </div>
-
-      {!showGate ? (
-        <ToastContainer
-          position="top-right"
-          autoClose={6000}
-          newestOnTop
-          closeOnClick
-          pauseOnFocusLoss
-          pauseOnHover
-          theme="light"
-        />
-      ) : null}
 
       {notificationsOpen && !showGate ? (
         <div
