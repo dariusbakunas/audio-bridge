@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-26
+
+### Added
+- Session volume control API:
+  - `GET /sessions/{id}/volume`
+  - `POST /sessions/{id}/volume`
+  - `POST /sessions/{id}/mute`
+- Bridge volume/mute transport support with new bridge endpoints:
+  - `GET /volume`
+  - `POST /volume`
+  - `POST /mute`
+- Web UI player volume controls:
+  - inline slider + mute action on wide layouts
+  - compact popover with vertical slider on collapsed layouts
+
+### Changed
+- Bridge provider capabilities now advertise volume control support.
+- Session output-switch migration now restores playback position and pause state in a single play request (seek + pause options included), reducing race conditions.
+- Session status SSE now performs cast-specific periodic refresh (1s) while keeping non-cast outputs event-driven.
+- Web UI playback bar behavior and responsiveness:
+  - queue sidebar overlays content with backdrop tint
+  - action button collapse breakpoint tuned for tighter layouts
+  - compact volume control layered above grid content
+
+### Fixed
+- Cast output switching could skip to the next track due to transient idle-state handling.
+- Cast pause/play reliability issues caused by stale toggle state and delayed media session readiness.
+- Cast playback status mapping edge cases (idle/pause/clear behavior) that could leave controls desynced.
+- Bridge elapsed-time reporting drift when device nominal sample rate differed from actual stream sample rate.
+- Bridge status polling load reduced by relying on status stream updates and cached status in session paths.
+- UI regressions in output/queue/track interactions:
+  - track menu placement near bottom bar and item wrapping/spacing
+  - queue modal double-scroll behavior
+  - disabled input readability in metadata dialogs
+
 ## [0.11.0] - 2026-02-24
 
 ### Added
