@@ -46,10 +46,12 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let tls_config = resolve_tls_config(&args, &cfg)?;
     let public_base_url = config::public_base_url_from_config(&cfg, bind, tls_config.is_some())?;
     let media_dir = resolve_media_dir(args.media_dir, &cfg)?;
+    let metadata_db_path = resolve_metadata_db_path(args.metadata_db_path, &cfg);
     tracing::info!(
         bind = %bind,
         public_base_url = %public_base_url,
         media_dir = %media_dir.display(),
+        metadata_db_path = ?metadata_db_path.as_ref().map(|p| p.display().to_string()),
         "starting audio-hub-server"
     );
     let web_ui_dist = locate_web_ui_dist();
@@ -61,7 +63,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     let events = crate::events::EventBus::new();
     let metadata_wake = MetadataWake::new();
     let (metadata_db, library) =
-        init_metadata_db_and_library(&media_dir, events.clone(), metadata_wake.clone())?;
+        init_metadata_db_and_library(&media_dir, metadata_db_path, events.clone(), metadata_wake.clone())?;
     let musicbrainz = init_musicbrainz(&cfg)?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
@@ -562,6 +564,14 @@ fn resolve_media_dir(
     })
 }
 
+/// Resolve optional metadata DB path from args + config.
+fn resolve_metadata_db_path(
+    db_path: Option<PathBuf>,
+    cfg: &config::ServerConfig,
+) -> Option<PathBuf> {
+    db_path.or_else(|| config::metadata_db_path_from_config(cfg))
+}
+
 fn locate_web_ui_dist() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(dir) = std::env::current_dir() {
@@ -595,10 +605,15 @@ fn init_musicbrainz(cfg: &config::ServerConfig) -> Result<Option<Arc<MusicBrainz
 
 fn init_metadata_db_and_library(
     media_dir: &PathBuf,
+    metadata_db_path: Option<PathBuf>,
     events: crate::events::EventBus,
     metadata_wake: MetadataWake,
 ) -> Result<(MetadataDb, crate::library::LibraryIndex)> {
-    let metadata_db = MetadataDb::new(media_dir)?;
+    let metadata_db = if let Some(path) = metadata_db_path {
+        MetadataDb::new_at_path(&path)?
+    } else {
+        MetadataDb::new(media_dir)?
+    };
     let metadata_service = MetadataService::new(
         metadata_db.clone(),
         media_dir.clone(),

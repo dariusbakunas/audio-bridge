@@ -16,6 +16,8 @@ pub struct ServerConfig {
     pub bind: Option<String>,
     /// Media library root directory.
     pub media_dir: Option<String>,
+    /// Optional full path to metadata SQLite DB file.
+    pub metadata_db_path: Option<String>,
     /// Public base URL used to construct stream URLs.
     pub public_base_url: Option<String>,
     /// Bridge definitions.
@@ -125,6 +127,18 @@ pub fn media_dir_from_config(cfg: &ServerConfig) -> Result<std::path::PathBuf> {
     Ok(std::path::PathBuf::from(dir))
 }
 
+/// Extract the optional metadata DB path from config.
+pub fn metadata_db_path_from_config(cfg: &ServerConfig) -> Option<std::path::PathBuf> {
+    cfg.metadata_db_path.as_deref().and_then(|path| {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(trimmed))
+        }
+    })
+}
+
 /// Parse an optional bind address from config.
 pub fn bind_from_config(cfg: &ServerConfig) -> Result<Option<std::net::SocketAddr>> {
     let Some(bind) = cfg.bind.as_deref() else {
@@ -209,6 +223,7 @@ mod tests {
         let cfg = ServerConfig {
             bind: None,
             media_dir: None,
+            metadata_db_path: None,
             public_base_url: Some("http://example.com/".to_string()),
             bridges: None,
             local_outputs: None,
@@ -230,6 +245,7 @@ mod tests {
         let cfg = ServerConfig {
             bind: None,
             media_dir: None,
+            metadata_db_path: None,
             public_base_url: None,
             bridges: None,
             local_outputs: None,
@@ -250,6 +266,7 @@ mod tests {
         let cfg = ServerConfig {
             bind: Some("127.0.0.1:9000".to_string()),
             media_dir: None,
+            metadata_db_path: None,
             public_base_url: None,
             bridges: None,
             local_outputs: None,

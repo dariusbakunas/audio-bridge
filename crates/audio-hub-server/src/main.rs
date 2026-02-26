@@ -63,6 +63,10 @@ pub(crate) struct Args {
     #[arg(long)]
     media_dir: Option<PathBuf>,
 
+    /// Optional full path to metadata SQLite DB file
+    #[arg(long)]
+    metadata_db_path: Option<PathBuf>,
+
     /// Optional server config file (TOML)
     #[arg(long)]
     config: Option<PathBuf>,
@@ -95,6 +99,7 @@ async fn main() -> Result<()> {
         version = VERSION,
         bind = ?args.bind,
         media_dir = ?args.media_dir,
+        metadata_db_path = ?args.metadata_db_path,
         config = ?args.config,
         "audio-hub-server starting"
     );

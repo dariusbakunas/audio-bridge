@@ -172,6 +172,10 @@ fn map_media_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAssetRe
 impl MetadataDb {
     pub fn new(media_root: &Path) -> Result<Self> {
         let db_path = db_path_for(media_root);
+        Self::new_at_path(&db_path)
+    }
+
+    pub fn new_at_path(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create metadata dir {:?}", parent))?;

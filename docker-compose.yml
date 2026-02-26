@@ -8,4 +8,12 @@ services:
     volumes:
       - ./crates/audio-hub-server/config.example.toml:/config/config.toml
       - ${AUDIO_HUB_MEDIA_DIR:-./music}:/music
+      - ${AUDIO_HUB_DATA_DIR:-./data}:/data
+    command:
+      - --bind
+      - 0.0.0.0:8080
+      - --config
+      - /config/config.toml
+      - --metadata-db-path
+      - /data/metadata.sqlite
     restart: unless-stopped

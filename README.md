@@ -170,13 +170,18 @@ docker run --rm \
   --network host \
   -v "$(pwd)/crates/audio-hub-server/config.example.toml:/config/config.toml" \
   -v "/path/to/music:/music" \
-  audio-hub-server:local
+  -v "$(pwd)/data:/data" \
+  audio-hub-server:local \
+  --bind 0.0.0.0:8080 \
+  --config /config/config.toml \
+  --metadata-db-path /data/metadata.sqlite
 ```
 
 Or use compose:
 
 ```bash
 export AUDIO_HUB_MEDIA_DIR=/path/to/music
+export AUDIO_HUB_DATA_DIR=$(pwd)/data
 docker compose up --build -d
 ```
 
@@ -186,7 +191,9 @@ Notes:
 - The image includes `web-ui/dist`, so the dashboard is served at `/` out of the box.
 - Mount config read/write so UI-persisted output settings can be written back to config.
 - Update the mounted config so `media_dir` points to the container path (for example `/music`).
-- Mount media read/write so the server can write metadata DB/artifacts and album marker files.
+- `--metadata-db-path /data/metadata.sqlite` stores metadata DB outside the media mount.
+- Mount `/data` read/write to persist metadata DB and generated artifacts.
+- Mount media read/write so the server can write album marker files.
 - Compose uses `network_mode: host` (no port mapping required in `docker-compose.yml`).
 - Host networking is intended for Linux hosts; Docker Desktop (macOS/Windows) has limitations.
 
@@ -273,6 +280,7 @@ Use a TOML config to define the media path and outputs:
 # public_base_url: base URL reachable by the bridge (used for /stream URLs)
 # tls_cert: path to a PEM-encoded TLS certificate (optional)
 # tls_key: path to a PEM-encoded TLS private key (optional)
+# metadata_db_path: full path to metadata sqlite db (optional)
 # bridges: list of bridge devices to connect to
 # local_outputs: enable local outputs on the hub host
 # local_id/name/device: optional overrides for local outputs
@@ -282,6 +290,7 @@ Use a TOML config to define the media path and outputs:
 bind = "0.0.0.0:8443"
 public_base_url = "https://192.168.1.10:8443"
 media_dir = "/srv/music"
+# metadata_db_path = "/var/lib/audio-hub/metadata.sqlite"
 # local_outputs = true
 # local_id = "local"
 # local_name = "Local Host"
@@ -299,7 +308,7 @@ name = "Living Room"
 http_addr = "192.168.1.50:5556"
 ```
 
-`public_base_url` must be reachable by the bridge so it can pull `/stream` URLs (set it to the server’s LAN IP + port). Pass config via `--config` (you can still override the media path via `--media-dir`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
+`public_base_url` must be reachable by the bridge so it can pull `/stream` URLs (set it to the server’s LAN IP + port). Pass config via `--config` (you can still override paths via `--media-dir` and `--metadata-db-path`). If `--config` is omitted, the server will look for `config.toml` next to the binary.
 
 If you enable TLS, update `public_base_url` to use `https://` and the TLS port.
 
