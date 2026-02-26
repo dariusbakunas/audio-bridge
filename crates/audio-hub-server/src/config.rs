@@ -20,8 +20,6 @@ pub struct ServerConfig {
     pub public_base_url: Option<String>,
     /// Bridge definitions.
     pub bridges: Option<Vec<BridgeConfig>>,
-    /// Optional active output id on startup.
-    pub active_output: Option<String>,
     /// Enable local outputs.
     pub local_outputs: Option<bool>,
     /// Local provider id.
@@ -213,7 +211,6 @@ mod tests {
             media_dir: None,
             public_base_url: Some("http://example.com/".to_string()),
             bridges: None,
-            active_output: None,
             local_outputs: None,
             local_id: None,
             local_name: None,
@@ -235,7 +232,6 @@ mod tests {
             media_dir: None,
             public_base_url: None,
             bridges: None,
-            active_output: None,
             local_outputs: None,
             local_id: None,
             local_name: None,
@@ -256,7 +252,6 @@ mod tests {
             media_dir: None,
             public_base_url: None,
             bridges: None,
-            active_output: None,
             local_outputs: None,
             local_id: None,
             local_name: None,

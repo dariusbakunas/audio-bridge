@@ -24,7 +24,6 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::api;
 use crate::bridge_transport::BridgeTransportClient;
 use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config};
-use crate::bridge_manager::parse_output_id;
 use crate::config;
 use crate::cover_art::CoverArtFetcher;
 use crate::discovery::{
@@ -71,9 +70,8 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         "loaded bridges from config"
     );
 
-    let mut device_to_set: Option<String> = None;
-    let (active_bridge_id, active_output_id) =
-        resolve_active_output(&cfg, &bridges, &mut device_to_set).await?;
+    let active_bridge_id = None;
+    let active_output_id = None;
     let active_http_addr = active_bridge_id.as_ref().and_then(|bridge_id| {
         bridges
             .iter()
@@ -87,7 +85,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
         .map(|id| output_settings_state.is_exclusive(id))
         .unwrap_or(false);
     apply_active_bridge_device(
-        device_to_set,
+        None,
         active_http_addr,
         &public_base_url,
         active_exclusive,
@@ -710,106 +708,6 @@ fn build_local_state(
     (local_state, device_selection)
 }
 
-/// Resolve active output id from config and available bridges.
-async fn resolve_active_output(
-    cfg: &config::ServerConfig,
-    bridges: &[crate::config::BridgeConfigResolved],
-    device_to_set: &mut Option<String>,
-) -> Result<(Option<String>, Option<String>)> {
-    let result = match cfg.active_output.as_ref() {
-        Some(id) if id.starts_with("local:") => (None, Some(id.clone())),
-        Some(id) => match parse_output_id(id) {
-            Ok((bridge_id, device_id)) => {
-                let http_addr = bridges
-                    .iter()
-                    .find(|b| b.id == bridge_id)
-                    .map(|b| b.http_addr);
-                if let Some(http_addr) = http_addr {
-                    if let Ok(devices) = BridgeTransportClient::new(http_addr)
-                        .list_devices()
-                        .await
-                    {
-                        if let Some(device) = devices.iter().find(|d| d.id == device_id) {
-                            let active_id = format!("bridge:{}:{}", bridge_id, device.id);
-                            *device_to_set = Some(device.name.clone());
-                            return Ok((Some(bridge_id), Some(active_id)));
-                        }
-                        if let Some(device) = devices.iter().find(|d| d.name == device_id) {
-                            let active_id = format!("bridge:{}:{}", bridge_id, device.id);
-                            *device_to_set = Some(device.name.clone());
-                            return Ok((Some(bridge_id), Some(active_id)));
-                        }
-                    }
-                }
-                let active_id = format!("bridge:{}:{}", bridge_id, device_id);
-                (Some(bridge_id), Some(active_id))
-            }
-            Err(e) => return Err(anyhow::anyhow!(e)),
-        },
-        None => {
-            if bridges.is_empty() {
-                tracing::warn!("no configured bridges; starting without active output");
-                (None, None)
-            } else {
-                let mut first_bridge: Option<crate::config::BridgeConfigResolved> = None;
-                let mut found_active: Option<(String, String)> = None;
-                for bridge in bridges {
-                    if first_bridge.is_none() {
-                        first_bridge = Some(bridge.clone());
-                    }
-                    match BridgeTransportClient::new(bridge.http_addr)
-                        .list_devices()
-                        .await
-                    {
-                        Ok(devices) if !devices.is_empty() => {
-                            let device = devices[0].clone();
-                            let active_id = format!("bridge:{}:{}", bridge.id, device.id);
-                            tracing::info!(
-                                bridge_id = %bridge.id,
-                                bridge_name = %bridge.name,
-                                device = %device.name,
-                                output_id = %active_id,
-                                "active_output not set; defaulting to first available output"
-                            );
-                            *device_to_set = Some(device.name.clone());
-                            found_active = Some((bridge.id.clone(), active_id));
-                            break;
-                        }
-                        Ok(_) => {
-                            tracing::warn!(
-                                bridge_id = %bridge.id,
-                                bridge_name = %bridge.name,
-                                "bridge returned no outputs while selecting default"
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                bridge_id = %bridge.id,
-                                bridge_name = %bridge.name,
-                                error = %e,
-                                "bridge unavailable while selecting default"
-                            );
-                        }
-                    }
-                }
-
-                if let Some(found) = found_active {
-                    (Some(found.0), Some(found.1))
-                } else {
-                    let bridge = first_bridge.unwrap();
-                    tracing::warn!(
-                        bridge_id = %bridge.id,
-                        bridge_name = %bridge.name,
-                        "active_output not set; no outputs available, starting without active output"
-                    );
-                    (None, None)
-                }
-            }
-        }
-    };
-    Ok(result)
-}
-
 /// Install Ctrl+C handler to stop playback cleanly.
 fn setup_shutdown(player: std::sync::Arc<std::sync::Mutex<crate::bridge::BridgePlayer>>) {
     let _ = ctrlc::set_handler(move || {
@@ -839,54 +737,5 @@ mod tests {
         assert!(!should_log_path("/outputs/bridge:test/status/stream"));
         assert!(should_log_path("/artists"));
         assert!(should_log_path("/outputs/select"));
-    }
-
-    #[test]
-    fn resolve_active_output_supports_local_override() {
-        let system = actix_web::rt::System::new();
-        let mut device_to_set = None;
-        let cfg = config::ServerConfig {
-            bind: None,
-            media_dir: None,
-            public_base_url: None,
-            bridges: None,
-            active_output: Some("local:default".to_string()),
-            local_outputs: None,
-            local_id: None,
-            local_name: None,
-            local_device: None,
-            musicbrainz: None,
-            tls_cert: None,
-            tls_key: None,
-            outputs: None,
-        };
-        let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
-        assert_eq!(result.0, None);
-        assert_eq!(result.1, Some("local:default".to_string()));
-        assert_eq!(device_to_set, None);
-    }
-
-    #[test]
-    fn resolve_active_output_defaults_to_none_without_bridges() {
-        let system = actix_web::rt::System::new();
-        let mut device_to_set = None;
-        let cfg = config::ServerConfig {
-            bind: None,
-            media_dir: None,
-            public_base_url: None,
-            bridges: None,
-            active_output: None,
-            local_outputs: None,
-            local_id: None,
-            local_name: None,
-            local_device: None,
-            musicbrainz: None,
-            tls_cert: None,
-            tls_key: None,
-            outputs: None,
-        };
-        let result = system.block_on(resolve_active_output(&cfg, &[], &mut device_to_set)).expect("resolve");
-        assert_eq!(result, (None, None));
-        assert_eq!(device_to_set, None);
     }
 }
