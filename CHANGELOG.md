@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-02-27
+
+### Changed
+- Docker Compose now supports image override via `AUDIO_HUB_IMAGE` (default remains `audio-hub-server:local`).
+- Docker examples now document running containers as the current host `UID:GID` for writable bind mounts.
+- Docker image workflow now routes `linux/arm64` builds to a native Ubuntu ARM runner instead of emulation.
+
+### Fixed
+- Container startup no longer fails when running with non-default runtime users and generating `web-ui/dist/runtime-config.js`.
+- Entrypoint now logs a warning and continues if runtime web config is not writable, instead of aborting startup.
+
 ## [0.14.0] - 2026-02-27
 
 ### Changed
