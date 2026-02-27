@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-27
+
+### Added
+- Configurable metadata DB location for the hub server:
+  - config file key: `metadata_db_path`
+  - CLI override: `--metadata-db-path <path>`
+- Runtime-configurable Web UI API base for container deployments via `AUDIO_HUB_WEB_API_BASE` (no image rebuild required).
+- Shared test lock helper in `session_registry` for deterministic tests that touch global session state.
+
+### Changed
+- Session queue internals migrated from file paths to track IDs (`now_playing`, queue items, history).
+- Queue/session API flow is now ID-first end-to-end, resolving paths only at playback dispatch boundaries.
+- Metadata SSE payloads no longer expose filesystem paths; events now use album labels and/or track IDs.
+- Docker image entrypoint now generates `web-ui/dist/runtime-config.js` at container start.
+
+### Removed
+- Path-based public streaming endpoints:
+  - `GET /stream?path=...`
+  - `GET /stream/transcode?path=...`
+- Path-based artwork endpoint:
+  - `GET /art?path=...`
+- Path-based track metadata query contract from public endpoints (replaced with `track_id` contracts).
+
+### Fixed
+- Local session pause control regression after ID migration.
+- Session output-switch test flakiness caused by concurrent registry resets.
+
 ## [0.12.0] - 2026-02-26
 
 ### Added
