@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -25,9 +24,9 @@ pub struct SessionRecord {
     pub owner: Option<String>,
     pub active_output_id: Option<String>,
     pub queue_len: usize,
-    pub now_playing: Option<PathBuf>,
-    pub queue_items: Vec<PathBuf>,
-    pub history: VecDeque<PathBuf>,
+    pub now_playing: Option<i64>,
+    pub queue_items: Vec<i64>,
+    pub history: VecDeque<i64>,
     pub created_at: Instant,
     pub last_seen: Instant,
     pub lease_ttl: Duration,
@@ -212,9 +211,9 @@ pub fn touch_session(session_id: &str) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct SessionQueueSnapshot {
-    pub now_playing: Option<PathBuf>,
-    pub queue_items: Vec<PathBuf>,
-    pub history: VecDeque<PathBuf>,
+    pub now_playing: Option<i64>,
+    pub queue_items: Vec<i64>,
+    pub history: VecDeque<i64>,
 }
 
 pub fn queue_snapshot(session_id: &str) -> Result<SessionQueueSnapshot, ()> {
@@ -227,15 +226,15 @@ pub fn queue_snapshot(session_id: &str) -> Result<SessionQueueSnapshot, ()> {
     })
 }
 
-pub fn queue_add_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usize, ()> {
+pub fn queue_add_track_ids(session_id: &str, track_ids: Vec<i64>) -> Result<usize, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
     let mut added = 0usize;
-    for path in paths {
-        if session.queue_items.iter().any(|p| p == &path) {
+    for track_id in track_ids {
+        if session.queue_items.iter().any(|id| id == &track_id) {
             continue;
         }
-        session.queue_items.push(path);
+        session.queue_items.push(track_id);
         added += 1;
     }
     session.queue_len = session.queue_items.len();
@@ -243,15 +242,15 @@ pub fn queue_add_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usize, (
     Ok(added)
 }
 
-pub fn queue_add_next_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usize, ()> {
+pub fn queue_add_next_track_ids(session_id: &str, track_ids: Vec<i64>) -> Result<usize, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
     let mut added = 0usize;
-    for path in paths {
-        if session.queue_items.iter().any(|p| p == &path) {
+    for track_id in track_ids {
+        if session.queue_items.iter().any(|id| id == &track_id) {
             continue;
         }
-        session.queue_items.insert(added, path);
+        session.queue_items.insert(added, track_id);
         added += 1;
     }
     session.queue_len = session.queue_items.len();
@@ -259,10 +258,10 @@ pub fn queue_add_next_paths(session_id: &str, paths: Vec<PathBuf>) -> Result<usi
     Ok(added)
 }
 
-pub fn queue_remove_path(session_id: &str, path: &Path) -> Result<bool, ()> {
+pub fn queue_remove_track_id(session_id: &str, track_id: i64) -> Result<bool, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
-    let removed = if let Some(pos) = session.queue_items.iter().position(|p| p == path) {
+    let removed = if let Some(pos) = session.queue_items.iter().position(|id| *id == track_id) {
         session.queue_items.remove(pos);
         true
     } else {
@@ -287,20 +286,20 @@ pub fn queue_clear(session_id: &str, clear_queue: bool, clear_history: bool) -> 
     Ok(())
 }
 
-pub fn queue_play_from(session_id: &str, path: &Path) -> Result<bool, ()> {
+pub fn queue_play_from(session_id: &str, track_id: i64) -> Result<bool, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
-    let found = if let Some(pos) = session.queue_items.iter().position(|p| p == path) {
+    let found = if let Some(pos) = session.queue_items.iter().position(|id| *id == track_id) {
         if let Some(current) = session.now_playing.take() {
             if session.history.back().map(|last| last != &current).unwrap_or(true) {
                 session.history.push_back(current);
             }
         }
-        let selected = session.queue_items[pos].clone();
+        let selected = session.queue_items[pos];
         session.queue_items.drain(0..=pos);
         session.now_playing = Some(selected);
         true
-    } else if session.now_playing.as_deref() == Some(path) {
+    } else if session.now_playing == Some(track_id) {
         true
     } else {
         let mut matched_history = false;
@@ -310,8 +309,8 @@ pub fn queue_play_from(session_id: &str, path: &Path) -> Result<bool, ()> {
                     session.queue_items.insert(0, current);
                 }
             }
-            session.now_playing = Some(prev.clone());
-            if prev.as_path() == path {
+            session.now_playing = Some(prev);
+            if prev == track_id {
                 matched_history = true;
                 break;
             }
@@ -329,30 +328,30 @@ pub fn queue_play_from(session_id: &str, path: &Path) -> Result<bool, ()> {
     Ok(true)
 }
 
-pub fn queue_next_path(session_id: &str) -> Result<Option<PathBuf>, ()> {
+pub fn queue_next_track_id(session_id: &str) -> Result<Option<i64>, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
     let next = if session.queue_items.is_empty() {
         None
     } else {
-        let path = session.queue_items.remove(0);
+        let track_id = session.queue_items.remove(0);
         if let Some(current) = session.now_playing.take() {
             if session.history.back().map(|last| last != &current).unwrap_or(true) {
                 session.history.push_back(current);
             }
         }
-        session.now_playing = Some(path.clone());
+        session.now_playing = Some(track_id);
         if session.history.len() > 100 {
             let _ = session.history.pop_front();
         }
-        Some(path)
+        Some(track_id)
     };
     session.queue_len = session.queue_items.len();
     session.last_seen = Instant::now();
     Ok(next)
 }
 
-pub fn queue_previous_path(session_id: &str) -> Result<Option<PathBuf>, ()> {
+pub fn queue_previous_track_id(session_id: &str) -> Result<Option<i64>, ()> {
     let mut store = store().lock().map_err(|_| ())?;
     let session = store.by_id.get_mut(session_id).ok_or(())?;
     while let Some(prev) = session.history.pop_back() {
@@ -361,7 +360,7 @@ pub fn queue_previous_path(session_id: &str) -> Result<Option<PathBuf>, ()> {
                 session.queue_items.insert(0, current);
             }
         }
-        session.now_playing = Some(prev.clone());
+        session.now_playing = Some(prev);
         session.queue_len = session.queue_items.len();
         session.last_seen = Instant::now();
         return Ok(Some(prev));
@@ -609,15 +608,19 @@ pub fn reset_for_tests() {
 }
 
 #[cfg(test)]
+pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("test lock poisoned")
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    fn test_guard() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("test lock poisoned")
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        super::test_lock()
     }
 
     fn make_session(name: &str, client_id: &str) -> String {
@@ -814,19 +817,19 @@ mod tests {
         let _guard = test_guard();
         reset_for_tests();
         let sid = make_session("Q", "q");
-        let a = PathBuf::from("/music/a.flac");
-        let b = PathBuf::from("/music/b.flac");
-        let c = PathBuf::from("/music/c.flac");
-        queue_add_paths(&sid, vec![a.clone(), b.clone(), c.clone()]).expect("add paths");
-        let current = queue_next_path(&sid).expect("next").expect("current");
+        let a = 101;
+        let b = 102;
+        let c = 103;
+        queue_add_track_ids(&sid, vec![a, b, c]).expect("add tracks");
+        let current = queue_next_track_id(&sid).expect("next").expect("current");
         assert_eq!(current, a);
 
-        let found = queue_play_from(&sid, &c).expect("play from");
+        let found = queue_play_from(&sid, c).expect("play from");
         assert!(found);
         let snapshot = queue_snapshot(&sid).expect("snapshot");
-        assert_eq!(snapshot.now_playing.as_deref(), Some(c.as_path()));
+        assert_eq!(snapshot.now_playing, Some(c));
         assert!(snapshot.queue_items.is_empty());
-        assert_eq!(snapshot.history.back().map(|p| p.as_path()), Some(a.as_path()));
+        assert_eq!(snapshot.history.back().copied(), Some(a));
     }
 
     #[test]
@@ -834,14 +837,14 @@ mod tests {
         let _guard = test_guard();
         reset_for_tests();
         let sid = make_session("Q", "q2");
-        let a = PathBuf::from("/music/a.flac");
-        queue_add_paths(&sid, vec![a.clone()]).expect("add path");
-        let _ = queue_next_path(&sid).expect("next");
+        let a = 101;
+        queue_add_track_ids(&sid, vec![a]).expect("add track");
+        let _ = queue_next_track_id(&sid).expect("next");
 
-        let found = queue_play_from(&sid, &a).expect("play from current");
+        let found = queue_play_from(&sid, a).expect("play from current");
         assert!(found);
         let snapshot = queue_snapshot(&sid).expect("snapshot");
-        assert_eq!(snapshot.now_playing.as_deref(), Some(a.as_path()));
+        assert_eq!(snapshot.now_playing, Some(a));
         assert!(snapshot.queue_items.is_empty());
     }
 
@@ -850,18 +853,18 @@ mod tests {
         let _guard = test_guard();
         reset_for_tests();
         let sid = make_session("Q", "q3");
-        let a = PathBuf::from("/music/a.flac");
-        let b = PathBuf::from("/music/b.flac");
-        let c = PathBuf::from("/music/c.flac");
-        queue_add_paths(&sid, vec![a.clone(), b.clone(), c.clone()]).expect("add");
-        let _ = queue_next_path(&sid).expect("next a");
-        let _ = queue_next_path(&sid).expect("next b");
-        let _ = queue_next_path(&sid).expect("next c");
+        let a = 101;
+        let b = 102;
+        let c = 103;
+        queue_add_track_ids(&sid, vec![a, b, c]).expect("add");
+        let _ = queue_next_track_id(&sid).expect("next a");
+        let _ = queue_next_track_id(&sid).expect("next b");
+        let _ = queue_next_track_id(&sid).expect("next c");
 
-        let found = queue_play_from(&sid, &a).expect("play from history");
+        let found = queue_play_from(&sid, a).expect("play from history");
         assert!(found);
         let snapshot = queue_snapshot(&sid).expect("snapshot");
-        assert_eq!(snapshot.now_playing.as_deref(), Some(a.as_path()));
+        assert_eq!(snapshot.now_playing, Some(a));
         assert_eq!(snapshot.queue_items.len(), 2);
         assert_eq!(snapshot.queue_items[0], b);
         assert_eq!(snapshot.queue_items[1], c);
@@ -872,12 +875,12 @@ mod tests {
         let _guard = test_guard();
         reset_for_tests();
         let sid = make_session("Q", "q4");
-        let a = PathBuf::from("/music/a.flac");
-        queue_add_paths(&sid, vec![a.clone()]).expect("add");
-        let _ = queue_next_path(&sid).expect("next");
-        let missing = PathBuf::from("/music/missing.flac");
+        let a = 101;
+        queue_add_track_ids(&sid, vec![a]).expect("add");
+        let _ = queue_next_track_id(&sid).expect("next");
+        let missing = 999;
 
-        let found = queue_play_from(&sid, &missing).expect("play from missing");
+        let found = queue_play_from(&sid, missing).expect("play from missing");
         assert!(!found);
     }
 }

@@ -386,15 +386,13 @@ impl SessionPlaybackManager {
     ) -> crate::models::StatusResponse {
         let should_use_queue_fallback = status.now_playing.is_none()
             && (!status.paused || status.elapsed_ms.is_some() || status.duration_ms.is_some());
-        let queue_now_playing = if should_use_queue_fallback {
+        let queue_now_playing_track_id = if should_use_queue_fallback {
             crate::session_registry::queue_snapshot(session_id)
                 .ok()
                 .and_then(|snapshot| snapshot.now_playing)
-                .map(|path| path.to_string_lossy().to_string())
         } else {
             None
         };
-        let now_playing_path = status.now_playing.clone().or(queue_now_playing);
         let now_playing_track_id_from_status = status
             .now_playing
             .as_deref()
@@ -402,46 +400,34 @@ impl SessionPlaybackManager {
         let session_has_previous = crate::session_registry::queue_snapshot(session_id)
             .ok()
             .map(|snapshot| !snapshot.history.is_empty());
-        let resolved_path = now_playing_path
+        let resolved_path = status
+            .now_playing
             .as_deref()
             .and_then(parse_now_playing_path)
             .map(PathBuf::from);
-        let (title, artist, album, format) = if let Some(path) = resolved_path.as_ref() {
-            let lib = state.library.read().unwrap();
-            match lib.find_track_by_path(&path) {
-                Some(crate::models::LibraryEntry::Track {
-                    file_name,
-                    artist,
-                    album,
-                    format,
-                    ..
-                }) => {
-                    let path_str = path.to_string_lossy();
-                    let title = state
+        let now_playing_track_id = now_playing_track_id_from_status
+            .or(queue_now_playing_track_id)
+            .or_else(|| {
+                resolved_path.as_ref().and_then(|path| {
+                    state
                         .metadata
                         .db
-                        .track_record_by_path(path_str.as_ref())
+                        .track_id_for_path(&path.to_string_lossy())
                         .ok()
                         .flatten()
-                        .and_then(|record| record.title)
-                        .or_else(|| Some(file_name));
-                    (title, artist, album, Some(format))
-                }
-                _ => (None, None, None, None),
-            }
-        } else {
-            (None, None, None, None)
-        };
-        let now_playing_track_id = now_playing_track_id_from_status.or_else(|| {
-            resolved_path.as_ref().and_then(|path| {
-                state
-                    .metadata
-                    .db
-                    .track_id_for_path(&path.to_string_lossy())
-                    .ok()
-                    .flatten()
+                })
+            });
+        let (title, artist, album, format) = now_playing_track_id
+            .and_then(|track_id| state.metadata.db.track_record_by_id(track_id).ok().flatten())
+            .map(|record| {
+                (
+                    record.title.or(Some(record.file_name)),
+                    record.artist,
+                    record.album,
+                    record.format,
+                )
             })
-        });
+            .unwrap_or((None, None, None, None));
         crate::models::StatusResponse {
             now_playing_track_id,
             paused: status.paused,
@@ -680,49 +666,27 @@ impl SessionPlaybackManager {
         source_error: Option<OutputControllerError>,
     ) -> crate::models::StatusResponse {
         let snapshot = crate::session_registry::queue_snapshot(session_id).ok();
-        let now_path = snapshot.as_ref().and_then(|s| s.now_playing.clone());
+        let now_track_id = snapshot.as_ref().and_then(|s| s.now_playing);
         let has_previous = snapshot
             .as_ref()
             .map(|s| !s.history.is_empty())
             .unwrap_or(false);
-        let (now_playing_track_id, title, artist, album, format, sample_rate, duration_ms) = match now_path {
-            Some(path) => {
-                let now = path.to_string_lossy().to_string();
-                let track_id = state.metadata.db.track_id_for_path(&now).ok().flatten();
-                let lib = state.library.read().unwrap();
-                match lib.find_track_by_path(&path) {
-                    Some(crate::models::LibraryEntry::Track {
-                        file_name,
-                        sample_rate,
-                        duration_ms,
-                        artist,
-                        album,
-                        format,
-                        ..
-                    }) => {
-                        let title = state
-                            .metadata
-                            .db
-                            .track_record_by_path(&now)
-                            .ok()
-                            .flatten()
-                            .and_then(|record| record.title)
-                            .or_else(|| Some(file_name));
-                        (
-                            track_id,
-                            title,
-                            artist,
-                            album,
-                            Some(format),
-                            sample_rate,
-                            duration_ms,
-                        )
-                    }
-                    _ => (track_id, None, None, None, None, None, None),
-                }
-            }
-            None => (None, None, None, None, None, None, None),
-        };
+        let (now_playing_track_id, title, artist, album, format, sample_rate, duration_ms) =
+            match now_track_id {
+                Some(track_id) => match state.metadata.db.track_record_by_id(track_id).ok().flatten() {
+                    Some(record) => (
+                        Some(track_id),
+                        record.title.or(Some(record.file_name)),
+                        record.artist,
+                        record.album,
+                        record.format,
+                        record.sample_rate,
+                        record.duration_ms,
+                    ),
+                    None => (Some(track_id), None, None, None, None, None, None),
+                },
+                None => (None, None, None, None, None, None, None),
+            };
         let provider_online = source_error.is_none();
         crate::models::StatusResponse {
             now_playing_track_id,
@@ -774,58 +738,33 @@ impl SessionPlaybackManager {
         if status.paused && status.elapsed_ms.is_none() && status.duration_ms.is_none() {
             return;
         }
-        let Some(path) = snapshot.now_playing else {
+        let Some(track_id) = snapshot.now_playing else {
             return;
         };
-        let now = path.to_string_lossy().to_string();
-        status.now_playing_track_id = state
-            .metadata
-            .db
-            .track_id_for_path(&now)
-            .ok()
-            .flatten();
-        if status.now_playing_track_id.is_none() {
+        status.now_playing_track_id = Some(track_id);
+        let Some(record) = state.metadata.db.track_record_by_id(track_id).ok().flatten() else {
             return;
+        };
+        if status.sample_rate.is_none() {
+            status.sample_rate = record.sample_rate;
         }
-        let lib = state.library.read().unwrap();
-        if let Some(crate::models::LibraryEntry::Track {
-            file_name,
-            sample_rate,
-            duration_ms,
-            artist,
-            album,
-            format,
-            ..
-        }) = lib.find_track_by_path(&path)
-        {
-            if status.sample_rate.is_none() {
-                status.sample_rate = sample_rate;
-            }
-            if status.output_sample_rate.is_none() {
-                status.output_sample_rate = sample_rate;
-            }
-            if status.duration_ms.is_none() {
-                status.duration_ms = duration_ms;
-            }
-            if status.artist.is_none() {
-                status.artist = artist;
-            }
-            if status.album.is_none() {
-                status.album = album;
-            }
-            if status.format.is_none() {
-                status.format = Some(format);
-            }
-            if status.title.is_none() {
-                status.title = state
-                    .metadata
-                    .db
-                    .track_record_by_path(&now)
-                    .ok()
-                    .flatten()
-                    .and_then(|record| record.title)
-                    .or_else(|| Some(file_name));
-            }
+        if status.output_sample_rate.is_none() {
+            status.output_sample_rate = record.sample_rate;
+        }
+        if status.duration_ms.is_none() {
+            status.duration_ms = record.duration_ms;
+        }
+        if status.artist.is_none() {
+            status.artist = record.artist;
+        }
+        if status.album.is_none() {
+            status.album = record.album;
+        }
+        if status.format.is_none() {
+            status.format = record.format;
+        }
+        if status.title.is_none() {
+            status.title = record.title.or(Some(record.file_name));
         }
     }
 }

@@ -223,7 +223,7 @@ function normalizeMatch(value?: string | null): string {
 function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
   switch (event.kind) {
     case "library_scan_album_start":
-      return {title: "Scanning album folder", detail: event.path};
+      return {title: "Scanning album folder", detail: event.album};
     case "library_scan_album_finish":
       return {title: "Scanned album folder", detail: `${event.tracks} tracks`};
     case "music_brainz_batch":
@@ -264,10 +264,10 @@ function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: 
 function metadataDetailLines(event: MetadataEvent): string[] {
   if (event.kind !== "music_brainz_lookup_no_match") {
     if (event.kind === "library_scan_album_finish") {
-      return [event.path];
+      return [event.album];
     }
     if (event.kind === "library_scan_album_start") {
-      return [event.path];
+      return [event.album];
     }
     if (event.kind === "cover_art_fetch_failure") {
       return [`MBID: ${event.mbid}`];

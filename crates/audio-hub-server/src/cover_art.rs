@@ -580,7 +580,6 @@ fn fetch_and_store_cover(
         );
         events.metadata_event(MetadataEvent::CoverArtFetchSuccess {
             album_id: candidate.album_id,
-            cover_path: relative_path,
         });
         events.library_changed();
     } else {

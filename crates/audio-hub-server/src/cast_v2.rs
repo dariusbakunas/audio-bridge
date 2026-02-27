@@ -331,6 +331,7 @@ pub fn spawn_cast_worker(
                         &bridge_state,
                         &mut pending_pause_toggle,
                         &mut stop_in_flight,
+                        metadata.as_ref(),
                     );
                 }
                 Ok(None) => {}
@@ -400,6 +401,7 @@ fn handle_message(
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
     pending_pause_toggle: &mut bool,
     stop_in_flight: &mut bool,
+    metadata: Option<&MetadataDb>,
 ) {
     let is_active = is_active_cast_output(bridge_state, &device.id);
     if msg.payload_type != proto::cast_message::PayloadType::String as i32 {
@@ -505,6 +507,7 @@ fn handle_message(
                         cast_status_updated_at,
                         session_auto_advance_in_flight,
                         stop_in_flight,
+                        metadata,
                     );
                 }
             }
@@ -582,6 +585,7 @@ fn apply_media_status(
     cast_status_updated_at: &Arc<Mutex<std::collections::HashMap<String, Instant>>>,
     session_auto_advance_in_flight: &mut bool,
     stop_in_flight: &mut bool,
+    metadata: Option<&MetadataDb>,
 ) {
     let is_idle = matches!(info.player_state.as_deref(), Some("IDLE"));
     let end_reason = match info.idle_reason.as_deref() {
@@ -641,7 +645,18 @@ fn apply_media_status(
     let should_session_advance = end_reason == Some(PlaybackEndReason::Eof);
     if should_session_advance && !*session_auto_advance_in_flight {
         if let Some(session_id) = bound_session_id.as_deref() {
-            if let Ok(Some(next_path)) = crate::session_registry::queue_next_path(session_id) {
+            if let Ok(Some(next_track_id)) = crate::session_registry::queue_next_track_id(session_id) {
+                let Some(next_path) = metadata
+                    .and_then(|db| db.track_path_for_id(next_track_id).ok().flatten())
+                    .map(PathBuf::from) else {
+                    tracing::warn!(
+                        output_id = %output_id,
+                        session_id = %session_id,
+                        track_id = next_track_id,
+                        "cast session auto-advance track not found"
+                    );
+                    return;
+                };
                 let ext_hint = next_path
                     .extension()
                     .and_then(|ext| ext.to_str())

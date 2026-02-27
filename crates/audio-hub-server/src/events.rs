@@ -18,23 +18,23 @@ use tracing_subscriber::Layer;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetadataEvent {
-    LibraryScanAlbumStart { path: String },
-    LibraryScanAlbumFinish { path: String, tracks: usize },
+    LibraryScanAlbumStart { album: String },
+    LibraryScanAlbumFinish { album: String, tracks: usize },
     MusicBrainzBatch { count: usize },
     MusicBrainzLookupStart {
-        path: String,
+        track_id: Option<i64>,
         title: String,
         artist: String,
         album: Option<String>,
     },
     MusicBrainzLookupSuccess {
-        path: String,
+        track_id: Option<i64>,
         recording_mbid: Option<String>,
         artist_mbid: Option<String>,
         album_mbid: Option<String>,
     },
     MusicBrainzLookupNoMatch {
-        path: String,
+        track_id: Option<i64>,
         title: String,
         artist: String,
         album: Option<String>,
@@ -43,10 +43,13 @@ pub enum MetadataEvent {
         best_recording_id: Option<String>,
         best_recording_title: Option<String>,
     },
-    MusicBrainzLookupFailure { path: String, error: String },
+    MusicBrainzLookupFailure {
+        track_id: Option<i64>,
+        error: String,
+    },
     CoverArtBatch { count: usize },
     CoverArtFetchStart { album_id: i64, mbid: String },
-    CoverArtFetchSuccess { album_id: i64, cover_path: String },
+    CoverArtFetchSuccess { album_id: i64 },
     CoverArtFetchFailure {
         album_id: i64,
         mbid: String,
@@ -54,7 +57,7 @@ pub enum MetadataEvent {
         attempts: i64,
     },
     AlbumNormalization {
-        path: String,
+        track_id: Option<i64>,
         original_album: String,
         normalized_album: String,
         disc_number: Option<u32>,

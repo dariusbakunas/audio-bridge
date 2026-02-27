@@ -3,6 +3,7 @@
 //! Spawns background listeners that trigger outputs refreshes when bridge devices change.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -265,7 +266,28 @@ fn apply_remote_status(
     }
     if session_eof && !*session_auto_advance_in_flight {
         if let Some((session_id, output_id)) = session_bound.clone() {
-            if let Ok(Some(next_path)) = crate::session_registry::queue_next_path(&session_id) {
+            if let Ok(Some(next_track_id)) = crate::session_registry::queue_next_track_id(&session_id) {
+                let Some(next_path) = state
+                    .metadata
+                    .db
+                    .track_path_for_id(next_track_id)
+                    .ok()
+                    .flatten()
+                    .map(PathBuf::from)
+                    .and_then(|candidate| {
+                        state
+                            .output
+                            .controller
+                            .canonicalize_under_root(state, &candidate)
+                            .ok()
+                    }) else {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        track_id = next_track_id,
+                        "session bridge auto-advance track not found"
+                    );
+                    return;
+                };
                 let Some(http_addr) = resolve_bridge_addr(state, bridge_id) else {
                     return;
                 };

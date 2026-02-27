@@ -1419,7 +1419,7 @@ pub async fn musicbrainz_match_apply(
                 "manual musicbrainz match applied (track)"
             );
             state.events.metadata_event(crate::events::MetadataEvent::MusicBrainzLookupSuccess {
-                path: record.path.clone(),
+                track_id: Some(track_id),
                 recording_mbid: mb.recording_mbid.clone(),
                 artist_mbid: mb.artist_mbid.clone(),
                 album_mbid: mb.album_mbid.clone(),

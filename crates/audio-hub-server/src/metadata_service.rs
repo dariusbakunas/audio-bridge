@@ -137,8 +137,13 @@ impl MetadataService {
             (original_album, album.clone(), source)
         {
             if original != normalized {
+                let track_id = self
+                    .db
+                    .track_id_for_path(&full_path.to_string_lossy())
+                    .ok()
+                    .flatten();
                 self.events.metadata_event(MetadataEvent::AlbumNormalization {
-                    path: full_path.to_string_lossy().to_string(),
+                    track_id,
                     original_album: original,
                     normalized_album: normalized.clone(),
                     disc_number,
@@ -263,8 +268,13 @@ fn scan_library_with_paths(
                     (original_album, album.clone(), source)
                 {
                     if original != normalized {
+                        let track_id = self
+                            .db
+                            .track_id_for_path(&path.to_string_lossy())
+                            .ok()
+                            .flatten();
                         self.events.metadata_event(MetadataEvent::AlbumNormalization {
-                            path: path.to_string_lossy().to_string(),
+                            track_id,
                             original_album: original,
                             normalized_album: normalized.clone(),
                             disc_number,
@@ -290,12 +300,17 @@ fn scan_library_with_paths(
                 if !emit_events {
                     return;
                 }
-                let path = dir.to_string_lossy().to_string();
+                let album = dir
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_string())
+                    .unwrap_or_else(|| dir.to_string_lossy().to_string());
                 if count == 0 {
-                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumStart { path });
+                    self.events
+                        .metadata_event(MetadataEvent::LibraryScanAlbumStart { album });
                 } else {
                     self.events.metadata_event(MetadataEvent::LibraryScanAlbumFinish {
-                        path,
+                        album,
                         tracks: count,
                     });
                 }

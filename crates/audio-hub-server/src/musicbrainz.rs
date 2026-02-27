@@ -476,8 +476,9 @@ fn enrich_candidate(
     if candidate.no_match_key.as_deref() == Some(key.as_str()) {
         return Ok(false);
     }
+    let track_id = db.track_id_for_path(&candidate.path).ok().flatten();
     events.metadata_event(MetadataEvent::MusicBrainzLookupStart {
-        path: candidate.path.clone(),
+        track_id,
         title: candidate.title.clone(),
         artist: candidate.artist.clone(),
         album: candidate.album.clone(),
@@ -509,7 +510,7 @@ fn enrich_candidate(
         Ok(MusicBrainzLookup::Match(mb)) => {
             db.apply_musicbrainz(&record, &mb)?;
             events.metadata_event(MetadataEvent::MusicBrainzLookupSuccess {
-                path: candidate.path.clone(),
+                track_id,
                 recording_mbid: mb.recording_mbid.clone(),
                 artist_mbid: mb.artist_mbid.clone(),
                 album_mbid: mb.album_mbid.clone(),
@@ -523,7 +524,7 @@ fn enrich_candidate(
         }) => {
             let _ = db.set_musicbrainz_no_match(&candidate.path, &key);
             events.metadata_event(MetadataEvent::MusicBrainzLookupNoMatch {
-                path: candidate.path.clone(),
+                track_id,
                 title: candidate.title.clone(),
                 artist: candidate.artist.clone(),
                 album: candidate.album.clone(),
@@ -535,7 +536,7 @@ fn enrich_candidate(
         }
         Err(err) => {
             events.metadata_event(MetadataEvent::MusicBrainzLookupFailure {
-                path: candidate.path.clone(),
+                track_id,
                 error: err.to_string(),
             });
         }

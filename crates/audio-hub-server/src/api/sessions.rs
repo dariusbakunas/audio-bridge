@@ -350,6 +350,8 @@ pub async fn sessions_select_output(
             crate::session_registry::queue_snapshot(&session_id)
                 .ok()
                 .and_then(|snapshot| snapshot.now_playing)
+                .and_then(|track_id| state.metadata.db.track_path_for_id(track_id).ok().flatten())
+                .map(PathBuf::from)
         });
     let resume_elapsed_ms = pre_switch_status.as_ref().and_then(|status| status.elapsed_ms);
     let resume_paused = pre_switch_status
@@ -932,31 +934,23 @@ fn canonical_track_path_by_id(
         .ok()
 }
 
-fn resolve_queue_add_paths(
+fn resolve_queue_add_track_ids(
     state: &web::Data<AppState>,
     body: &QueueAddRequest,
-) -> Vec<PathBuf> {
+) -> Vec<i64> {
     let mut resolved = Vec::new();
     for track_id in &body.track_ids {
-        if let Some(path) = canonical_track_path_by_id(state, *track_id) {
-            resolved.push(path);
+        if canonical_track_path_by_id(state, *track_id).is_some() {
+            resolved.push(*track_id);
         }
     }
     resolved
 }
 
 fn build_local_playback_response(
-    state: &AppState,
     req: &HttpRequest,
-    path: PathBuf,
+    track_id: i64,
 ) -> Result<LocalPlaybackPlayResponse, HttpResponse> {
-    let path_str = path.to_string_lossy().to_string();
-    let track_id = state
-        .metadata
-        .db
-        .track_id_for_path(&path_str)
-        .map_err(|err| HttpResponse::InternalServerError().body(err.to_string()))?
-        .ok_or_else(|| HttpResponse::NotFound().body("track not found"))?;
     let conn = req.connection_info();
     let base_url = format!("{}://{}", conn.scheme(), conn.host());
     let url = format!("{}/stream/track/{}", base_url.trim_end_matches('/'), track_id);
@@ -1004,7 +998,7 @@ pub async fn sessions_queue_list(state: web::Data<AppState>, id: web::Path<Strin
     )
 )]
 #[post("/sessions/{id}/queue")]
-/// Add paths to a session queue.
+/// Add tracks to a session queue.
 pub async fn sessions_queue_add(
     state: web::Data<AppState>,
     id: web::Path<String>,
@@ -1014,8 +1008,8 @@ pub async fn sessions_queue_add(
     if let Err(resp) = require_session(&session_id) {
         return resp;
     }
-    let resolved = resolve_queue_add_paths(&state, &body);
-    let added = match crate::session_registry::queue_add_paths(&session_id, resolved) {
+    let resolved = resolve_queue_add_track_ids(&state, &body);
+    let added = match crate::session_registry::queue_add_track_ids(&session_id, resolved) {
         Ok(added) => added,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
@@ -1038,7 +1032,7 @@ pub async fn sessions_queue_add(
     )
 )]
 #[post("/sessions/{id}/queue/next/add")]
-/// Insert paths at the front of a session queue.
+/// Insert tracks at the front of a session queue.
 pub async fn sessions_queue_add_next(
     state: web::Data<AppState>,
     id: web::Path<String>,
@@ -1048,8 +1042,8 @@ pub async fn sessions_queue_add_next(
     if let Err(resp) = require_session(&session_id) {
         return resp;
     }
-    let resolved = resolve_queue_add_paths(&state, &body);
-    let added = match crate::session_registry::queue_add_next_paths(&session_id, resolved) {
+    let resolved = resolve_queue_add_track_ids(&state, &body);
+    let added = match crate::session_registry::queue_add_next_track_ids(&session_id, resolved) {
         Ok(added) => added,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
@@ -1083,11 +1077,11 @@ pub async fn sessions_queue_remove(
     if let Err(resp) = require_session(&session_id) {
         return resp;
     }
-    let path = match canonical_track_path_by_id(&state, body.track_id) {
-        Some(path) => path,
+    let track_id = match canonical_track_path_by_id(&state, body.track_id) {
+        Some(_) => body.track_id,
         None => return HttpResponse::NotFound().body("track not found"),
     };
-    match crate::session_registry::queue_remove_path(&session_id, &path) {
+    match crate::session_registry::queue_remove_track_id(&session_id, track_id) {
         Ok(removed) => {
             if removed {
                 state.events.queue_changed();
@@ -1138,7 +1132,7 @@ pub async fn sessions_queue_play_from(
         }
     };
 
-    let found = match crate::session_registry::queue_play_from(&session_id, &canonical) {
+    let found = match crate::session_registry::queue_play_from(&session_id, body.track_id) {
         Ok(found) => found,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
@@ -1149,7 +1143,7 @@ pub async fn sessions_queue_play_from(
     state.events.status_changed();
 
     if is_local_session(&session_id) {
-        let payload = match build_local_playback_response(&state, &req, canonical) {
+        let payload = match build_local_playback_response(&req, body.track_id) {
             Ok(payload) => payload,
             Err(resp) => return resp,
         };
@@ -1219,16 +1213,19 @@ pub async fn sessions_queue_next(
     if let Err(resp) = require_session(&session_id) {
         return resp;
     }
-    let Some(next_path) = (match crate::session_registry::queue_next_path(&session_id) {
-        Ok(path) => path,
+    let Some(next_track_id) = (match crate::session_registry::queue_next_track_id(&session_id) {
+        Ok(track_id) => track_id,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     }) else {
         return HttpResponse::NoContent().finish();
     };
+    let Some(next_path) = canonical_track_path_by_id(&state, next_track_id) else {
+        return HttpResponse::NotFound().body("track not found");
+    };
     state.events.queue_changed();
     state.events.status_changed();
     if is_local_session(&session_id) {
-        let payload = match build_local_playback_response(&state, &req, next_path) {
+        let payload = match build_local_playback_response(&req, next_track_id) {
             Ok(payload) => payload,
             Err(resp) => return resp,
         };
@@ -1269,16 +1266,19 @@ pub async fn sessions_queue_previous(
     if let Err(resp) = require_session(&session_id) {
         return resp;
     }
-    let Some(prev_path) = (match crate::session_registry::queue_previous_path(&session_id) {
-        Ok(path) => path,
+    let Some(prev_track_id) = (match crate::session_registry::queue_previous_track_id(&session_id) {
+        Ok(track_id) => track_id,
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     }) else {
         return HttpResponse::NoContent().finish();
     };
+    let Some(prev_path) = canonical_track_path_by_id(&state, prev_track_id) else {
+        return HttpResponse::NotFound().body("track not found");
+    };
     state.events.queue_changed();
     state.events.status_changed();
     if is_local_session(&session_id) {
-        let payload = match build_local_playback_response(&state, &req, prev_path) {
+        let payload = match build_local_playback_response(&req, prev_track_id) {
             Ok(payload) => payload,
             Err(resp) => return resp,
         };
@@ -1303,20 +1303,13 @@ fn build_queue_response(
     let mut items: Vec<crate::models::QueueItem> = snapshot
         .queue_items
         .iter()
-        .map(|path| build_queue_item(state, path, false, false))
+        .map(|track_id| build_queue_item(state, *track_id, false, false))
         .collect();
 
-    if let Some(current_path) = snapshot.now_playing.as_ref() {
-        let current_str = current_path.to_string_lossy().to_string();
-        let current_track_id = state
-            .metadata
-            .db
-            .track_id_for_path(&current_str)
-            .ok()
-            .flatten();
+    if let Some(current_track_id) = snapshot.now_playing {
         let index = items.iter().position(|item| match item {
-            crate::models::QueueItem::Track { id, .. } => current_track_id == Some(*id),
-            crate::models::QueueItem::Missing { id } => current_track_id.is_some() && *id == current_track_id,
+            crate::models::QueueItem::Track { id, .. } => current_track_id == *id,
+            crate::models::QueueItem::Missing { id } => *id == Some(current_track_id),
         });
         if let Some(index) = index {
             if index != 0 {
@@ -1327,23 +1320,23 @@ fn build_queue_response(
                 *now_playing = true;
             }
         } else {
-            items.insert(0, build_queue_item(state, current_path, true, false));
+            items.insert(0, build_queue_item(state, current_track_id, true, false));
         }
     }
 
-    let mut played_paths = Vec::new();
-    for path in snapshot.history.iter().rev() {
-        if snapshot.now_playing.as_deref() == Some(path.as_path()) {
+    let mut played_track_ids = Vec::new();
+    for track_id in snapshot.history.iter().rev() {
+        if snapshot.now_playing == Some(*track_id) {
             continue;
         }
-        played_paths.push(path.clone());
-        if played_paths.len() >= 10 {
+        played_track_ids.push(*track_id);
+        if played_track_ids.len() >= 10 {
             break;
         }
     }
 
-    if !played_paths.is_empty() {
-        played_paths.reverse();
+    if !played_track_ids.is_empty() {
+        played_track_ids.reverse();
         let mut seen = HashSet::new();
         for item in &items {
             match item {
@@ -1357,13 +1350,11 @@ fn build_queue_response(
         }
 
         let mut played_items = Vec::new();
-        for path in played_paths {
-            let path_str = path.to_string_lossy().to_string();
-            let track_id = state.metadata.db.track_id_for_path(&path_str).ok().flatten();
-            if seen.contains(&track_id) {
+        for track_id in played_track_ids {
+            if seen.contains(&Some(track_id)) {
                 continue;
             }
-            played_items.push(build_queue_item(state, &path, false, true));
+            played_items.push(build_queue_item(state, track_id, false, true));
         }
 
         if !played_items.is_empty() {
@@ -1377,61 +1368,25 @@ fn build_queue_response(
 
 fn build_queue_item(
     state: &AppState,
-    path: &PathBuf,
+    track_id: i64,
     now_playing: bool,
     played: bool,
 ) -> crate::models::QueueItem {
-    let lib = state.library.read().unwrap();
-    if let Some(crate::models::LibraryEntry::Track {
-        file_name,
-        sample_rate,
-        album,
-        artist,
-        format,
-        ..
-    }) = lib.find_track_by_path(path)
-    {
-        let path_str = path.to_string_lossy().to_string();
-        let track_id = state.metadata.db.track_id_for_path(&path_str).ok().flatten();
-        let title = state
-            .metadata
-            .db
-            .track_record_by_path(&path_str)
-            .ok()
-            .flatten()
-            .and_then(|record| record.title);
-        let duration_ms = state
-            .metadata
-            .db
-            .track_record_by_path(&path_str)
-            .ok()
-            .flatten()
-            .and_then(|record| record.duration_ms);
-        if let Some(track_id) = track_id {
-            crate::models::QueueItem::Track {
-                id: track_id,
-                file_name,
-                title,
-                duration_ms,
-                sample_rate,
-                album,
-                artist,
-                format,
-                now_playing,
-                played,
-            }
-        } else {
-            crate::models::QueueItem::Missing { id: None }
-        }
-    } else {
-        crate::models::QueueItem::Missing {
-            id: state
-                .metadata
-                .db
-                .track_id_for_path(&path.to_string_lossy())
-                .ok()
-                .flatten(),
-        }
+    let record = match state.metadata.db.track_record_by_id(track_id).ok().flatten() {
+        Some(record) => record,
+        None => return crate::models::QueueItem::Missing { id: Some(track_id) },
+    };
+    crate::models::QueueItem::Track {
+        id: track_id,
+        file_name: record.file_name,
+        title: record.title,
+        duration_ms: record.duration_ms,
+        sample_rate: record.sample_rate,
+        album: record.album,
+        artist: record.artist,
+        format: record.format.unwrap_or_else(|| "unknown".to_string()),
+        now_playing,
+        played,
     }
 }
 
@@ -1522,6 +1477,8 @@ mod tests {
 
     #[actix_web::test]
     async fn select_output_while_playing_stops_previous_output_and_starts_new_output() {
+        let _guard = crate::session_registry::test_lock();
+        crate::session_registry::reset_for_tests();
         let state = make_state();
         let unique = uuid::Uuid::new_v4().to_string();
         let old_device_id = format!("old-{unique}");
@@ -1570,6 +1527,54 @@ mod tests {
             );
         }
         {
+            let library_root = state.library.read().expect("library lock").root().to_path_buf();
+            let track_path = library_root.join("test-track.flac");
+            std::fs::write(&track_path, b"fixture").expect("write track fixture");
+            let fs_meta = std::fs::metadata(&track_path).expect("track fixture metadata");
+            let mtime_ms = fs_meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            state
+                .metadata
+                .db
+                .upsert_track(&crate::metadata_db::TrackRecord {
+                    path: track_path.to_string_lossy().to_string(),
+                    file_name: "test-track.flac".to_string(),
+                    title: Some("Test Track".to_string()),
+                    artist: Some("Test Artist".to_string()),
+                    album_artist: Some("Test Artist".to_string()),
+                    album: Some("Test Album".to_string()),
+                    album_uuid: None,
+                    track_number: Some(1),
+                    disc_number: Some(1),
+                    year: Some(2024),
+                    duration_ms: Some(180_000),
+                    sample_rate: Some(44_100),
+                    bit_depth: Some(16),
+                    format: Some("flac".to_string()),
+                    mtime_ms,
+                    size_bytes: fs_meta.len() as i64,
+                })
+                .expect("upsert fixture track");
+        }
+        let track_id = state
+            .metadata
+            .db
+            .track_id_for_path(
+                &state
+                    .library
+                    .read()
+                    .expect("library lock")
+                    .root()
+                    .join("test-track.flac")
+                    .to_string_lossy(),
+            )
+            .expect("lookup track id")
+            .expect("track id");
+        {
             let mut status_by_output = state
                 .providers
                 .cast
@@ -1579,7 +1584,7 @@ mod tests {
             status_by_output.insert(
                 old_output_id.clone(),
                 audio_bridge_types::BridgeStatus {
-                    now_playing: Some("/tmp/test-track.flac".to_string()),
+                    now_playing: Some(format!("http://localhost/stream/track/{track_id}")),
                     paused: false,
                     elapsed_ms: Some(12_345),
                     duration_ms: Some(180_000),
@@ -1588,6 +1593,12 @@ mod tests {
             );
         }
 
+        let app = actix_web::test::init_service(
+            actix_web::App::new()
+                .app_data(state.clone())
+                .service(crate::api::sessions_select_output),
+        )
+        .await;
         let session_name = format!("switch-test-{unique}");
         let client_id = format!("client-{unique}");
         let (session_id, _) = crate::session_registry::create_or_refresh(
@@ -1600,19 +1611,11 @@ mod tests {
         );
         crate::session_registry::bind_output(&session_id, &old_output_id, false)
             .expect("bind old output");
-        let queued_path = std::path::PathBuf::from("/tmp/test-track.flac");
-        crate::session_registry::queue_add_paths(&session_id, vec![queued_path.clone()])
-            .expect("queue add");
-        let found = crate::session_registry::queue_play_from(&session_id, &queued_path)
+        crate::session_registry::queue_add_track_ids(&session_id, vec![track_id]).expect("queue add");
+        let found = crate::session_registry::queue_play_from(&session_id, track_id)
             .expect("queue play_from");
         assert!(found, "queued track should be found");
 
-        let app = actix_web::test::init_service(
-            actix_web::App::new()
-                .app_data(state.clone())
-                .service(crate::api::sessions_select_output),
-        )
-        .await;
         let req = actix_web::test::TestRequest::post()
             .uri(&format!("/sessions/{}/select-output", urlencoding::encode(&session_id)))
             .set_json(SessionSelectOutputRequest {

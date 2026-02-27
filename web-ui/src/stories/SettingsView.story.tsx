@@ -9,7 +9,7 @@ const metadataEvents = [
     time: new Date(Date.now() - 1000 * 60 * 2),
     event: {
       kind: "music_brainz_lookup_start",
-      path: "/music/Radiohead/In Rainbows/01 - 15 Step.flac",
+      track_id: 101,
       title: "15 Step",
       artist: "Radiohead",
       album: "In Rainbows"
@@ -20,8 +20,7 @@ const metadataEvents = [
     time: new Date(Date.now() - 1000 * 60),
     event: {
       kind: "cover_art_fetch_success",
-      album_id: 42,
-      cover_path: "/covers/42.jpg"
+      album_id: 42
     } as MetadataEvent
   }
 ];
@@ -107,7 +106,7 @@ const describeMetadataEvent = (event: MetadataEvent) => {
     case "music_brainz_lookup_start":
       return { title: "Lookup started", detail: event.title };
     case "cover_art_fetch_success":
-      return { title: "Cover art cached", detail: event.cover_path };
+      return { title: "Cover art cached", detail: `album ${event.album_id}` };
     default:
       return { title: "Metadata event", detail: event.kind };
   }
@@ -115,7 +114,7 @@ const describeMetadataEvent = (event: MetadataEvent) => {
 
 const metadataDetailLines = (event: MetadataEvent) => {
   if (event.kind === "music_brainz_lookup_start") {
-    return [event.path, event.artist];
+    return [event.track_id ? `track ${event.track_id}` : "track unknown", event.artist];
   }
   return [];
 };
