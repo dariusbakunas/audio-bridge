@@ -17,6 +17,7 @@ const SCHEMA_VERSION: i32 = 10;
 #[derive(Clone)]
 pub struct MetadataDb {
     pool: Pool<SqliteConnectionManager>,
+    media_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -171,10 +172,17 @@ fn map_media_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAssetRe
 impl MetadataDb {
     pub fn new(media_root: &Path) -> Result<Self> {
         let db_path = db_path_for(media_root);
-        Self::new_at_path(&db_path)
+        Self::new_at_path_with_media_root(&db_path, Some(media_root))
     }
 
     pub fn new_at_path(db_path: &Path) -> Result<Self> {
+        Self::new_at_path_with_media_root(db_path, None)
+    }
+
+    pub fn new_at_path_with_media_root(
+        db_path: &Path,
+        media_root: Option<&Path>,
+    ) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create metadata dir {:?}", parent))?;
@@ -195,12 +203,102 @@ impl MetadataDb {
             init_schema(&conn)?;
         }
 
-        Ok(Self { pool })
+        let db = Self {
+            pool,
+            media_root: media_root.map(normalize_media_root),
+        };
+        db.migrate_track_paths_to_relative()?;
+        Ok(db)
+    }
+
+    fn path_to_db(&self, path: &str) -> String {
+        let Some(root) = self.media_root.as_ref() else {
+            return path.to_string();
+        };
+        let path_obj = Path::new(path);
+        if !path_obj.is_absolute() {
+            return path.to_string();
+        }
+        relative_from_absolute(path_obj, root)
+            .map(|rel| rel.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string())
+    }
+
+    fn path_from_db(&self, path: String) -> String {
+        let Some(root) = self.media_root.as_ref() else {
+            return path;
+        };
+        let path_obj = Path::new(&path);
+        if path_obj.is_absolute() {
+            return path;
+        }
+        root.join(path_obj).to_string_lossy().to_string()
+    }
+
+    fn migrate_track_paths_to_relative(&self) -> Result<()> {
+        let Some(root) = self.media_root.as_ref() else {
+            return Ok(());
+        };
+        let mut conn = self.pool.get().context("open metadata db")?;
+        let tx = conn.transaction().context("begin path migration tx")?;
+        let mut stmt = tx
+            .prepare("SELECT id, path FROM tracks")
+            .context("prepare path migration query")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .context("run path migration query")?;
+        let mut updates: Vec<(i64, String, String)> = Vec::new();
+        for row in rows {
+            let (id, existing_path) = row.context("map path migration row")?;
+            let existing_obj = Path::new(&existing_path);
+            if !existing_obj.is_absolute() {
+                continue;
+            }
+            let Some(rel) = relative_from_absolute(existing_obj, root) else {
+                continue;
+            };
+            let rel_str = rel.to_string_lossy().to_string();
+            if rel_str != existing_path {
+                updates.push((id, existing_path, rel_str));
+            }
+        }
+        drop(stmt);
+
+        for (id, old_path, rel_path) in updates {
+            match tx.execute(
+                "UPDATE tracks SET path = ?1 WHERE id = ?2",
+                params![rel_path, id],
+            ) {
+                Ok(_) => {}
+                Err(rusqlite::Error::SqliteFailure(err, _))
+                    if err.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
+                {
+                    tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])
+                        .with_context(|| {
+                            format!(
+                                "drop duplicate track during path migration old={} new={}",
+                                old_path, rel_path
+                            )
+                        })?;
+                }
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "migrate track path old={} new={}",
+                            old_path, rel_path
+                        )
+                    });
+                }
+            }
+        }
+        tx.commit().context("commit path migration tx")?;
+        Ok(())
     }
 
     pub fn upsert_track(&self, record: &TrackRecord) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
+        let record_path = self.path_to_db(&record.path);
 
         let existing: Option<(
             i64,
@@ -234,7 +332,7 @@ impl MetadataDb {
                 LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.path = ?1
                 "#,
-                params![record.path],
+                params![&record_path],
                 |row| Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -344,7 +442,7 @@ impl MetadataDb {
                 mb_no_match_key = NULL
             "#,
             params![
-                record.path,
+                &record_path,
                 record.file_name,
                 record.title,
                 artist_id,
@@ -390,6 +488,7 @@ impl MetadataDb {
     ) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
+        let record_path = self.path_to_db(&record.path);
 
         let artist_id = if let Some(name) = record.artist.as_deref() {
             find_artist_id(&tx, name)?
@@ -399,7 +498,7 @@ impl MetadataDb {
         let album_id = tx
             .query_row(
                 "SELECT album_id FROM tracks WHERE path = ?1",
-                params![record.path],
+                params![&record_path],
                 |row| row.get(0),
             )
             .optional()
@@ -495,13 +594,13 @@ impl MetadataDb {
             if override_existing {
                 tx.execute(
                     "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2",
-                    params![recording_mbid, record.path],
+                    params![recording_mbid, &record_path],
                 )
                 .context("update track mbid")?;
             } else {
                 tx.execute(
                     "UPDATE tracks SET mbid = ?1, mb_no_match_key = NULL WHERE path = ?2 AND (mbid IS NULL OR mbid = '')",
-                    params![recording_mbid, record.path],
+                    params![recording_mbid, &record_path],
                 )
                 .context("update track mbid")?;
             }
@@ -584,6 +683,7 @@ impl MetadataDb {
 
     pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         conn
             .query_row(
                 r#"
@@ -596,10 +696,11 @@ impl MetadataDb {
                 LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.path = ?1
                 "#,
-                params![path],
+                params![db_path],
                 |row| {
+                    let path: String = row.get(0)?;
                     Ok(TrackRecord {
-                        path: row.get(0)?,
+                        path: self.path_from_db(path),
                         file_name: row.get(1)?,
                         title: row.get(2)?,
                         artist: row.get(3)?,
@@ -648,8 +749,9 @@ impl MetadataDb {
                 "#,
                 params![track_id],
                 |row| {
+                    let path: String = row.get(0)?;
                     Ok(TrackRecord {
-                        path: row.get(0)?,
+                        path: self.path_from_db(path),
                         file_name: row.get(1)?,
                         title: row.get(2)?,
                         artist: row.get(3)?,
@@ -684,10 +786,11 @@ impl MetadataDb {
 
     pub fn track_id_for_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         conn
             .query_row(
                 "SELECT id FROM tracks WHERE path = ?1",
-                params![path],
+                params![db_path],
                 |row| row.get(0),
             )
             .optional()
@@ -696,22 +799,24 @@ impl MetadataDb {
 
     pub fn track_path_for_id(&self, track_id: i64) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
-        conn
+        let path: Option<String> = conn
             .query_row(
                 "SELECT path FROM tracks WHERE id = ?1",
                 params![track_id],
                 |row| row.get(0),
             )
             .optional()
-            .context("fetch track path for id")
+            .context("fetch track path for id")?;
+        Ok(path.map(|value| self.path_from_db(value)))
     }
 
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         conn
             .query_row(
                 "SELECT album_id FROM tracks WHERE path = ?1",
-                params![path],
+                params![db_path],
                 |row| row.get(0),
             )
             .optional()
@@ -731,13 +836,14 @@ impl MetadataDb {
             "#,
         )?;
         let rows = stmt.query_map([], |row| {
+            let path: String = row.get(5)?;
             Ok(AlbumMarkerCandidate {
                 album_uuid: row.get(0)?,
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 original_year: row.get(3)?,
                 year: row.get(4)?,
-                path: row.get(5)?,
+                path: self.path_from_db(path),
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -787,8 +893,9 @@ impl MetadataDb {
             "#,
         )?;
         let rows = stmt.query_map(params![limit], |row| {
+            let path: String = row.get(0)?;
             Ok(MusicBrainzCandidate {
-                path: row.get(0)?,
+                path: self.path_from_db(path),
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 album: row.get(3)?,
@@ -853,6 +960,7 @@ impl MetadataDb {
 
     pub fn cover_path_for_track(&self, path: &str) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         let cover: Option<String> = conn
             .query_row(
                 r#"
@@ -861,7 +969,7 @@ impl MetadataDb {
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.path = ?1
                 "#,
-                params![path],
+                params![db_path],
                 |row| row.get(0),
             )
             .optional()
@@ -990,9 +1098,10 @@ impl MetadataDb {
 
     pub fn set_musicbrainz_no_match(&self, path: &str, key: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         conn.execute(
             "UPDATE tracks SET mb_no_match_key = ?1 WHERE path = ?2",
-            params![key, path],
+            params![key, db_path],
         )
         .context("set musicbrainz no match")?;
         Ok(())
@@ -1000,9 +1109,10 @@ impl MetadataDb {
 
     pub fn clear_musicbrainz_no_match(&self, path: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         conn.execute(
             "UPDATE tracks SET mb_no_match_key = NULL WHERE path = ?1",
-            params![path],
+            params![db_path],
         )
         .context("clear musicbrainz no match")?;
         Ok(())
@@ -1489,14 +1599,20 @@ impl MetadataDb {
             "SELECT path FROM tracks WHERE album_id = ?1 ORDER BY COALESCE(disc_number, 0), COALESCE(track_number, 0), file_name",
         )?;
         let rows = stmt.query_map(params![album_id], |row| row.get(0))?;
-        Ok(rows.filter_map(Result::ok).collect())
+        Ok(rows
+            .filter_map(Result::ok)
+            .map(|path: String| self.path_from_db(path))
+            .collect())
     }
 
     pub fn list_all_track_paths(&self) -> Result<Vec<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare("SELECT path FROM tracks")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
-        Ok(rows.filter_map(Result::ok).collect())
+        Ok(rows
+            .filter_map(Result::ok)
+            .map(|path: String| self.path_from_db(path))
+            .collect())
     }
 
     pub fn update_album_metadata(
@@ -1574,8 +1690,9 @@ impl MetadataDb {
 
     pub fn delete_track_by_path(&self, path: &str) -> Result<bool> {
         let conn = self.pool.get().context("open metadata db")?;
+        let db_path = self.path_to_db(path);
         let deleted = conn
-            .execute("DELETE FROM tracks WHERE path = ?1", params![path])
+            .execute("DELETE FROM tracks WHERE path = ?1", params![db_path])
             .context("delete track by path")?;
         Ok(deleted > 0)
     }
@@ -1614,6 +1731,42 @@ impl MetadataDb {
 
 fn db_path_for(media_root: &Path) -> PathBuf {
     media_root.join(".audio-hub").join("metadata.sqlite")
+}
+
+fn normalize_media_root(media_root: &Path) -> PathBuf {
+    media_root
+        .canonicalize()
+        .unwrap_or_else(|_| media_root.to_path_buf())
+}
+
+fn relative_from_absolute(path: &Path, media_root: &Path) -> Option<PathBuf> {
+    if let Ok(relative) = path.strip_prefix(media_root) {
+        return Some(relative.to_path_buf());
+    }
+    let media_name = media_root.file_name()?;
+    let mut matched_index: Option<usize> = None;
+    let components: Vec<_> = path.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        if component.as_os_str() == media_name {
+            matched_index = Some(index);
+        }
+    }
+    let start = matched_index?;
+    let relative = components
+        .iter()
+        .skip(start + 1)
+        .fold(PathBuf::new(), |mut acc, component| {
+            acc.push(component.as_os_str());
+            acc
+        });
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    if media_root.join(&relative).exists() {
+        Some(relative)
+    } else {
+        None
+    }
 }
 
 fn is_blank(value: &Option<String>) -> bool {
@@ -1964,6 +2117,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn db_path_for_places_db_under_audio_hub_dir() {
@@ -2007,6 +2161,25 @@ mod tests {
         assert_eq!(missing_artist, None);
         let missing_album = find_album_id(&conn, "Missing", Some(1)).expect("find missing album");
         assert_eq!(missing_album, None);
+    }
+
+    #[test]
+    fn relative_from_absolute_supports_root_basename_heuristic() {
+        let tmp = std::env::temp_dir().join(format!(
+            "audio-hub-path-rel-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = tmp.join("music");
+        let track = root.join("Artist").join("Album").join("song.flac");
+        fs::create_dir_all(track.parent().unwrap()).expect("create track dir");
+        fs::write(&track, b"audio").expect("write track file");
+
+        let legacy = Path::new("/legacy/mount/music/Artist/Album/song.flac");
+        let rel = relative_from_absolute(legacy, &root).expect("relative path");
+        assert_eq!(rel, PathBuf::from("Artist/Album/song.flac"));
     }
 }
 

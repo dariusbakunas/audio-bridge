@@ -390,7 +390,12 @@ fn scan_library_with_paths(
 
     pub fn resolve_track_path(root: &Path, raw_path: &str) -> Result<PathBuf, HttpResponse> {
         let raw_path = PathBuf::from(raw_path);
-        let full_path = match raw_path.canonicalize() {
+        let candidate = if raw_path.is_absolute() {
+            raw_path
+        } else {
+            root.join(raw_path)
+        };
+        let full_path = match candidate.canonicalize() {
             Ok(path) => path,
             Err(_) => return Err(HttpResponse::NotFound().finish()),
         };
@@ -671,6 +676,18 @@ mod tests {
         let result = MetadataService::resolve_track_path(&root, &path.to_string_lossy());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), path.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn resolve_track_path_accepts_relative_path_under_root() {
+        let root = temp_root().canonicalize().expect("canonicalize root");
+        let nested = root.join("album").join("inside.flac");
+        std::fs::create_dir_all(nested.parent().expect("parent")).expect("create album dir");
+        std::fs::write(&nested, b"audio").expect("write file");
+
+        let result = MetadataService::resolve_track_path(&root, "album/inside.flac");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), nested.canonicalize().unwrap());
     }
 
     #[test]

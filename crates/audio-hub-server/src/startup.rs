@@ -608,7 +608,7 @@ fn init_metadata_db_and_library(
     metadata_wake: MetadataWake,
 ) -> Result<(MetadataDb, crate::library::LibraryIndex)> {
     let metadata_db = if let Some(path) = metadata_db_path {
-        MetadataDb::new_at_path(&path)?
+        MetadataDb::new_at_path_with_media_root(&path, Some(media_dir))?
     } else {
         MetadataDb::new(media_dir)?
     };
