@@ -37,13 +37,19 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libasound2 \
     && rm -rf /var/lib/apt/lists/*
+RUN groupadd --system --gid 10001 audiohub \
+    && useradd --system --uid 10001 --gid audiohub --home /app --shell /usr/sbin/nologin audiohub
 
 WORKDIR /app
 COPY --from=rust-builder /tmp/audio-hub-server /usr/local/bin/audio-hub-server
 COPY --from=web-ui-builder /src/web-ui/dist ./web-ui/dist
 COPY crates/audio-hub-server/config.example.toml /app/config.example.toml
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && chown -R audiohub:audiohub /app \
+    && chown audiohub:audiohub /usr/local/bin/audio-hub-server /usr/local/bin/docker-entrypoint.sh
+
+USER audiohub:audiohub
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
