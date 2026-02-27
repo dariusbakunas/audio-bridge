@@ -25,7 +25,9 @@ WORKDIR /app
 COPY --from=rust-builder /src/target/release/audio-hub-server /usr/local/bin/audio-hub-server
 COPY --from=web-ui-builder /src/web-ui/dist ./web-ui/dist
 COPY crates/audio-hub-server/config.example.toml /app/config.example.toml
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/audio-hub-server"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--bind", "0.0.0.0:8080", "--config", "/config/config.toml"]

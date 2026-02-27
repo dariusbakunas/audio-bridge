@@ -171,6 +171,7 @@ docker run --rm \
   -v "$(pwd)/crates/audio-hub-server/config.example.toml:/config/config.toml" \
   -v "/path/to/music:/music" \
   -v "$(pwd)/data:/data" \
+  -e AUDIO_HUB_WEB_API_BASE="" \
   audio-hub-server:local \
   --bind 0.0.0.0:8080 \
   --config /config/config.toml \
@@ -182,6 +183,7 @@ Or use compose:
 ```bash
 export AUDIO_HUB_MEDIA_DIR=/path/to/music
 export AUDIO_HUB_DATA_DIR=$(pwd)/data
+export AUDIO_HUB_WEB_API_BASE=
 docker compose up --build -d
 ```
 
@@ -189,6 +191,8 @@ Notes:
 - `docker run` example uses host networking, so no `-p` flag is needed.
 - `--config /config/config.toml` is required by the server entrypoint.
 - The image includes `web-ui/dist`, so the dashboard is served at `/` out of the box.
+- By default, the UI calls same-origin API paths (recommended when serving UI + API from this container).
+- Optionally set `AUDIO_HUB_WEB_API_BASE` at container runtime to override the UI API base without rebuilding the image.
 - Mount config read/write so UI-persisted output settings can be written back to config.
 - Update the mounted config so `media_dir` points to the container path (for example `/music`).
 - `--metadata-db-path /data/metadata.sqlite` stores metadata DB outside the media mount.
@@ -249,6 +253,8 @@ npm run dev
 By default the Vite dev server proxies API requests to `http://localhost:8080`. If your hub server is on a different host/port, set `VITE_API_BASE` when running `npm run dev`.
 
 If you enable TLS on the hub server, use `https://` for `VITE_API_BASE` and in the desktop app connection settings.
+
+For Docker deployments, prefer runtime configuration with `AUDIO_HUB_WEB_API_BASE` (instead of `VITE_API_BASE`) so one built image can be reused across environments.
 
 ## Desktop App (Tauri)
 

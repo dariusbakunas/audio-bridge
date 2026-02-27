@@ -5,6 +5,10 @@ services:
       dockerfile: Dockerfile.server
     image: audio-hub-server:local
     network_mode: host
+    environment:
+      # Optional runtime override for the web UI API base URL.
+      # Example: http://host.docker.internal:8080
+      - AUDIO_HUB_WEB_API_BASE=${AUDIO_HUB_WEB_API_BASE:-}
     volumes:
       - ./crates/audio-hub-server/config.example.toml:/config/config.toml
       - ${AUDIO_HUB_MEDIA_DIR:-./music}:/music

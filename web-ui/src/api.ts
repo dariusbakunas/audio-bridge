@@ -1,8 +1,18 @@
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
 
-// @ts-ignore
-const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE ?? "";
+type RuntimeUiConfig = {
+  apiBase?: string;
+};
+
+declare global {
+  interface Window {
+    __AUDIO_HUB_CONFIG__?: RuntimeUiConfig;
+  }
+}
+
+const RUNTIME_API_BASE = window.__AUDIO_HUB_CONFIG__?.apiBase ?? "";
+const DEFAULT_API_BASE = RUNTIME_API_BASE || import.meta.env.VITE_API_BASE || "";
 const API_BASE_STORAGE_KEY = "audioHub.apiBase";
 const DEFAULT_FETCH_TIMEOUT_MS = 8000;
 
