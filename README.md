@@ -187,6 +187,17 @@ export AUDIO_HUB_WEB_API_BASE=
 docker compose up --build -d
 ```
 
+Or use compose with the published Docker Hub image (`dariusbakunas/audio-hub-server:latest`):
+
+```bash
+export AUDIO_HUB_IMAGE=dariusbakunas/audio-hub-server:latest
+export AUDIO_HUB_MEDIA_DIR=/path/to/music
+export AUDIO_HUB_DATA_DIR=$(pwd)/data
+export AUDIO_HUB_WEB_API_BASE=
+docker compose pull
+docker compose up -d
+```
+
 Notes:
 - `docker run` example uses host networking, so no `-p` flag is needed.
 - `--config /config/config.toml` is required by the server entrypoint.
@@ -199,6 +210,7 @@ Notes:
 - Mount `/data` read/write to persist metadata DB and generated artifacts.
 - Mount media read/write so the server can write album marker files.
 - Compose uses `network_mode: host` (no port mapping required in `docker-compose.yml`).
+- Compose image can be overridden with `AUDIO_HUB_IMAGE` (default: `audio-hub-server:local`).
 - Host networking is intended for Linux hosts; Docker Desktop (macOS/Windows) has limitations.
 
 ### Docker Hub publish (GitHub Actions)

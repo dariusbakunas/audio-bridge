@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-    image: audio-hub-server:local
+    image: ${AUDIO_HUB_IMAGE:-audio-hub-server:local}
     network_mode: host
     environment:
       # Optional runtime override for the web UI API base URL.
