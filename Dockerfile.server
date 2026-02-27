@@ -2,6 +2,8 @@
 
 FROM node:20-bookworm-slim AS web-ui-builder
 WORKDIR /src/web-ui
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
 COPY web-ui/package*.json ./
 RUN npm ci
 COPY web-ui/ ./
