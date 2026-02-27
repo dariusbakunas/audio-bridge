@@ -168,6 +168,7 @@ Run it (mount your config + media library):
 ```bash
 docker run --rm \
   --network host \
+  --user "$(id -u):$(id -g)" \
   -v "$(pwd)/crates/audio-hub-server/config.example.toml:/config/config.toml" \
   -v "/path/to/music:/music" \
   -v "$(pwd)/data:/data" \
@@ -184,6 +185,8 @@ Or use compose:
 export AUDIO_HUB_MEDIA_DIR=/path/to/music
 export AUDIO_HUB_DATA_DIR=$(pwd)/data
 export AUDIO_HUB_WEB_API_BASE=
+export AUDIO_HUB_UID=$(id -u)
+export AUDIO_HUB_GID=$(id -g)
 docker compose up --build -d
 ```
 
@@ -194,6 +197,8 @@ export AUDIO_HUB_IMAGE=dariusbakunas/audio-hub-server:latest
 export AUDIO_HUB_MEDIA_DIR=/path/to/music
 export AUDIO_HUB_DATA_DIR=$(pwd)/data
 export AUDIO_HUB_WEB_API_BASE=
+export AUDIO_HUB_UID=$(id -u)
+export AUDIO_HUB_GID=$(id -g)
 docker compose pull
 docker compose up -d
 ```
@@ -211,6 +216,7 @@ Notes:
 - Mount media read/write so the server can write album marker files.
 - Compose uses `network_mode: host` (no port mapping required in `docker-compose.yml`).
 - Compose image can be overridden with `AUDIO_HUB_IMAGE` (default: `audio-hub-server:local`).
+- For writable bind mounts, run container as your host user (`UID:GID`) via `--user` (docker run) or `AUDIO_HUB_UID`/`AUDIO_HUB_GID` (compose).
 - Host networking is intended for Linux hosts; Docker Desktop (macOS/Windows) has limitations.
 
 ### Docker Hub publish (GitHub Actions)

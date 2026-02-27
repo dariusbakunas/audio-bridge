@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.server
     image: ${AUDIO_HUB_IMAGE:-audio-hub-server:local}
+    user: "${AUDIO_HUB_UID:-1000}:${AUDIO_HUB_GID:-1000}"
     network_mode: host
     environment:
       # Optional runtime override for the web UI API base URL.

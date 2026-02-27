@@ -49,6 +49,7 @@ COPY crates/audio-hub-server/config.example.toml /app/config.example.toml
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && chown -R audiohub:audiohub /app \
+    && chmod 0666 /app/web-ui/dist/runtime-config.js \
     && chown audiohub:audiohub /usr/local/bin/audio-hub-server /usr/local/bin/docker-entrypoint.sh
 
 USER audiohub:audiohub
