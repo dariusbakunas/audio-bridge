@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-02-27
+
+### Changed
+- Metadata DB now stores track paths relative to the configured media root, while API/runtime path resolution remains absolute at the boundaries.
+- Startup now normalizes existing absolute track paths in metadata DB to relative paths (with duplicate-safe migration behavior).
+- Docker builds now pass the Git commit SHA into the Web UI build stage so containerized UI version info can reflect source revision.
+
+### Fixed
+- Dockerized deployments no longer break metadata path resolution when the host media mount path differs from the in-container media root.
+- Added structured warning logs for ambiguous `404`/lookup failures across stream, metadata, session queue/output, and local playback APIs to improve operator diagnostics.
+
 ## [0.13.1] - 2026-02-27
 
 ### Changed
