@@ -404,12 +404,23 @@ pub async fn tracks_analysis(
     let root = state.library.read().unwrap().root().to_path_buf();
     let path = match state.metadata.db.track_path_for_id(request.track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = request.track_id, "track analysis track id not found");
+            return HttpResponse::NotFound().body("track_id not found");
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
         Ok(path) => path,
-        Err(response) => return response,
+        Err(response) => {
+            tracing::warn!(
+                track_id = request.track_id,
+                track_path = %path,
+                status = %response.status(),
+                "track analysis path resolution failed"
+            );
+            return response;
+        }
     };
 
     let max_seconds = match request.max_seconds {
