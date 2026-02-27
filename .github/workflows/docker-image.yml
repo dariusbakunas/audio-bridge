@@ -108,9 +108,20 @@ jobs:
       - name: Create manifest list and push tags
         run: |
           cd /tmp/digests
-          TAG_ARGS="$(printf -- '-t %s ' ${{ steps.meta.outputs.tags }})"
-          SOURCE_ARGS="$(printf -- 'docker.io/${{ secrets.DOCKERHUB_USERNAME }}/audio-hub-server@sha256:%s ' *)"
-          docker buildx imagetools create ${TAG_ARGS} ${SOURCE_ARGS}
+          mapfile -t TAGS <<< "${{ steps.meta.outputs.tags }}"
+          TAG_ARGS=()
+          for tag in "${TAGS[@]}"; do
+            if [ -n "${tag}" ]; then
+              TAG_ARGS+=("-t" "${tag}")
+            fi
+          done
+
+          SOURCE_ARGS=()
+          for digest in *; do
+            SOURCE_ARGS+=("docker.io/${{ secrets.DOCKERHUB_USERNAME }}/audio-hub-server@sha256:${digest}")
+          done
+
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${SOURCE_ARGS[@]}"
 
       - name: Inspect image
         run: |
