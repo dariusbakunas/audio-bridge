@@ -8,7 +8,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: "http://127.0.0.1:5173",
     trace: "on-first-retry"
   },
   projects: [
@@ -17,10 +17,19 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] }
     }
   ],
-  webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000
-  }
+  webServer: [
+    {
+      command:
+        "cd .. && cargo run -p audio-hub-server -- --config web-ui/tests/fixtures/e2e.server.toml --bind 127.0.0.1:18080 --media-dir web-ui/tests/fixtures/media --metadata-db-path /tmp/audio-hub-e2e.sqlite",
+      url: "http://127.0.0.1:18080/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 180000
+    },
+    {
+      command: "VITE_API_BASE=http://127.0.0.1:18080 npm run dev -- --host 127.0.0.1 --port 5173",
+      url: "http://127.0.0.1:5173",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000
+    }
+  ]
 });

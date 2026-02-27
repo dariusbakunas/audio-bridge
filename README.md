@@ -252,6 +252,31 @@ npm run dev
 
 By default the Vite dev server proxies API requests to `http://localhost:8080`. If your hub server is on a different host/port, set `VITE_API_BASE` when running `npm run dev`.
 
+### Web UI E2E tests (Playwright)
+
+Playwright tests live in `web-ui/tests/e2e` and run against a real local `audio-hub-server` instance (not mocked API).
+
+Run:
+
+```bash
+cd web-ui
+npm install
+npx playwright install
+npm run test:e2e
+```
+
+Useful variants:
+
+```bash
+npm run test:e2e:headed
+npm run test:e2e:ui
+```
+
+Notes:
+- The Playwright config starts both backend (`audio-hub-server` on `127.0.0.1:18080`) and frontend (`vite` on `127.0.0.1:5173`).
+- Test fixtures are in `web-ui/tests/fixtures` (server config + media fixture directory).
+- Current coverage includes server-backed app/session smoke tests and offline connection-gate recovery behavior.
+
 If you enable TLS on the hub server, use `https://` for `VITE_API_BASE` and in the desktop app connection settings.
 
 For Docker deployments, prefer runtime configuration with `AUDIO_HUB_WEB_API_BASE` (instead of `VITE_API_BASE`) so one built image can be reused across environments.

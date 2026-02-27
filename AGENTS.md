@@ -31,8 +31,12 @@
 ## Web UI
 - Dev: `cd web-ui && npm install && npm run dev`
 - Build: `cd web-ui && npm install && npm run build`
+- E2E (Playwright, real server + UI): `cd web-ui && npm install && npx playwright install && npm run test:e2e`
+- E2E headed: `cd web-ui && npm run test:e2e:headed`
+- E2E UI mode: `cd web-ui && npm run test:e2e:ui`
 - Serve: place `web-ui/dist` next to the server binary or repo root; open `http://<SERVER_IP>:8080/`.
 - API base override: `VITE_API_BASE` for `npm run dev`.
+- E2E fixtures: server config at `web-ui/tests/fixtures/e2e.server.toml`, media fixture dir at `web-ui/tests/fixtures/media`.
 
 ## Notes
 - Workspace edition: Rust 2024.
