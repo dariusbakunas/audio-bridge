@@ -7,14 +7,30 @@ RUN npm ci
 COPY web-ui/ ./
 RUN npm run build
 
-FROM rust:1.88-bookworm AS rust-builder
+FROM rust:1.88-bookworm AS rust-chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
 WORKDIR /src
+
+FROM rust-chef AS rust-planner
 COPY Cargo.toml ./
+COPY Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release -p audio-hub-server
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM rust-chef AS rust-builder
+COPY --from=rust-planner /src/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo chef cook --release --recipe-path recipe.json
+COPY Cargo.toml ./
+COPY Cargo.lock ./
+COPY crates ./crates
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p audio-hub-server
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
