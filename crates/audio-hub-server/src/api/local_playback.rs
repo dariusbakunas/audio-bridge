@@ -76,6 +76,7 @@ pub async fn local_playback_play(
 ) -> impl Responder {
     let session_id = session_id.into_inner();
     if !crate::local_playback_sessions::has_session(&session_id) {
+        tracing::warn!(session_id = %session_id, reason = "session_not_found", "local playback play failed");
         return HttpResponse::NotFound().body("session not found");
     }
     let _ = crate::local_playback_sessions::touch_session(&session_id);
@@ -89,8 +90,14 @@ pub async fn local_playback_play(
                 Err(err) => return err.into_response(),
             }
         }
-        Ok(None) => return HttpResponse::NotFound().body("track not found"),
-        Err(_) => return HttpResponse::InternalServerError().finish(),
+        Ok(None) => {
+            tracing::warn!(session_id = %session_id, track_id = payload.track_id, reason = "track_id_not_found", "local playback play failed");
+            return HttpResponse::NotFound().body("track not found");
+        }
+        Err(err) => {
+            tracing::warn!(session_id = %session_id, track_id = payload.track_id, error = %err, reason = "track_lookup_error", "local playback play failed");
+            return HttpResponse::InternalServerError().finish();
+        }
     };
 
     let conn = req.connection_info();

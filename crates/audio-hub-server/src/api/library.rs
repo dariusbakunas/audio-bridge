@@ -97,7 +97,10 @@ pub async fn stream_track_id(
 fn path_for_track_id(state: &web::Data<AppState>, track_id: i64) -> Result<PathBuf, HttpResponse> {
     let raw = match state.metadata.db.track_path_for_id(track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return Err(HttpResponse::NotFound().finish()),
+        Ok(None) => {
+            tracing::warn!(track_id, reason = "track_id_not_found", "stream track lookup failed");
+            return Err(HttpResponse::NotFound().finish());
+        }
         Err(err) => return Err(HttpResponse::InternalServerError().body(err.to_string())),
     };
     let candidate = PathBuf::from(raw);
@@ -120,11 +123,17 @@ async fn stream_file(
 
     let mut file = match tokio::fs::File::open(&path).await {
         Ok(f) => f,
-        Err(_) => return HttpResponse::NotFound().finish(),
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, reason = "file_open_failed", "stream file open failed");
+            return HttpResponse::NotFound().finish();
+        }
     };
     let meta = match file.metadata().await {
         Ok(m) => m,
-        Err(_) => return HttpResponse::NotFound().finish(),
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, reason = "metadata_read_failed", "stream file metadata failed");
+            return HttpResponse::NotFound().finish();
+        }
     };
     let total_len = meta.len();
 

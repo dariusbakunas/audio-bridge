@@ -332,6 +332,7 @@ pub async fn sessions_select_output(
     }
     if output_id.starts_with("browser:") {
         let Some(session) = crate::session_registry::get_session(&session_id) else {
+            tracing::warn!(session_id = %session_id, output_id = %output_id, reason = "session_not_found", "select output failed");
             return HttpResponse::NotFound().body("session not found");
         };
         if !matches!(session.mode, crate::models::SessionMode::Local) {
@@ -372,12 +373,14 @@ pub async fn sessions_select_output(
     match crate::session_registry::bind_output(&session_id, &output_id, payload.force) {
         Ok(_) => {}
         Err(crate::session_registry::BindError::SessionNotFound) => {
+            tracing::warn!(session_id = %session_id, output_id = %output_id, reason = "session_not_found", "select output failed");
             return HttpResponse::NotFound().body("session not found");
         }
         Err(crate::session_registry::BindError::OutputInUse {
             output_id,
             held_by_session_id,
         }) => {
+            tracing::warn!(session_id = %session_id, output_id = %output_id, held_by_session_id = %held_by_session_id, reason = "output_in_use", "select output conflict");
             return HttpResponse::Conflict().json(OutputInUseError {
                 error: "output_in_use".to_string(),
                 output_id,
@@ -388,6 +391,7 @@ pub async fn sessions_select_output(
             bridge_id,
             held_by_session_id,
         }) => {
+            tracing::warn!(session_id = %session_id, output_id = %output_id, bridge_id = %bridge_id, held_by_session_id = %held_by_session_id, reason = "bridge_in_use", "select output conflict");
             return HttpResponse::Conflict().body(format!(
                 "bridge_in_use bridge_id={bridge_id} held_by_session_id={held_by_session_id}"
             ));
@@ -440,7 +444,10 @@ pub async fn sessions_release_output(
     let session_id = id.into_inner();
     let released_output_id = match crate::session_registry::release_output(&session_id) {
         Ok(released) => released,
-        Err(()) => return HttpResponse::NotFound().body("session not found"),
+        Err(()) => {
+            tracing::warn!(session_id = %session_id, reason = "session_not_found", "release output failed");
+            return HttpResponse::NotFound().body("session not found");
+        }
     };
     clear_cached_session_status(&state, &session_id);
     state.events.outputs_changed();
@@ -920,18 +927,29 @@ fn canonical_track_path_by_id(
     state: &web::Data<AppState>,
     track_id: i64,
 ) -> Option<PathBuf> {
-    let raw_path = state
-        .metadata
-        .db
-        .track_path_for_id(track_id)
-        .ok()
-        .flatten()?;
+    let raw_path = match state.metadata.db.track_path_for_id(track_id) {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            tracing::warn!(track_id, reason = "track_id_not_found", "queue track path lookup failed");
+            return None;
+        }
+        Err(err) => {
+            tracing::warn!(track_id, error = %err, reason = "track_lookup_error", "queue track path lookup failed");
+            return None;
+        }
+    };
     let candidate = PathBuf::from(raw_path);
-    state
+    match state
         .output
         .controller
         .canonicalize_under_root(state, &candidate)
-        .ok()
+    {
+        Ok(path) => Some(path),
+        Err(err) => {
+            tracing::warn!(track_id, candidate = %candidate.display(), reason = "path_canonicalize_failed", error = ?err, "queue track path canonicalization failed");
+            None
+        }
+    }
 }
 
 fn resolve_queue_add_track_ids(
@@ -942,6 +960,8 @@ fn resolve_queue_add_track_ids(
     for track_id in &body.track_ids {
         if canonical_track_path_by_id(state, *track_id).is_some() {
             resolved.push(*track_id);
+        } else {
+            tracing::warn!(track_id, reason = "track_path_missing", "queue add dropped unknown track id");
         }
     }
     resolved
@@ -1120,7 +1140,10 @@ pub async fn sessions_queue_play_from(
 
     let path = match state.metadata.db.track_path_for_id(body.track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(session_id = %session_id, track_id = body.track_id, reason = "track_id_not_found", "queue play_from failed");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
 
@@ -1137,6 +1160,7 @@ pub async fn sessions_queue_play_from(
         Err(()) => return HttpResponse::NotFound().body("session not found"),
     };
     if !found {
+        tracing::warn!(session_id = %session_id, track_id = body.track_id, reason = "track_not_in_queue", "queue play_from failed");
         return HttpResponse::NotFound().finish();
     }
     state.events.queue_changed();
@@ -1220,6 +1244,7 @@ pub async fn sessions_queue_next(
         return HttpResponse::NoContent().finish();
     };
     let Some(next_path) = canonical_track_path_by_id(&state, next_track_id) else {
+        tracing::warn!(session_id = %session_id, track_id = next_track_id, reason = "next_track_path_missing", "queue next failed");
         return HttpResponse::NotFound().body("track not found");
     };
     state.events.queue_changed();
@@ -1273,6 +1298,7 @@ pub async fn sessions_queue_previous(
         return HttpResponse::NoContent().finish();
     };
     let Some(prev_path) = canonical_track_path_by_id(&state, prev_track_id) else {
+        tracing::warn!(session_id = %session_id, track_id = prev_track_id, reason = "previous_track_path_missing", "queue previous failed");
         return HttpResponse::NotFound().body("track not found");
     };
     state.events.queue_changed();

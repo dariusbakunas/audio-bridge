@@ -162,14 +162,20 @@ pub async fn tracks_resolve(
     let metadata_service = state.metadata_service();
     let path = match state.metadata.db.track_path_for_id(query.track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks resolve failed");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     match metadata_service.album_id_for_track_path(&path) {
         Ok(Some(album_id)) => HttpResponse::Ok().json(TrackResolveResponse {
             album_id: Some(album_id),
         }),
-        Ok(None) => HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = query.track_id, track_path = %path, reason = "album_not_found_for_track", "tracks resolve failed");
+            HttpResponse::NotFound().finish()
+        }
         Err(err) => HttpResponse::InternalServerError().body(err),
     }
 }
@@ -217,7 +223,10 @@ pub async fn tracks_metadata(
                 extra_tags,
             })
         }
-        Ok(None) => HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks metadata missing");
+            HttpResponse::NotFound().finish()
+        }
         Err(err) => HttpResponse::InternalServerError().body(err),
     }
 }
@@ -240,7 +249,10 @@ pub async fn tracks_metadata_fields(
     let root = state.library.read().unwrap().root().to_path_buf();
     let path = match state.metadata.db.track_path_for_id(query.track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks metadata fields missing");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
@@ -277,7 +289,10 @@ pub async fn tracks_metadata_update(
     let metadata_service = state.metadata_service();
     let path = match state.metadata.db.track_path_for_id(request.track_id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = request.track_id, reason = "track_id_not_found", "tracks metadata update failed");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
@@ -1150,7 +1165,10 @@ pub async fn track_cover(
     let metadata_service = state.metadata_service();
     let cover_rel = match metadata_service.cover_path_for_track_id(path.id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(track_id = path.id, reason = "cover_not_set", "track cover missing");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err),
     };
     serve_cover_art(&state, &cover_rel, &req)
@@ -1174,7 +1192,10 @@ pub async fn album_cover(
     let metadata_service = state.metadata_service();
     let cover_rel = match metadata_service.cover_path_for_album_id(path.id) {
         Ok(Some(path)) => path,
-        Ok(None) => return HttpResponse::NotFound().finish(),
+        Ok(None) => {
+            tracing::warn!(album_id = path.id, reason = "cover_not_set", "album cover missing");
+            return HttpResponse::NotFound().finish();
+        }
         Err(err) => return HttpResponse::InternalServerError().body(err),
     };
     serve_cover_art(&state, &cover_rel, &req)
@@ -1186,14 +1207,21 @@ fn serve_cover_art(state: &AppState, cover_rel: &str, req: &HttpRequest) -> Http
     let full_path = root.join(cover_rel);
     let full_path = match full_path.canonicalize() {
         Ok(path) => path,
-        Err(_) => return HttpResponse::NotFound().finish(),
+        Err(err) => {
+            tracing::warn!(cover_rel, error = %err, reason = "cover_path_not_found", "cover art canonicalize failed");
+            return HttpResponse::NotFound().finish();
+        }
     };
     if !full_path.starts_with(&art_root) {
+        tracing::warn!(cover_rel, resolved = %full_path.display(), reason = "cover_outside_art_root", "cover art request forbidden");
         return HttpResponse::Forbidden().finish();
     }
     match NamedFile::open(full_path) {
         Ok(file) => file.into_response(req),
-        Err(_) => HttpResponse::NotFound().finish(),
+        Err(err) => {
+            tracing::warn!(cover_rel, error = %err, reason = "cover_file_open_failed", "cover art open failed");
+            HttpResponse::NotFound().finish()
+        }
     }
 }
 
