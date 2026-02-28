@@ -40,6 +40,7 @@ use crate::models::{
     SessionsListResponse,
     StatusResponse,
 };
+use crate::session_playback_manager::SessionPlaybackError;
 use crate::state::AppState;
 
 const PROTECTED_SESSION_NAMES: [&str; 2] = ["default", "local"];
@@ -526,10 +527,15 @@ pub async fn sessions_status(
             cache_session_status(&state, &session_id, &resp);
             HttpResponse::Ok().json(resp)
         }
-        Err(err) => match cached_session_status(&state, &session_id) {
-            Some(cached) => HttpResponse::Ok().json(cached),
-            None => err.into_response(),
-        },
+        Err(err) => {
+            let cached = cached_session_status(&state, &session_id);
+            let has_cached = cached.is_some();
+            log_session_status_error(&session_id, "status", &err, has_cached);
+            match cached {
+                Some(cached) => HttpResponse::Ok().json(cached),
+                None => err.into_response(),
+            }
+        }
     }
 }
 
@@ -653,10 +659,15 @@ pub async fn sessions_status_stream(
             cache_session_status(&state, &session_id, &resp);
             resp
         }
-        Err(err) => match cached_session_status(&state, &session_id) {
-            Some(cached) => cached,
-            None => return err.into_response(),
-        },
+        Err(err) => {
+            let cached = cached_session_status(&state, &session_id);
+            let has_cached = cached.is_some();
+            log_session_status_error(&session_id, "status_stream_initial", &err, has_cached);
+            match cached {
+                Some(cached) => cached,
+                None => return err.into_response(),
+            }
+        }
     };
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
     let mut pending = VecDeque::new();
@@ -906,6 +917,122 @@ fn require_session(session_id: &str) -> Result<(), HttpResponse> {
         Ok(())
     } else {
         Err(HttpResponse::NotFound().body("session not found"))
+    }
+}
+
+fn log_session_status_error(
+    session_id: &str,
+    endpoint: &str,
+    err: &SessionPlaybackError,
+    has_cached_status: bool,
+) {
+    let active_output_id = crate::session_registry::get_session(session_id)
+        .and_then(|s| s.active_output_id)
+        .unwrap_or_else(|| "<none>".to_string());
+    match err {
+        SessionPlaybackError::SessionNotFound => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                has_cached_status,
+                reason = "session_not_found",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::NoOutputSelected { .. } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                has_cached_status,
+                reason = "no_output_selected",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::OutputLockMissing { output_id, .. } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                has_cached_status,
+                reason = "output_lock_missing",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::OutputInUse {
+            output_id,
+            held_by_session_id,
+            ..
+        } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                held_by_session_id,
+                has_cached_status,
+                reason = "output_in_use",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::SelectFailed {
+            output_id, reason, ..
+        } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                status_error = %reason,
+                has_cached_status,
+                reason = "select_failed",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::DispatchFailed {
+            output_id, reason, ..
+        } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                status_error = %reason,
+                has_cached_status,
+                reason = "dispatch_failed",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::StatusFailed {
+            output_id, reason, ..
+        } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                status_error = %reason,
+                has_cached_status,
+                reason = "status_failed",
+                "session status request failed"
+            );
+        }
+        SessionPlaybackError::CommandFailed {
+            output_id, reason, ..
+        } => {
+            tracing::warn!(
+                endpoint,
+                session_id,
+                active_output_id,
+                output_id,
+                status_error = %reason,
+                has_cached_status,
+                reason = "command_failed",
+                "session status request failed"
+            );
+        }
     }
 }
 

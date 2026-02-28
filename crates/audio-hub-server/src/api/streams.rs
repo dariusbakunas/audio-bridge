@@ -132,15 +132,22 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                 }
 
                 let mut refresh = false;
+                let mut emit_unchanged = false;
                 match recv_signal(&mut ctx.receiver, Some(&mut ctx.interval)).await {
                     StreamSignal::Tick => {}
                     StreamSignal::Event(result) => match result {
-                        Ok(HubEvent::OutputsChanged) => refresh = true,
+                        Ok(HubEvent::OutputsChanged) => {
+                            refresh = true;
+                            emit_unchanged = true;
+                        }
                         Ok(HubEvent::StatusChanged) => {}
                         Ok(HubEvent::QueueChanged) => {}
                         Ok(HubEvent::Metadata(_)) => {}
                         Ok(HubEvent::LibraryChanged) => {}
-                        Err(RecvError::Lagged(_)) => refresh = true,
+                        Err(RecvError::Lagged(_)) => {
+                            refresh = true;
+                            emit_unchanged = true;
+                        }
                         Err(RecvError::Closed) => return None,
                     },
                 }
@@ -151,7 +158,7 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                     );
                     let json = serde_json::to_string(&outputs)
                         .unwrap_or_else(|_| "null".to_string());
-                    if ctx.last_outputs.as_deref() != Some(json.as_str()) {
+                    if emit_unchanged || ctx.last_outputs.as_deref() != Some(json.as_str()) {
                         ctx.last_outputs = Some(json.clone());
                         ctx.pending.push_back(sse_event("outputs", &json));
                     }

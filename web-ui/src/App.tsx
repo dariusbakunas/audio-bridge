@@ -137,6 +137,7 @@ const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
 const WEB_DEFAULT_SESSION_NAME = "Default";
+const WEB_DEFAULT_REMOTE_CLIENT_ID = "web-default-global";
 const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
 
 type LocalPlaybackSnapshot = {
@@ -979,7 +980,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     const defaultSession = await postJson<SessionCreateResponse>("/sessions", {
       name: WEB_DEFAULT_SESSION_NAME,
       mode: "remote",
-      client_id: `${clientId}:default`,
+      client_id: WEB_DEFAULT_REMOTE_CLIENT_ID,
       app_version: __APP_VERSION__,
       owner: "web-ui",
       lease_ttl_sec: 0
@@ -1133,6 +1134,14 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [serverConnected, sessionId, refreshSessionDetail]);
 
   useEffect(() => {
+    if (!sessionId) return;
+    const current = sessions.find((item) => item.id === sessionId);
+    if (!current) return;
+    const nextActiveOutputId = current.active_output_id ?? null;
+    setActiveOutputId((prev) => (prev === nextActiveOutputId ? prev : nextActiveOutputId));
+  }, [sessionId, sessions]);
+
+  useEffect(() => {
     if (!canControlVolume || !sessionId) {
       setSessionVolume(null);
       return;
@@ -1201,6 +1210,12 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     sourceKey: streamKey,
     onEvent: (data) => {
       setOutputs(data.outputs);
+      const sid = activeSessionIdRef.current;
+      if (sid) {
+        refreshSessionDetail(sid).catch(() => {
+          // Best-effort session output sync for cross-client output switches.
+        });
+      }
       markServerConnected();
     },
     onError: () => {

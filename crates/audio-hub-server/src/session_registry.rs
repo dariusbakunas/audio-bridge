@@ -88,7 +88,9 @@ pub fn create_or_refresh(
     if let Some(existing_id) = store.by_key.get(&key).cloned() {
         if let Some(existing) = store.by_id.get_mut(&existing_id) {
             existing.name = name;
-            existing.client_id = client_id;
+            if matches!(mode, SessionMode::Local) {
+                existing.client_id = client_id;
+            }
             existing.app_version = app_version;
             existing.owner = owner;
             existing.last_seen = now;
@@ -674,7 +676,7 @@ mod tests {
         );
         assert_eq!(a, b);
         let session = get_session(&a).expect("session");
-        assert_eq!(session.client_id, "client-b");
+        assert_eq!(session.client_id, "client-a");
     }
 
     #[test]

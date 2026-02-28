@@ -384,6 +384,9 @@ fn spawn_session_reaper(state: web::Data<AppState>) {
     });
 }
 
+/// Emit a warning when request latency crosses this threshold.
+const SLOW_REQUEST_WARN_MS: u128 = 2_000;
+
 /// Return true when the request path should be logged.
 fn should_log_path(path: &str) -> bool {
     if path == "/stream"
@@ -454,6 +457,20 @@ where
         let fut = self.service.call(req);
         Box::pin(async move {
             let res = fut.await?;
+            let elapsed_ms = start.elapsed().as_millis();
+            if elapsed_ms >= SLOW_REQUEST_WARN_MS {
+                tracing::warn!(
+                    method = %method,
+                    path = %path,
+                    status = %res.status().as_u16(),
+                    user_agent = %ua,
+                    peer = %peer,
+                    elapsed_ms = %elapsed_ms,
+                    threshold_ms = %SLOW_REQUEST_WARN_MS,
+                    reason = "slow_request",
+                    "http request slow"
+                );
+            }
             if should_log {
                 tracing::info!(
                     method = %method,
@@ -461,7 +478,7 @@ where
                     status = %res.status().as_u16(),
                     user_agent = %ua,
                     peer = %peer,
-                    elapsed_ms = %start.elapsed().as_millis(),
+                    elapsed_ms = %elapsed_ms,
                     "http request"
                 );
             }

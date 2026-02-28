@@ -3,6 +3,7 @@
 use actix_files::NamedFile;
 use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
 use serde::Deserialize;
+use std::time::Instant;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::musicbrainz::MusicBrainzMatch;
@@ -526,6 +527,23 @@ pub async fn albums_metadata_update(
     state: web::Data<AppState>,
     body: web::Json<AlbumMetadataUpdateRequest>,
 ) -> impl Responder {
+    #[derive(Debug)]
+    enum AlbumMetadataUpdateError {
+        BadRequest(String),
+        NotFound(String),
+        Internal(String),
+    }
+
+    impl AlbumMetadataUpdateError {
+        fn into_response(self) -> HttpResponse {
+            match self {
+                AlbumMetadataUpdateError::BadRequest(message) => HttpResponse::BadRequest().body(message),
+                AlbumMetadataUpdateError::NotFound(message) => HttpResponse::NotFound().body(message),
+                AlbumMetadataUpdateError::Internal(message) => HttpResponse::InternalServerError().body(message),
+            }
+        }
+    }
+
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
@@ -558,73 +576,124 @@ pub async fn albums_metadata_update(
         return HttpResponse::NotFound().finish();
     }
 
-    for path in paths {
-        let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
-            Ok(path) => path,
-            Err(response) => return response,
-        };
-        if let Err(err) = write_track_tags(
-            &full_path,
-            TrackTagUpdate {
-                title: None,
-                artist: track_artist,
-                album,
-                album_artist,
+    let album_id = request.album_id;
+    let track_count = paths.len();
+    let album_owned = album.map(str::to_string);
+    let album_artist_owned = album_artist.map(str::to_string);
+    let track_artist_owned = track_artist.map(str::to_string);
+    let started_at = Instant::now();
+    tracing::info!(album_id, track_count, "album metadata update started");
+
+    let state_for_update = state.clone();
+    let update_result = tokio::task::spawn_blocking(move || -> Result<i64, AlbumMetadataUpdateError> {
+        for path in paths {
+            let full_path = crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+                .map_err(|response| match response.status().as_u16() {
+                    400 => AlbumMetadataUpdateError::BadRequest(format!(
+                        "track path outside library root: {path}"
+                    )),
+                    404 => AlbumMetadataUpdateError::NotFound(format!(
+                        "track not found during album update: {path}"
+                    )),
+                    _ => AlbumMetadataUpdateError::Internal(format!(
+                        "failed to resolve track path for album update: {path}"
+                    )),
+                })?;
+
+            if let Err(err) = write_track_tags(
+                &full_path,
+                TrackTagUpdate {
+                    title: None,
+                    artist: track_artist_owned.as_deref(),
+                    album: album_owned.as_deref(),
+                    album_artist: album_artist_owned.as_deref(),
+                    year,
+                    track_number: None,
+                    disc_number: None,
+                    extra_tags: None,
+                    clear_title: false,
+                    clear_artist: false,
+                    clear_album: false,
+                    clear_album_artist: false,
+                    clear_year: false,
+                    clear_track_number: false,
+                    clear_disc_number: false,
+                    clear_extra_tags: None,
+                },
+            ) {
+                return Err(AlbumMetadataUpdateError::Internal(format!(
+                    "album metadata update failed for {path}: {err}"
+                )));
+            }
+
+            if let Err(response) = metadata_service.rescan_track(&state_for_update.library, &full_path) {
+                return Err(match response.status().as_u16() {
+                    400 => AlbumMetadataUpdateError::BadRequest(format!(
+                        "track rescan rejected after tag update: {path}"
+                    )),
+                    404 => AlbumMetadataUpdateError::NotFound(format!(
+                        "track disappeared during rescan: {path}"
+                    )),
+                    _ => AlbumMetadataUpdateError::Internal(format!(
+                        "track rescan failed after tag update: {path}"
+                    )),
+                });
+            }
+        }
+
+        let mut updated_album_id = album_id;
+        if album_owned.is_some() || album_artist_owned.is_some() || year.is_some() {
+            match metadata_service.update_album_metadata(
+                album_id,
+                album_owned.as_deref(),
+                album_artist_owned.as_deref(),
                 year,
-                track_number: None,
-                disc_number: None,
-                extra_tags: None,
-                clear_title: false,
-                clear_artist: false,
-                clear_album: false,
-                clear_album_artist: false,
-                clear_year: false,
-                clear_track_number: false,
-                clear_disc_number: false,
-                clear_extra_tags: None,
-            },
-        ) {
-            let message = format!("album metadata update failed for {path}: {err}");
-            tracing::warn!(
-                error = %err,
-                path = %path,
-                album_id = request.album_id,
-                "album metadata update failed"
-            );
-            return HttpResponse::InternalServerError().body(message);
-        }
-        if let Err(response) = metadata_service.rescan_track(&state.library, &full_path) {
-            tracing::warn!(
-                path = %path,
-                album_id = request.album_id,
-                status = %response.status(),
-                "album metadata rescan failed"
-            );
-            return response;
-        }
-    }
-
-    let mut updated_album_id = request.album_id;
-    if album.is_some() || album_artist.is_some() || year.is_some() {
-        match metadata_service.update_album_metadata(request.album_id, album, album_artist, year) {
-            Ok(Some(new_id)) => {
-                updated_album_id = new_id;
-            }
-            Ok(None) => return HttpResponse::NotFound().finish(),
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    album_id = request.album_id,
-                    "album metadata db update failed"
-                );
-                return HttpResponse::InternalServerError().body(err);
+            ) {
+                Ok(Some(new_id)) => {
+                    updated_album_id = new_id;
+                }
+                Ok(None) => {
+                    return Err(AlbumMetadataUpdateError::NotFound(format!(
+                        "album not found: {album_id}"
+                    )));
+                }
+                Err(err) => {
+                    return Err(AlbumMetadataUpdateError::Internal(format!(
+                        "album metadata db update failed: {err}"
+                    )));
+                }
             }
         }
-    }
 
-    HttpResponse::Ok().json(AlbumMetadataUpdateResponse {
-        album_id: updated_album_id,
+        Ok(updated_album_id)
     })
+    .await;
+
+    match update_result {
+        Ok(Ok(updated_album_id)) => {
+            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            tracing::info!(album_id, track_count, elapsed_ms, "album metadata update finished");
+            HttpResponse::Ok().json(AlbumMetadataUpdateResponse {
+                album_id: updated_album_id,
+            })
+        }
+        Ok(Err(err)) => {
+            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            tracing::warn!(album_id, track_count, elapsed_ms, error = ?err, "album metadata update failed");
+            err.into_response()
+        }
+        Err(join_err) => {
+            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            tracing::error!(
+                album_id,
+                track_count,
+                elapsed_ms,
+                error = %join_err,
+                "album metadata update worker panicked"
+            );
+            HttpResponse::InternalServerError().body("album metadata update worker failed")
+        }
+    }
 }
 
 #[utoipa::path(
