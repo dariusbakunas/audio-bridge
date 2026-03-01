@@ -538,6 +538,7 @@ pub fn delete_session(session_id: &str) -> Result<Option<String>, ()> {
     Ok(removed.active_output_id)
 }
 
+#[allow(dead_code)]
 pub fn purge_expired() -> Vec<String> {
     let now = Instant::now();
     let mut store = match store().lock() {

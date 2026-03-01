@@ -136,7 +136,6 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     spawn_cast_mdns_discovery(state.clone());
     spawn_bridge_device_streams_for_config(state.clone());
     spawn_bridge_status_streams_for_config(state.clone());
-    spawn_session_reaper(state.clone());
     let server = HttpServer::new(move || {
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173")
@@ -359,27 +358,6 @@ fn spawn_library_watcher(state: web::Data<AppState>) {
                     _ => {}
                 }
             }
-        }
-    });
-}
-
-fn spawn_session_reaper(state: web::Data<AppState>) {
-    actix_web::rt::spawn(async move {
-        let mut interval = actix_web::rt::time::interval(Duration::from_secs(1));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            interval.tick().await;
-            let expired = crate::session_registry::purge_expired();
-            if expired.is_empty() {
-                continue;
-            }
-            if let Ok(mut cache) = state.output.session_status_cache.lock() {
-                for session_id in &expired {
-                    cache.remove(session_id);
-                }
-            }
-            tracing::info!(count = expired.len(), expired = ?expired, "expired sessions purged");
-            state.events.outputs_changed();
         }
     });
 }
