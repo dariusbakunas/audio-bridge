@@ -184,6 +184,7 @@ fn duration_ms_from_codec_params(codec_params: &CodecParameters) -> Option<u64> 
     Some(frames.saturating_mul(1000) / rate)
 }
 
+/// Best-effort codec label used for status payloads.
 fn codec_name_from_params(params: &CodecParameters) -> Option<String> {
     use symphonia::core::codecs::*;
     let name = match params.codec {

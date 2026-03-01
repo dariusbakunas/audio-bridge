@@ -153,6 +153,7 @@ pub(crate) fn spawn_http_server(
     })
 }
 
+/// Return API health/version snapshot.
 async fn health() -> HttpResponse {
     HttpResponse::Ok().json(HealthResponse {
         status: "ok",
@@ -160,6 +161,7 @@ async fn health() -> HttpResponse {
     })
 }
 
+/// Return currently available output devices and selected device info.
 async fn list_devices(state: web::Data<AppState>) -> HttpResponse {
     match build_devices_response(&state) {
         Ok(resp) => HttpResponse::Ok().json(resp),
@@ -167,6 +169,7 @@ async fn list_devices(state: web::Data<AppState>) -> HttpResponse {
     }
 }
 
+/// Stream device list changes via SSE.
 async fn devices_stream(state: web::Data<AppState>) -> HttpResponse {
     let mut pending = VecDeque::new();
     let mut last_devices = None;
@@ -214,6 +217,7 @@ async fn devices_stream(state: web::Data<AppState>) -> HttpResponse {
     sse_response(stream)
 }
 
+/// Select active output device by id or name.
 async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     let req: DeviceSelectRequest = match parse_json(&body) {
         Ok(req) => req,
@@ -261,10 +265,12 @@ async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResp
     }
 }
 
+/// Return current playback status snapshot.
 async fn status_snapshot(state: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(build_status_snapshot(&state))
 }
 
+/// Stream playback status changes via SSE.
 async fn status_stream(state: web::Data<AppState>) -> HttpResponse {
     let initial = build_status_snapshot(&state);
     let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "null".to_string());
@@ -301,6 +307,7 @@ async fn status_stream(state: web::Data<AppState>) -> HttpResponse {
     sse_response(stream)
 }
 
+/// Enqueue a play command for an HTTP media URL.
 async fn play(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     let req: PlayRequest = match parse_json(&body) {
         Ok(req) => req,
@@ -327,6 +334,7 @@ async fn play(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     }
 }
 
+/// Toggle pause state in the playback worker.
 async fn pause(state: web::Data<AppState>) -> HttpResponse {
     if state.player_tx.send(PlayerCommand::PauseToggle).is_err() {
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
@@ -335,6 +343,7 @@ async fn pause(state: web::Data<AppState>) -> HttpResponse {
     }
 }
 
+/// Force playback resume in the playback worker.
 async fn resume(state: web::Data<AppState>) -> HttpResponse {
     if state.player_tx.send(PlayerCommand::Resume).is_err() {
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
@@ -343,6 +352,7 @@ async fn resume(state: web::Data<AppState>) -> HttpResponse {
     }
 }
 
+/// Stop playback in the playback worker.
 async fn stop(state: web::Data<AppState>) -> HttpResponse {
     if state.player_tx.send(PlayerCommand::Stop).is_err() {
         error_response(StatusCode::INTERNAL_SERVER_ERROR, "player offline")
@@ -351,6 +361,7 @@ async fn stop(state: web::Data<AppState>) -> HttpResponse {
     }
 }
 
+/// Seek playback to an absolute position in milliseconds.
 async fn seek(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     let req: SeekRequest = match parse_json(&body) {
         Ok(req) => req,
@@ -368,11 +379,13 @@ async fn seek(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     }
 }
 
+/// Return current volume/mute snapshot.
 async fn volume_snapshot(state: web::Data<AppState>) -> HttpResponse {
     let (value, muted) = state.volume.snapshot();
     HttpResponse::Ok().json(VolumeResponse { value, muted })
 }
 
+/// Set output volume and mirror it into in-memory volume state.
 async fn set_volume(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     let req: VolumeSetRequest = match parse_json(&body) {
         Ok(req) => req,
@@ -393,6 +406,7 @@ async fn set_volume(state: web::Data<AppState>, body: web::Bytes) -> HttpRespons
     })
 }
 
+/// Set mute flag and mirror it into in-memory volume state.
 async fn set_mute(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     let req: MuteRequest = match parse_json(&body) {
         Ok(req) => req,
@@ -410,11 +424,13 @@ async fn set_mute(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse 
     HttpResponse::Ok().json(VolumeResponse { value, muted })
 }
 
+/// Parse request JSON body into the target type or return HTTP 400.
 fn parse_json<T: serde::de::DeserializeOwned>(body: &web::Bytes) -> Result<T, HttpResponse> {
     serde_json::from_slice(body)
         .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid json: {e}")))
 }
 
+/// Build a normalized, deduplicated device list response.
 fn build_devices_response(state: &AppState) -> Result<DevicesResponse, String> {
     let host = cpal::default_host();
     let devices = device::list_device_infos(&host).map_err(|e| format!("{e:#}"))?;
@@ -445,6 +461,7 @@ fn build_devices_response(state: &AppState) -> Result<DevicesResponse, String> {
     })
 }
 
+/// Build the current status snapshot, falling back to an empty snapshot on lock failure.
 fn build_status_snapshot(state: &AppState) -> StatusSnapshot {
     state
         .status
@@ -479,6 +496,7 @@ fn error_response(status: StatusCode, message: &str) -> HttpResponse {
     HttpResponse::build(status).json(serde_json::json!({ "error": message }))
 }
 
+/// Encode one SSE event frame.
 fn sse_event(event: &str, data: &str) -> Bytes {
     let mut payload = String::new();
     payload.push_str("event: ");
@@ -493,6 +511,7 @@ fn sse_event(event: &str, data: &str) -> Bytes {
     Bytes::from(payload)
 }
 
+/// Emit periodic SSE ping comments to keep idle streams alive through proxies.
 fn push_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
     if pending.is_empty() && last_ping.elapsed() >= PING_INTERVAL {
         *last_ping = Instant::now();
@@ -500,6 +519,7 @@ fn push_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
     }
 }
 
+/// Build an HTTP response configured for SSE streaming.
 fn sse_response<S>(stream: S) -> HttpResponse
 where
     S: Stream<Item = Result<Bytes, Error>> + 'static,
@@ -511,6 +531,7 @@ where
         .streaming(stream)
 }
 
+/// Internal mutable state for the devices SSE loop.
 struct DevicesStreamState {
     state: web::Data<AppState>,
     interval: actix_web::rt::time::Interval,
@@ -519,6 +540,7 @@ struct DevicesStreamState {
     last_ping: Instant,
 }
 
+/// Internal mutable state for the status SSE loop.
 struct StatusStreamState {
     state: web::Data<AppState>,
     interval: actix_web::rt::time::Interval,

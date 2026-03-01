@@ -105,6 +105,7 @@ pub fn pick_buffer_size(config: &cpal::SupportedStreamConfig) -> Option<cpal::Bu
     }
 }
 
+/// Choose a concrete sample rate within `[min, max]` for an optional target.
 fn pick_rate_for_range(min: u32, max: u32, target_rate: Option<u32>) -> u32 {
     let target = target_rate.unwrap_or(u32::MAX);
     if target_rate.is_some() {
@@ -120,6 +121,7 @@ fn pick_rate_for_range(min: u32, max: u32, target_rate: Option<u32>) -> u32 {
     }
 }
 
+/// Rank sample formats for preference ordering (lower is better).
 fn sample_format_rank(format: cpal::SampleFormat) -> u8 {
     match format {
         cpal::SampleFormat::F32 => 0,
@@ -130,6 +132,7 @@ fn sample_format_rank(format: cpal::SampleFormat) -> u8 {
     }
 }
 
+/// Compare output-config candidates and return whether the new one is better.
 fn is_better_candidate(
     below: bool,
     rate: u32,
@@ -233,6 +236,7 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
     Ok(out)
 }
 
+/// Return stable device id or deterministic fallback hash when CPAL id is unavailable.
 fn device_id_for(device: &cpal::Device, name: &str, min_rate: u32, max_rate: u32) -> String {
     if let Ok(id) = device.id() {
         return id.to_string();
@@ -240,6 +244,7 @@ fn device_id_for(device: &cpal::Device, name: &str, min_rate: u32, max_rate: u32
     hash_device_id(name, min_rate, max_rate)
 }
 
+/// Return cache key for per-device sample-rate cache entries.
 fn device_cache_key(device: &cpal::Device, name: &str) -> String {
     if let Ok(id) = device.id() {
         return id.to_string();
@@ -247,26 +252,31 @@ fn device_cache_key(device: &cpal::Device, name: &str) -> String {
     name.to_string()
 }
 
+/// Global cache for remembered `(min_rate, max_rate)` tuples by device key.
 fn rates_cache() -> &'static Mutex<std::collections::HashMap<String, (u32, u32)>> {
     static CACHE: OnceLock<Mutex<std::collections::HashMap<String, (u32, u32)>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Lookup remembered sample-rate range for a device key.
 fn cached_rates(key: &str) -> Option<(u32, u32)> {
     rates_cache().lock().ok().and_then(|m| m.get(key).copied())
 }
 
+/// Update remembered sample-rate range for a device key.
 fn update_cached_rates(key: &str, min_rate: u32, max_rate: u32) {
     if let Ok(mut m) = rates_cache().lock() {
         m.insert(key.to_string(), (min_rate, max_rate));
     }
 }
 
+/// Global set tracking which invalid devices have already emitted a warning.
 fn invalid_warned() -> &'static Mutex<HashSet<String>> {
     static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     WARNED.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// Return whether invalid-device warning should be emitted for this key.
 fn should_warn_invalid_device(key: &str) -> bool {
     if let Ok(mut warned) = invalid_warned().lock() {
         return warned.insert(key.to_string());
@@ -274,6 +284,7 @@ fn should_warn_invalid_device(key: &str) -> bool {
     true
 }
 
+/// Build deterministic fallback device id from name and supported-rate range.
 fn hash_device_id(name: &str, min_rate: u32, max_rate: u32) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     let mut input = String::new();
@@ -289,6 +300,7 @@ fn hash_device_id(name: &str, min_rate: u32, max_rate: u32) -> String {
     format!("{hash:016x}")
 }
 
+/// Case-insensitive substring match for device name selection.
 fn matches_device_name(name: &str, needle: &str) -> bool {
     let needle = needle.trim();
     if needle.is_empty() {

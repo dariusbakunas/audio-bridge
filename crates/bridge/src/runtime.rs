@@ -88,6 +88,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     Ok(())
 }
 
+/// Normalize optional device name input by trimming and dropping empty values.
 fn normalize_device_name(device: Option<String>) -> Option<String> {
     device.and_then(|name| {
         let trimmed = name.trim();

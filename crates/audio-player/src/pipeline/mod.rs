@@ -48,6 +48,7 @@ struct PlaybackState {
 }
 
 impl PlaybackState {
+    /// Build internal playback state from public session options.
     fn new(opts: PlaybackSessionOptions) -> Self {
         Self {
             paused: opts.paused,
@@ -62,6 +63,7 @@ impl PlaybackState {
         }
     }
 
+    /// Placeholder reporter lifecycle hook.
     fn stop_reporter(self) {}
 }
 

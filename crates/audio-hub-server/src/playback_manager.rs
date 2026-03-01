@@ -110,6 +110,7 @@ impl PlaybackManager {
         self.status.set_has_previous(has_previous);
     }
 
+    /// Create a transport facade backed by the active player command channel.
     fn transport(&self) -> ChannelTransport {
         ChannelTransport::new(self.player.lock().unwrap().cmd_tx.clone())
     }

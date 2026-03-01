@@ -29,6 +29,7 @@ impl StatusStore {
         &self.inner
     }
 
+    /// Apply a mutation and return whether status changed.
     fn update_status<F>(&self, f: F) -> bool
     where
         F: FnOnce(&mut PlayerStatus),
@@ -41,6 +42,9 @@ impl StatusStore {
         *s != prev
     }
 
+    /// Apply a mutation that also returns a computed value.
+    ///
+    /// Returns `None` when the status lock cannot be acquired.
     fn update_status_with<F, R>(&self, f: F) -> Option<(R, bool)>
     where
         F: FnOnce(&mut PlayerStatus) -> R,
@@ -250,6 +254,8 @@ impl StatusStore {
         (inputs, changed)
     }
 
+    /// Merge one remote bridge snapshot into local status and compute
+    /// queue auto-advance decision inputs from the merged state.
     fn apply_remote_status(
         state: &mut PlayerStatus,
         remote: &BridgeStatus,
@@ -322,6 +328,8 @@ impl StatusStore {
     }
 }
 
+/// Public helper for tests/callers that need merged auto-advance inputs
+/// without emitting events.
 pub(crate) fn reduce_remote_status(
     state: &mut PlayerStatus,
     remote: &BridgeStatus,
@@ -330,6 +338,7 @@ pub(crate) fn reduce_remote_status(
     StatusStore::apply_remote_status(state, remote, last_duration_ms)
 }
 
+/// Internal grouped playback fields used to keep status updates consistent.
 struct PlaybackFields {
     output_device: Option<String>,
     sample_rate: Option<u32>,
@@ -349,6 +358,7 @@ struct PlaybackFields {
     paused: Option<bool>,
 }
 
+/// Apply a full set of playback fields onto the mutable status object.
 fn apply_playback_fields(s: &mut PlayerStatus, fields: PlaybackFields) {
     s.output_device = fields.output_device;
     s.sample_rate = fields.sample_rate;
@@ -370,14 +380,17 @@ fn apply_playback_fields(s: &mut PlayerStatus, fields: PlaybackFields) {
     }
 }
 
+/// Clear seek-in-flight once fresh elapsed/duration proves playback resumed.
 fn should_clear_seek_in_flight(state: &PlayerStatus) -> bool {
     state.seek_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
 }
 
+/// Clear manual-advance-in-flight once fresh elapsed/duration arrives.
 fn should_clear_manual_advance_in_flight(state: &PlayerStatus) -> bool {
     state.manual_advance_in_flight && state.elapsed_ms.is_some() && state.duration_ms.is_some()
 }
 
+/// Clear stale now-playing data when remote status reports fully idle state.
 fn should_clear_now_playing(state: &PlayerStatus, remote: &BridgeStatus) -> bool {
     state.now_playing.is_some()
         && remote.now_playing.is_none()

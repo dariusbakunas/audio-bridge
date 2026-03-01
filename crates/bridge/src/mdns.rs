@@ -73,6 +73,7 @@ impl MdnsAdvertiser {
     }
 }
 
+/// Resolve base hostname for mDNS host/id defaults.
 fn resolve_host_base() -> String {
     std::env::var("HOSTNAME")
         .ok()
@@ -80,6 +81,7 @@ fn resolve_host_base() -> String {
         .unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string())
 }
 
+/// Format host into `.local.` form expected by mDNS records.
 fn format_host(host_base: &str) -> String {
     if host_base.ends_with(".local.") {
         host_base.to_string()
@@ -88,10 +90,12 @@ fn format_host(host_base: &str) -> String {
     }
 }
 
+/// Resolve bridge id from env override or host-derived default.
 fn resolve_bridge_id(host_base: &str) -> String {
     std::env::var("BRIDGE_ID").unwrap_or_else(|_| host_base.to_string())
 }
 
+/// Resolve bridge display name from env override or host-derived default.
 fn resolve_bridge_name(host_base: &str) -> String {
     std::env::var("BRIDGE_NAME").unwrap_or_else(|_| host_base.to_string())
 }

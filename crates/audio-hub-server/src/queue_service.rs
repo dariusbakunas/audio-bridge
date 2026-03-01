@@ -47,6 +47,7 @@ pub(crate) struct AutoAdvanceInputs {
     pub now_playing: bool,
 }
 
+/// Return whether queue auto-advance should dispatch the next track now.
 fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
     if inputs.manual_advance_in_flight {
         return false;

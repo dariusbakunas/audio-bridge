@@ -233,6 +233,7 @@ impl SharedAudio {
         }
     }
 
+    /// Emit low-buffer diagnostics at most once per second.
     fn log_low_watermark(&self) {
         let threshold = (self.max_buffered_samples / 8).max(self.channels * 16);
         let queued = {

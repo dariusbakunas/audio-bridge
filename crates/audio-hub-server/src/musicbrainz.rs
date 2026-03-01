@@ -16,15 +16,23 @@ const DEFAULT_RATE_LIMIT_MS: u64 = 1000;
 const MIN_MATCH_SCORE: i32 = 90;
 
 #[derive(Debug, Clone)]
+/// Normalized MusicBrainz match fields persisted into metadata DB.
 pub struct MusicBrainzMatch {
+    /// Recording MBID.
     pub recording_mbid: Option<String>,
+    /// Primary artist MBID.
     pub artist_mbid: Option<String>,
+    /// Primary artist sort-name when available.
     pub artist_sort_name: Option<String>,
+    /// Preferred release/album MBID.
     pub album_mbid: Option<String>,
+    /// Parsed release year.
     pub release_year: Option<i32>,
+    /// Additional release MBID candidates.
     pub release_candidates: Vec<String>,
 }
 
+/// Rate-limited MusicBrainz API client.
 pub struct MusicBrainzClient {
     base_url: String,
     user_agent: String,
@@ -34,6 +42,7 @@ pub struct MusicBrainzClient {
 }
 
 #[derive(Debug, Clone)]
+/// Candidate recording result returned by search API.
 pub struct MusicBrainzRecordingCandidate {
     pub recording_mbid: String,
     pub score: Option<i32>,
@@ -46,6 +55,7 @@ pub struct MusicBrainzRecordingCandidate {
 }
 
 #[derive(Debug, Clone)]
+/// Candidate release result returned by search API.
 pub struct MusicBrainzReleaseCandidate {
     pub release_mbid: String,
     pub score: Option<i32>,
@@ -56,6 +66,7 @@ pub struct MusicBrainzReleaseCandidate {
 }
 
 impl MusicBrainzClient {
+    /// Build a client from config; returns `Ok(None)` when disabled or misconfigured.
     pub fn new(cfg: &MusicBrainzConfig) -> Result<Option<Self>> {
         if !cfg.enabled.unwrap_or(false) {
             return Ok(None);
@@ -83,6 +94,7 @@ impl MusicBrainzClient {
         }))
     }
 
+    /// Lookup the best recording match for title/artist/(optional album).
     pub fn lookup_recording(
         &self,
         title: &str,
@@ -195,6 +207,7 @@ impl MusicBrainzClient {
         }))
     }
 
+    /// Search recording candidates with relevance scores.
     pub fn search_recordings(
         &self,
         title: &str,
@@ -272,6 +285,7 @@ impl MusicBrainzClient {
         Ok(results)
     }
 
+    /// Search release candidates with relevance scores.
     pub fn search_releases(
         &self,
         title: &str,
@@ -328,10 +342,12 @@ impl MusicBrainzClient {
         Ok(results)
     }
 
+    /// Return configured MusicBrainz user-agent string.
     pub fn user_agent(&self) -> &str {
         &self.user_agent
     }
 
+    /// Enforce per-request spacing based on configured rate limit.
     fn wait_rate_limit(&self) {
         let mut last = self
             .last_request
@@ -344,6 +360,7 @@ impl MusicBrainzClient {
         *last = Instant::now();
     }
 
+    /// Execute one HTTP request and convert non-2xx responses into detailed errors.
     fn call_request(
         &self,
         request: ureq::RequestBuilder<ureq::typestate::WithoutBody>,
@@ -378,6 +395,7 @@ impl MusicBrainzClient {
         Ok(resp)
     }
 
+    /// Return highest-scoring recording for a prebuilt query.
     fn search_best_recording(&self, query: &str) -> Result<Option<RecordingResult>> {
         self.wait_rate_limit();
 
@@ -406,6 +424,7 @@ impl MusicBrainzClient {
     }
 }
 
+/// Lookup result for enrichment pipeline.
 pub enum MusicBrainzLookup {
     Match(MusicBrainzMatch),
     NoMatch {
@@ -416,6 +435,7 @@ pub enum MusicBrainzLookup {
     },
 }
 
+/// Spawn background metadata enrichment loop driven by wake notifications.
 pub fn spawn_enrichment_loop(
     db: MetadataDb,
     client: std::sync::Arc<MusicBrainzClient>,
@@ -464,6 +484,7 @@ pub fn spawn_enrichment_loop(
     });
 }
 
+/// Enrich one pending track candidate and emit corresponding metadata events.
 fn enrich_candidate(
     db: &MetadataDb,
     client: &MusicBrainzClient,
@@ -546,6 +567,7 @@ fn enrich_candidate(
     Ok(true)
 }
 
+/// Stable key used to suppress repeated failed lookups for same inputs.
 fn no_match_key(title: &str, artist: &str, album: Option<&str>) -> String {
     let mut key = String::new();
     key.push_str(title.trim().to_lowercase().as_str());
@@ -558,6 +580,7 @@ fn no_match_key(title: &str, artist: &str, album: Option<&str>) -> String {
     key
 }
 
+/// Build MusicBrainz recording query string.
 fn build_query(title: &str, artist: &str, album: Option<&str>) -> String {
     let mut parts = Vec::new();
     parts.push(format!("recording:\"{}\"", escape_query(title)));
@@ -568,6 +591,7 @@ fn build_query(title: &str, artist: &str, album: Option<&str>) -> String {
     parts.join(" AND ")
 }
 
+/// Build MusicBrainz release query string.
 fn build_release_query(title: &str, artist: &str) -> String {
     format!(
         "release:\"{}\" AND artist:\"{}\"",
@@ -576,10 +600,12 @@ fn build_release_query(title: &str, artist: &str) -> String {
     )
 }
 
+/// Escape quote characters for MusicBrainz Lucene query syntax.
 fn escape_query(raw: &str) -> String {
     raw.replace('"', "\\\"")
 }
 
+/// Remove bracketed/parenthetical suffixes to build fallback queries.
 fn strip_parenthetical(raw: &str) -> Option<String> {
     let mut out = String::with_capacity(raw.len());
     let mut depth = 0usize;
@@ -621,6 +647,7 @@ fn strip_parenthetical(raw: &str) -> Option<String> {
     }
 }
 
+/// Strip common `" - suffix"` qualifiers from titles.
 fn strip_suffix_after_dash(value: &str) -> String {
     if let Some((left, _)) = value.split_once(" - ") {
         let trimmed = left.trim();
@@ -631,6 +658,7 @@ fn strip_suffix_after_dash(value: &str) -> String {
     value.trim().to_string()
 }
 
+/// Build fallback `(title, album)` pair for second-pass lookup.
 fn fallback_parts(title: &str, album: Option<&str>) -> Option<(String, Option<String>)> {
     let title_fallback = strip_parenthetical(title);
     let album_fallback = album.and_then(strip_parenthetical);
@@ -644,6 +672,7 @@ fn fallback_parts(title: &str, album: Option<&str>) -> Option<(String, Option<St
     Some((title, album))
 }
 
+/// Pick higher-scored recording between two optional candidates.
 fn select_best_recording(
     left: Option<RecordingResult>,
     right: Option<RecordingResult>,
@@ -662,6 +691,7 @@ fn select_best_recording(
     }
 }
 
+/// Parse leading year component from MusicBrainz date string.
 fn parse_year(raw: &str) -> Option<i32> {
     raw.split('-').next()?.trim().parse::<i32>().ok()
 }
@@ -716,6 +746,7 @@ struct ReleaseSummary {
     date: Option<String>,
 }
 
+/// Extract primary artist MBID/name from artist credits.
 fn primary_artist(credits: Option<&Vec<ArtistCredit>>) -> (Option<String>, Option<String>) {
     credits
         .and_then(|items| items.first())

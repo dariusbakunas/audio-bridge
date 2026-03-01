@@ -12,19 +12,26 @@ use tokio::net::lookup_host;
 const ASSETS_DIR: &str = ".audio-hub/assets";
 const MAX_IMAGE_BYTES: usize = 6_000_000;
 
+/// Result of storing/fetching one remote media asset.
 pub struct StoredAsset {
+    /// Relative on-disk path under `.audio-hub/assets`.
     pub local_path: String,
+    /// Content checksum used for dedupe-friendly file naming.
     pub checksum: String,
+    /// Original remote source URL.
     pub source_url: String,
+    /// Write timestamp (unix millis).
     pub updated_at_ms: i64,
 }
 
+/// Filesystem-backed media asset storage rooted at library path.
 pub struct MediaAssetStore {
     root: PathBuf,
     client: Client,
 }
 
 impl MediaAssetStore {
+    /// Build a new media asset store rooted at the library root.
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
@@ -32,10 +39,12 @@ impl MediaAssetStore {
         }
     }
 
+    /// Return absolute assets root directory.
     pub fn assets_root(&self) -> PathBuf {
         self.root.join(ASSETS_DIR)
     }
 
+    /// Download, validate, and persist an image asset from a public URL.
     pub async fn store_image_from_url(
         &self,
         owner_type: &str,
@@ -100,6 +109,7 @@ impl MediaAssetStore {
         })
     }
 
+    /// Resolve a stored relative asset path and enforce assets-root confinement.
     pub fn resolve_asset_path(&self, local_path: &str) -> Result<PathBuf> {
         let full_path = self.root.join(local_path);
         let full_path = full_path
@@ -115,6 +125,7 @@ impl MediaAssetStore {
         Ok(full_path)
     }
 
+    /// Delete one stored asset file by relative path.
     pub fn delete_asset_file(&self, local_path: &str) -> Result<()> {
         let path = Path::new(local_path);
         if path.is_absolute() {
@@ -139,6 +150,7 @@ impl MediaAssetStore {
     }
 }
 
+/// Map allowed image MIME type to on-disk extension.
 fn extension_for_mime(mime: &str) -> Option<&'static str> {
     match mime {
         "image/jpeg" | "image/jpg" => Some("jpg"),
@@ -148,6 +160,7 @@ fn extension_for_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
+/// Validate URL scheme/host and reject local/private-network targets.
 async fn validate_public_url(raw: &str) -> Result<Url> {
     let url = Url::parse(raw).map_err(|_| anyhow!("url must be a valid http(s) url"))?;
     match url.scheme() {
@@ -183,6 +196,7 @@ async fn validate_public_url(raw: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// Return whether IP is publicly routable (best-effort safety filter).
 fn is_public_ip(ip: &std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
@@ -216,46 +230,56 @@ fn is_public_ip(ip: &std::net::IpAddr) -> bool {
     }
 }
 
+/// Check IPv4 shared CGNAT block (`100.64.0.0/10`).
 fn is_v4_cgnat(ip: &std::net::Ipv4Addr) -> bool {
     matches!(ip.octets(), [100, b, ..] if (64..=127).contains(&b))
 }
 
+/// Check IPv4 documentation blocks.
 fn is_v4_doc(ip: &std::net::Ipv4Addr) -> bool {
     matches!(ip.octets(), [192, 0, 2, _])
         || matches!(ip.octets(), [198, 51, 100, _])
         || matches!(ip.octets(), [203, 0, 113, _])
 }
 
+/// Check IPv4 benchmarking block (`198.18.0.0/15`).
 fn is_v4_benchmark(ip: &std::net::Ipv4Addr) -> bool {
     matches!(ip.octets(), [198, 18 | 19, _, _])
 }
 
+/// Check IPv4 multicast range.
 fn is_v4_multicast(ip: &std::net::Ipv4Addr) -> bool {
     ip.is_multicast()
 }
 
+/// Check IPv4 reserved/special ranges not suitable for public fetch targets.
 fn is_v4_reserved(ip: &std::net::Ipv4Addr) -> bool {
     matches!(ip.octets(), [0, ..]) || (240..=255).contains(&ip.octets()[0])
 }
 
+/// Check IPv6 unique-local range (`fc00::/7`).
 fn is_v6_unique_local(ip: &std::net::Ipv6Addr) -> bool {
     matches!(ip.segments()[0] & 0xfe00, 0xfc00)
 }
 
+/// Check IPv6 link-local range (`fe80::/10`).
 fn is_v6_link_local(ip: &std::net::Ipv6Addr) -> bool {
     matches!(ip.segments()[0] & 0xffc0, 0xfe80)
 }
 
+/// Check IPv6 documentation range (`2001:db8::/32`).
 fn is_v6_documentation(ip: &std::net::Ipv6Addr) -> bool {
     ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8
 }
 
+/// Build deterministic hash string used in stored file names.
 fn hash_bytes(data: &[u8]) -> String {
     let mut hasher = DefaultHasher::new();
     data.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
+/// Return current UNIX timestamp in milliseconds.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

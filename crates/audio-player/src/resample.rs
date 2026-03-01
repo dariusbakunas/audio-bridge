@@ -211,10 +211,12 @@ pub fn start_resampler(
     Ok(dstq)
 }
 
+/// Ensure resampler chunk size never drops below one frame.
 fn normalize_chunk_frames(chunk_frames: usize) -> usize {
     chunk_frames.max(1)
 }
 
+/// Compute output queue capacity for the resampler stage in samples.
 fn max_buffered_samples_for_resample(dst_rate: u32, channels: usize, buffer_seconds: f32) -> usize {
     calc_max_buffered_samples(dst_rate, channels, buffer_seconds)
 }

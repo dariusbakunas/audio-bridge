@@ -55,6 +55,7 @@ pub(crate) struct BridgeVolumeState {
 }
 
 impl BridgeVolumeState {
+    /// Create a new shared bridge volume snapshot.
     pub(crate) fn new(value: u8, muted: bool) -> Self {
         Self {
             value: Arc::new(AtomicU8::new(value.min(100))),
@@ -62,6 +63,7 @@ impl BridgeVolumeState {
         }
     }
 
+    /// Read current `(value, muted)` state.
     pub(crate) fn snapshot(&self) -> (u8, bool) {
         (
             self.value.load(Ordering::Relaxed),
@@ -69,18 +71,22 @@ impl BridgeVolumeState {
         )
     }
 
+    /// Set user volume value (clamped to 0..=100).
     pub(crate) fn set_value(&self, value: u8) {
         self.value.store(value.min(100), Ordering::Relaxed);
     }
 
+    /// Set mute flag.
     pub(crate) fn set_muted(&self, muted: bool) {
         self.muted.store(muted, Ordering::Relaxed);
     }
 
+    /// Return atomic handle used by audio pipeline for live gain updates.
     pub(crate) fn volume_percent_handle(&self) -> Arc<AtomicU8> {
         self.value.clone()
     }
 
+    /// Return atomic handle used by audio pipeline for live mute updates.
     pub(crate) fn muted_handle(&self) -> Arc<AtomicBool> {
         self.muted.clone()
     }
@@ -232,6 +238,7 @@ fn player_thread_main(
     }
 }
 
+/// Pre-populate now-playing state immediately after receiving a play command.
 fn preupdate_status_on_play(status: &Arc<Mutex<BridgeStatusState>>, now_playing: &str) {
     if let Ok(mut s) = status.lock() {
         s.clear_playback();
@@ -482,6 +489,9 @@ fn play_one_http(
     result
 }
 
+/// Derive effective playback buffering settings for the current command.
+///
+/// Seeks use a smaller buffer profile to reduce re-seek latency.
 fn effective_playback_for_seek(playback: &PlaybackConfig, seek_ms: Option<u64>) -> PlaybackConfig {
     let mut playback_eff = playback.clone();
     if seek_ms.is_some() {
@@ -492,6 +502,7 @@ fn effective_playback_for_seek(playback: &PlaybackConfig, seek_ms: Option<u64>) 
     playback_eff
 }
 
+/// Convert seek milliseconds into played frame count for elapsed restoration.
 fn played_frames_from_seek(
     seek_ms: u64,
     duration_ms: Option<u64>,
@@ -504,6 +515,7 @@ fn played_frames_from_seek(
     Some(target_ms.saturating_mul(sample_rate_hz as u64) / 1000)
 }
 
+/// Pick the status sample rate used for elapsed-time reporting.
 fn status_sample_rate(stream_sample_rate: u32, _nominal_rate: Option<u32>) -> u32 {
     // Elapsed time is derived from played_frames / sample_rate. We must use the
     // actual stream sample rate (not hardware nominal rate) to keep elapsed_ms
