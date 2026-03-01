@@ -3,20 +3,28 @@
 [![CI](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/dariusbakunas/audio-bridge/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/dariusbakunas/audio-bridge/badge.svg?branch=main&kill_cache=1)](https://coveralls.io/github/dariusbakunas/audio-bridge?branch=main)
 
-Stream audio files from your laptop/desktop to a small network “receiver” (perfect for a Raspberry Pi connected to a USB DAC).
+A deterministic digital transport for locally owned audio libraries.
 
-This repo is a Rust workspace with two main apps:
+Audio Hub is a distributed playback system designed for serious audio setups: a media rack server, one or more network receivers (e.g. Raspberry Pi + USB DAC), and a control surface.
 
-- **`bridge`** (receiver): runs on the target machine (e.g. RPi). Exposes an HTTP control API, pulls audio via HTTP, decodes and plays through the selected output device.
-- **`audio-hub-server`** (server): runs on the media rack. Scans your library and exposes an HTTP API for control + streaming.
+It prioritizes:
 
-Each binary supports `--version`, which includes the crate version, git SHA, and build date.
+- Explicit output selection
+- Deterministic routing
+- Signal transparency
+- Sample rate awareness
+- Inspectable playback state
 
-## Architecture
+Audio Hub is not a streaming aggregator, discovery engine, or cloud music platform.
 
-- `audio-player`: shared decode/resample/queue/playback building blocks
-- `bridge`: thin HTTP-controlled receiver that uses `audio-player`
-- `audio-hub-server`: scans the library, manages outputs, and streams audio to the bridge
+It is a precision playback transport for systems you own and control.
+
+---
+
+This repository is a Rust workspace with two primary applications:
+
+- **`bridge`** (receiver): runs on a target machine (e.g. RPi). It exposes an HTTP control API, pulls audio via HTTP, decodes locally, and plays through a selected output device.
+- **`audio-hub-server`** (server): runs on the media host. It scans your library, manages outputs and sessions, and streams audio to bridges.
 
 ### Playback flow
 
