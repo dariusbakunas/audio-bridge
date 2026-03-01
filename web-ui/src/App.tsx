@@ -20,19 +20,10 @@ import {
   TrackSummary
 } from "./types";
 import AlbumDetailView from "./components/AlbumDetailView";
-import AlbumMetadataDialog from "./components/AlbumMetadataDialog";
 import AlbumsView from "./components/AlbumsView";
-import CatalogMetadataDialog from "./components/CatalogMetadataDialog";
-import AlbumNotesModal from "./components/AlbumNotesModal";
-import CreateSessionModal from "./components/CreateSessionModal";
-import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
-import TrackMetadataModal from "./components/TrackMetadataModal";
-import TrackAnalysisModal from "./components/TrackAnalysisModal";
-import OutputsModal from "./components/OutputsModal";
+import AppModals from "./components/AppModals";
 import PlayerBar from "./components/PlayerBar";
-import QueueModal from "./components/QueueModal";
 import SettingsView from "./components/SettingsView";
-import SignalModal from "./components/SignalModal";
 import ConnectionGate from "./components/ConnectionGate";
 import NotificationsPanel from "./components/NotificationsPanel";
 import SideNav from "./components/SideNav";
@@ -1552,155 +1543,99 @@ export default function App() {
         />
       ) : null}
 
-      {!showGate ? (
-        <CreateSessionModal
-          open={createSessionOpen}
-          busy={createSessionBusy}
-          name={newSessionName}
-          neverExpires={newSessionNeverExpires}
-          onNameChange={setNewSessionName}
-          onNeverExpiresChange={setNewSessionNeverExpires}
-          onClose={() => {
-            if (!createSessionBusy) {
-              setCreateSessionOpen(false);
-            }
-          }}
-          onSubmit={() => {
-            void submitCreateSession();
-          }}
-        />
-      ) : null}
-
-      {!showGate && !isLocalSession ? (
-        <OutputsModal
-        open={outputsOpen}
+      <AppModals
+        showGate={showGate}
+        isLocalSession={Boolean(isLocalSession)}
+        createSessionOpen={createSessionOpen}
+        createSessionBusy={createSessionBusy}
+        newSessionName={newSessionName}
+        newSessionNeverExpires={newSessionNeverExpires}
+        onSetCreateSessionOpen={setCreateSessionOpen}
+        onSetNewSessionName={setNewSessionName}
+        onSetNewSessionNeverExpires={setNewSessionNeverExpires}
+        onSubmitCreateSession={() => {
+          void submitCreateSession();
+        }}
+        outputsOpen={outputsOpen}
         outputs={outputs}
         sessions={sessions}
-        outputLocks={sessionOutputLocks}
-        bridgeLocks={sessionBridgeLocks}
-        currentSessionId={sessionId}
+        sessionOutputLocks={sessionOutputLocks}
+        sessionBridgeLocks={sessionBridgeLocks}
+        sessionId={sessionId}
         activeOutputId={activeOutputId}
-        onClose={() => setOutputsOpen(false)}
-        onSelectOutput={handleSelectOutputForSession}
+        onSetOutputsOpen={setOutputsOpen}
+        onSelectOutputForSession={handleSelectOutputForSession}
         formatRateRange={formatRateRange}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <SignalModal
-        open={signalOpen}
+        signalOpen={signalOpen}
         status={status}
         activeOutput={activeOutput}
         updatedAt={updatedAt}
         formatHz={formatHz}
-        onClose={() => setSignalOpen(false)}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <MusicBrainzMatchModal
-        open={Boolean(matchTarget)}
-        kind="track"
-        targetLabel={matchLabel}
-        defaults={matchDefaults}
-        trackId={matchTarget?.trackId ?? null}
-        onClose={() => setMatchTarget(null)}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <TrackMetadataModal
-        open={Boolean(editTarget)}
-        trackId={editTarget?.trackId ?? null}
-        targetLabel={editLabel}
-        defaults={editDefaults}
-        onClose={() => setEditTarget(null)}
-        onSaved={() => {
+        onSetSignalOpen={setSignalOpen}
+        matchOpen={Boolean(matchTarget)}
+        matchLabel={matchLabel}
+        matchDefaults={matchDefaults}
+        matchTrackId={matchTarget?.trackId ?? null}
+        onCloseMatch={() => setMatchTarget(null)}
+        editOpen={Boolean(editTarget)}
+        editTrackId={editTarget?.trackId ?? null}
+        editLabel={editLabel}
+        editDefaults={editDefaults}
+        onCloseEdit={() => setEditTarget(null)}
+        onSavedEdit={() => {
           if (albumViewId !== null) {
             loadAlbumTracks(albumViewId);
           }
           loadAlbums();
         }}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <AlbumMetadataDialog
-        open={Boolean(albumEditTarget)}
-        albumId={albumEditTarget?.albumId ?? null}
-        targetLabel={albumEditLabel}
-        artist={albumEditTarget?.artist ?? ""}
-        defaults={albumEditDefaults}
-        onBeforeUpdate={async () => {
-          if (!albumEditTarget?.albumId) return;
-          if (nowPlayingAlbumId !== albumEditTarget.albumId) return;
-          if (!isPlaying) return;
-          await handlePause();
-        }}
-        onClose={() => setAlbumEditTarget(null)}
-        onUpdated={(updatedAlbumId) => {
+        albumEditOpen={Boolean(albumEditTarget)}
+        albumEditAlbumId={albumEditTarget?.albumId ?? null}
+        albumEditLabel={albumEditLabel}
+        albumEditArtist={albumEditTarget?.artist ?? ""}
+        albumEditDefaults={albumEditDefaults}
+        nowPlayingAlbumId={nowPlayingAlbumId}
+        isPlaying={isPlaying}
+        onPause={handlePause}
+        onCloseAlbumEdit={() => setAlbumEditTarget(null)}
+        onUpdatedAlbumEdit={(updatedAlbumId) => {
           if (albumViewId !== null) {
             setAlbumViewId(updatedAlbumId);
             loadAlbumTracks(updatedAlbumId);
           }
           loadAlbums();
         }}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <AlbumNotesModal
-        open={albumNotesOpen}
-        title={selectedAlbum?.title ?? ""}
-        artist={selectedAlbum?.artist ?? ""}
-        notes={albumProfile?.notes?.text ?? ""}
-        onClose={() => setAlbumNotesOpen(false)}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <TrackAnalysisModal
-        open={Boolean(analysisTarget)}
-        trackId={analysisTarget?.trackId ?? null}
-        title={analysisTarget?.title ?? ""}
-        artist={analysisTarget?.artist ?? null}
-        onClose={() => setAnalysisTarget(null)}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <CatalogMetadataDialog
-        open={catalogOpen}
-        albumId={albumViewId}
-        albumTitle={selectedAlbum?.title ?? ""}
-        artistName={selectedAlbum?.artist ?? ""}
-        onClose={() => setCatalogOpen(false)}
-        onUpdated={({ album }) => {
+        albumNotesOpen={albumNotesOpen}
+        selectedAlbumTitle={selectedAlbum?.title ?? ""}
+        selectedAlbumArtist={selectedAlbum?.artist ?? ""}
+        albumNotes={albumProfile?.notes?.text ?? ""}
+        onCloseAlbumNotes={() => setAlbumNotesOpen(false)}
+        analysisOpen={Boolean(analysisTarget)}
+        analysisTrackId={analysisTarget?.trackId ?? null}
+        analysisTitle={analysisTarget?.title ?? ""}
+        analysisArtist={analysisTarget?.artist ?? null}
+        onCloseAnalysis={() => setAnalysisTarget(null)}
+        catalogOpen={catalogOpen}
+        albumViewId={albumViewId}
+        onCloseCatalog={() => setCatalogOpen(false)}
+        onCatalogUpdated={({ album }) => {
           if (album) {
             setAlbumProfile(album);
           } else {
             loadCatalogProfiles(albumViewId);
           }
         }}
-        />
-      ) : null}
-
-      {!showGate ? (
-        <QueueModal
-        open={queueOpen}
-        items={queue}
-        onClose={() => setQueueOpen(false)}
+        queueOpen={queueOpen}
+        queue={queue}
         formatMs={formatMs}
         placeholder={albumPlaceholder}
-        canPlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
+        canQueuePlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
         isPaused={isPaused}
-        onPause={handlePause}
-        onPlayFrom={handleQueuePlayFrom}
-        onClear={handleQueueClear}
-        />
-      ) : null}
-
-      {!showGate ? <audio ref={audioRef} preload="auto" style={{ display: "none" }} /> : null}
+        onQueueClose={() => setQueueOpen(false)}
+        onQueuePause={handlePause}
+        onQueuePlayFrom={handleQueuePlayFrom}
+        onQueueClear={handleQueueClear}
+        audioRef={audioRef}
+      />
 
     </div>
   );
