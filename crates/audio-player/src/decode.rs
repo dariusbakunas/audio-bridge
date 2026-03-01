@@ -5,25 +5,20 @@
 //! - decode packets into interleaved `f32` samples
 //! - push samples into a bounded [`SharedAudio`] queue from a background thread
 
-
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
-use anyhow::{anyhow, Context, Result};
-use symphonia::core::{
-    audio::SignalSpec,
-    codecs::DecoderOptions,
-    formats::FormatOptions,
-    io::MediaSourceStream,
-    meta::MetadataOptions,
-    probe::Hint,
-};
-use symphonia::core::audio::{SampleBuffer};
+use crate::queue::{SharedAudio, calc_max_buffered_samples};
+use anyhow::{Context, Result, anyhow};
+use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::io::MediaSource;
-use crate::queue::{calc_max_buffered_samples, SharedAudio};
+use symphonia::core::{
+    audio::SignalSpec, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
+    meta::MetadataOptions, probe::Hint,
+};
 
 /// Metadata captured while probing the source.
 #[derive(Clone, Debug, Default)]
@@ -154,8 +149,8 @@ fn decode_format_loop(
     codec_params: CodecParameters,
     shared: &Arc<SharedAudio>,
 ) -> Result<()> {
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&codec_params, &DecoderOptions::default())?;
+    let mut decoder =
+        symphonia::default::get_codecs().make(&codec_params, &DecoderOptions::default())?;
 
     loop {
         let packet = match format.next_packet() {

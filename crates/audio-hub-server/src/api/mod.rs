@@ -2,102 +2,47 @@
 //!
 //! Defines the Actix routes for library, playback, queue, and output control.
 
+pub mod health;
 pub mod library;
-pub mod logs;
 pub mod local_playback;
+pub mod logs;
 pub mod metadata;
 pub mod outputs;
 pub mod sessions;
 pub mod streams;
-pub mod health;
 
+pub use health::HealthResponse;
 pub use library::{
-    list_library,
-    rescan_library,
-    rescan_track,
-    stream_track_id,
-    transcode_track_id,
+    list_library, rescan_library, rescan_track, stream_track_id, transcode_track_id,
 };
-pub use logs::{logs_clear, LogsClearResponse};
-pub use local_playback::{
-    local_playback_play,
-    local_playback_register,
-    local_playback_sessions,
-};
+pub use local_playback::{local_playback_play, local_playback_register, local_playback_sessions};
+pub use logs::{LogsClearResponse, logs_clear};
 pub use metadata::{
-    album_image_clear,
-    album_image_set,
-    album_profile,
-    album_profile_update,
-    album_cover,
-    albums_list,
-    albums_metadata,
-    albums_metadata_update,
-    artist_image_clear,
-    artist_image_set,
-    artist_profile,
-    artist_profile_update,
-    artists_list,
-    media_asset,
-    musicbrainz_match_apply,
-    musicbrainz_match_search,
-    track_cover,
-    tracks_list,
-    tracks_metadata,
-    tracks_metadata_fields,
-    tracks_metadata_update,
-    tracks_resolve,
-    tracks_analysis,
+    album_cover, album_image_clear, album_image_set, album_profile, album_profile_update,
+    albums_list, albums_metadata, albums_metadata_update, artist_image_clear, artist_image_set,
+    artist_profile, artist_profile_update, artists_list, media_asset, musicbrainz_match_apply,
+    musicbrainz_match_search, track_cover, tracks_analysis, tracks_list, tracks_metadata,
+    tracks_metadata_fields, tracks_metadata_update, tracks_resolve,
 };
 pub use outputs::{
-    outputs_list,
-    outputs_select,
-    outputs_settings,
-    outputs_settings_update,
-    provider_outputs_list,
-    provider_refresh,
-    providers_list,
+    outputs_list, outputs_select, outputs_settings, outputs_settings_update, provider_outputs_list,
+    provider_refresh, providers_list,
 };
 pub use sessions::{
-    sessions_create,
-    sessions_delete,
-    sessions_get,
-    sessions_heartbeat,
-    sessions_locks,
-    sessions_list,
-    sessions_mute_set,
-    sessions_pause,
-    sessions_queue_add,
-    sessions_queue_add_next,
-    sessions_queue_clear,
-    sessions_queue_list,
-    sessions_queue_next,
-    sessions_queue_play_from,
-    sessions_queue_previous,
-    sessions_queue_remove,
-    sessions_queue_stream,
-    sessions_release_output,
-    sessions_seek,
-    sessions_select_output,
-    sessions_status,
-    sessions_status_stream,
-    sessions_volume,
-    sessions_volume_set,
-    sessions_stop,
+    sessions_create, sessions_delete, sessions_get, sessions_heartbeat, sessions_list,
+    sessions_locks, sessions_mute_set, sessions_pause, sessions_queue_add, sessions_queue_add_next,
+    sessions_queue_clear, sessions_queue_list, sessions_queue_next, sessions_queue_play_from,
+    sessions_queue_previous, sessions_queue_remove, sessions_queue_stream, sessions_release_output,
+    sessions_seek, sessions_select_output, sessions_status, sessions_status_stream, sessions_stop,
+    sessions_volume, sessions_volume_set,
 };
-pub use streams::{
-    albums_stream,
-    logs_stream,
-    metadata_stream,
-    outputs_stream,
-};
-pub use health::HealthResponse;
+pub use streams::{albums_stream, logs_stream, metadata_stream, outputs_stream};
 
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use actix_web::{test, App};
+    use actix_web::{App, test};
 
     use crate::api;
     use crate::events::{EventBus, LogBus};
@@ -137,7 +82,9 @@ mod tests {
             enabled: false,
             id: "local".to_string(),
             name: "Local Host".to_string(),
-            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
@@ -145,7 +92,8 @@ mod tests {
         let events = EventBus::new();
         let status_store = crate::status_store::StatusStore::new(status, events.clone());
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
+        let queue_service =
+            crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
         let playback_manager = crate::playback_manager::PlaybackManager::new(
             bridge_state.player.clone(),
             status_store,
@@ -180,8 +128,12 @@ mod tests {
     #[actix_web::test]
     async fn tracks_metadata_missing_returns_404() {
         let state = make_state();
-        let app = test::init_service(App::new().app_data(state.clone()).service(api::tracks_metadata))
-            .await;
+        let app = test::init_service(
+            App::new()
+                .app_data(state.clone())
+                .service(api::tracks_metadata),
+        )
+        .await;
 
         let req = test::TestRequest::get()
             .uri("/tracks/metadata?track_id=999999")
@@ -193,11 +145,15 @@ mod tests {
     #[actix_web::test]
     async fn library_list_root_ok() {
         let state = make_state();
-        let app = test::init_service(App::new().app_data(state.clone()).service(api::list_library)).await;
+        let app = test::init_service(
+            App::new()
+                .app_data(state.clone())
+                .service(api::list_library),
+        )
+        .await;
 
         let req = test::TestRequest::get().uri("/library").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
     }
-
 }

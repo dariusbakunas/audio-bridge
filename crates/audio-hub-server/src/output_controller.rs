@@ -4,9 +4,11 @@
 
 use actix_web::HttpResponse;
 
-use crate::models::{OutputsResponse, ProvidersResponse, QueueMode, SessionVolumeResponse, StatusResponse};
+use crate::models::{
+    OutputsResponse, ProvidersResponse, QueueMode, SessionVolumeResponse, StatusResponse,
+};
 use crate::output_providers::registry::OutputRegistry;
-use crate::state::{AppState};
+use crate::state::AppState;
 
 /// Errors returned by the output controller facade.
 #[derive(Debug)]
@@ -31,8 +33,7 @@ impl OutputControllerError {
                 ))
             }
             OutputControllerError::OutputOffline { output_id } => {
-                HttpResponse::ServiceUnavailable()
-                    .body(format!("output offline: {output_id}"))
+                HttpResponse::ServiceUnavailable().body(format!("output offline: {output_id}"))
             }
             OutputControllerError::PlayerOffline => {
                 HttpResponse::InternalServerError().body("player offline")
@@ -183,7 +184,14 @@ impl OutputController {
         state: &AppState,
         requested: Option<&str>,
     ) -> Result<String, OutputControllerError> {
-        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone();
         let Some(active_id) = active_id else {
             tracing::warn!("request rejected: no active output selected");
             return Err(OutputControllerError::NoActiveOutput);
@@ -203,7 +211,9 @@ impl OutputController {
         }
         if let Err(_err) = self.ensure_active_output_connected(state).await {
             tracing::warn!(output_id = %active_id, "request rejected: output offline");
-            return Err(OutputControllerError::OutputOffline { output_id: active_id });
+            return Err(OutputControllerError::OutputOffline {
+                output_id: active_id,
+            });
         }
         Ok(active_id)
     }
@@ -228,12 +238,11 @@ impl OutputController {
     }
 
     /// Toggle pause/resume on the active output.
-    pub(crate) async fn pause_toggle(
-        &self,
-        state: &AppState,
-    ) -> Result<(), OutputControllerError> {
+    pub(crate) async fn pause_toggle(&self, state: &AppState) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager
+        state
+            .playback
+            .manager
             .pause_toggle()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -246,7 +255,9 @@ impl OutputController {
         ms: u64,
     ) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager
+        state
+            .playback
+            .manager
             .seek(ms)
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -255,7 +266,9 @@ impl OutputController {
     /// Stop playback on the active output.
     pub(crate) async fn stop(&self, state: &AppState) -> Result<(), OutputControllerError> {
         let _ = self.resolve_active_output_id(state, None).await?;
-        state.playback.manager
+        state
+            .playback
+            .manager
             .stop()
             .map_err(|_| OutputControllerError::PlayerOffline)?;
         Ok(())
@@ -274,7 +287,9 @@ impl OutputController {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        state.playback.manager
+        state
+            .playback
+            .manager
             .play(path, ext_hint, seek_ms, start_paused)
             .map_err(|_| {
                 let active_output_id = state
@@ -284,13 +299,19 @@ impl OutputController {
                     .lock()
                     .ok()
                     .and_then(|bridges| bridges.active_output_id.clone());
-                let bridge_online = state.providers.bridge
+                let bridge_online = state
+                    .providers
+                    .bridge
                     .bridge_online
                     .load(std::sync::atomic::Ordering::Relaxed);
-                let worker_running = state.providers.bridge
+                let worker_running = state
+                    .providers
+                    .bridge
                     .worker_running
                     .load(std::sync::atomic::Ordering::Relaxed);
-                let status_cached = state.providers.bridge
+                let status_cached = state
+                    .providers
+                    .bridge
                     .status_cache
                     .lock()
                     .ok()
@@ -319,15 +340,14 @@ impl OutputController {
         } else {
             root.join(path)
         };
-        let canon = candidate
-            .canonicalize()
-            .map_err(|_| OutputControllerError::Http(
+        let canon = candidate.canonicalize().map_err(|_| {
+            OutputControllerError::Http(
                 HttpResponse::BadRequest().body(format!("path does not exist: {:?}", path)),
-            ))?;
+            )
+        })?;
         if !canon.starts_with(&root) {
             return Err(OutputControllerError::Http(
-                HttpResponse::BadRequest()
-                    .body(format!("path outside library root: {:?}", path)),
+                HttpResponse::BadRequest().body(format!("path outside library root: {:?}", path)),
             ));
         }
         Ok(canon)
@@ -337,13 +357,13 @@ impl OutputController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex};
-    use async_trait::async_trait;
     use crate::models::OutputInfo;
     use crate::output_providers::registry::{OutputProvider, ProviderError};
     use crate::state::QueueState;
     use crate::status_store::StatusStore;
+    use async_trait::async_trait;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
 
     struct MockProvider {
         active_output_id: String,
@@ -421,14 +441,13 @@ mod tests {
     }
 
     fn make_state(active_output_id: Option<String>) -> AppState {
-        let tmp = std::env::temp_dir()
-            .join(format!(
-                "audio-hub-server-test-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
+        let tmp = std::env::temp_dir().join(format!(
+            "audio-hub-server-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = std::fs::create_dir_all(&tmp);
         let library = crate::library::scan_library(&tmp).expect("scan library");
         let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
@@ -568,14 +587,26 @@ mod tests {
     fn apply_queue_mode_keep_preserves_items() {
         let (state, _root) = make_state_with_root();
         {
-            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
+            let mut queue = state
+                .playback
+                .manager
+                .queue_service()
+                .queue()
+                .lock()
+                .unwrap();
             queue.items.push(std::path::PathBuf::from("/music/a.flac"));
         }
         state
             .playback
             .manager
             .apply_queue_mode(std::path::Path::new("/music/b.flac"), QueueMode::Keep);
-        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
+        let queue = state
+            .playback
+            .manager
+            .queue_service()
+            .queue()
+            .lock()
+            .unwrap();
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
     }
@@ -584,14 +615,26 @@ mod tests {
     fn apply_queue_mode_replace_clears_queue() {
         let (state, _root) = make_state_with_root();
         {
-            let mut queue = state.playback.manager.queue_service().queue().lock().unwrap();
+            let mut queue = state
+                .playback
+                .manager
+                .queue_service()
+                .queue()
+                .lock()
+                .unwrap();
             queue.items.push(std::path::PathBuf::from("/music/a.flac"));
         }
         state
             .playback
             .manager
             .apply_queue_mode(std::path::Path::new("/music/b.flac"), QueueMode::Replace);
-        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
+        let queue = state
+            .playback
+            .manager
+            .queue_service()
+            .queue()
+            .lock()
+            .unwrap();
         assert!(queue.items.is_empty());
     }
 
@@ -599,9 +642,21 @@ mod tests {
     fn apply_queue_mode_append_adds_once() {
         let path = std::path::Path::new("/music/a.flac");
         let (state, _root) = make_state_with_root();
-        state.playback.manager.apply_queue_mode(path, QueueMode::Append);
-        state.playback.manager.apply_queue_mode(path, QueueMode::Append);
-        let queue = state.playback.manager.queue_service().queue().lock().unwrap();
+        state
+            .playback
+            .manager
+            .apply_queue_mode(path, QueueMode::Append);
+        state
+            .playback
+            .manager
+            .apply_queue_mode(path, QueueMode::Append);
+        let queue = state
+            .playback
+            .manager
+            .queue_service()
+            .queue()
+            .lock()
+            .unwrap();
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
     }
@@ -610,9 +665,8 @@ mod tests {
     fn resolve_active_output_id_rejects_missing_active() {
         let state = make_state(None);
         let controller = OutputController::new(OutputRegistry::new(Vec::new()));
-        let result = actix_web::rt::System::new().block_on(async {
-            controller.resolve_active_output_id(&state, None).await
-        });
+        let result = actix_web::rt::System::new()
+            .block_on(async { controller.resolve_active_output_id(&state, None).await });
         assert!(matches!(result, Err(OutputControllerError::NoActiveOutput)));
     }
 
@@ -640,9 +694,8 @@ mod tests {
             should_connect: false,
         };
         let controller = OutputController::new(OutputRegistry::new(vec![Box::new(provider)]));
-        let result = actix_web::rt::System::new().block_on(async {
-            controller.resolve_active_output_id(&state, None).await
-        });
+        let result = actix_web::rt::System::new()
+            .block_on(async { controller.resolve_active_output_id(&state, None).await });
         assert!(matches!(
             result,
             Err(OutputControllerError::OutputOffline { .. })
@@ -758,10 +811,8 @@ mod tests {
         let (state, _root) = make_state_with_root();
         let controller = OutputController::new(OutputRegistry::new(Vec::new()));
 
-        let result = controller.canonicalize_under_root(
-            &state,
-            std::path::Path::new("missing.flac"),
-        );
+        let result =
+            controller.canonicalize_under_root(&state, std::path::Path::new("missing.flac"));
 
         assert!(matches!(result, Err(OutputControllerError::Http(_))));
     }
@@ -785,5 +836,4 @@ mod tests {
 
         assert!(matches!(result, Err(OutputControllerError::Http(_))));
     }
-
 }

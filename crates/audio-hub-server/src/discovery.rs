@@ -6,8 +6,7 @@ use actix_web::web;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 
 use crate::bridge_device_streams::{
-    spawn_bridge_device_stream_for_discovered,
-    spawn_bridge_status_stream_for_discovered,
+    spawn_bridge_device_stream_for_discovered, spawn_bridge_status_stream_for_discovered,
 };
 use crate::state::{AppState, DiscoveredCast};
 
@@ -28,7 +27,8 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
             }
         };
         tracing::info!("mdns: browsing for _audio-bridge._tcp.local.");
-        let mut fullname_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut fullname_to_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for event in receiver {
             match event {
                 ServiceEvent::ServiceFound(_ty, fullname) => {
@@ -132,7 +132,8 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
             }
         };
         tracing::info!("mdns: browsing for _googlecast._tcp.local.");
-        let mut fullname_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut fullname_to_id: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for event in receiver {
             match event {
                 ServiceEvent::ServiceFound(_ty, fullname) => {
@@ -148,9 +149,12 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
                     let id = property_value(&info, "id")
                         .unwrap_or_else(|| info.get_fullname().to_string());
                     let name = property_value(&info, "fn").unwrap_or_else(|| id.clone());
-                    let host = first_ipv4_addr(&info)
-                        .map(|ip| ip.to_string())
-                        .or_else(|| info.get_hostname().to_string().strip_suffix('.').map(|s| s.to_string()));
+                    let host = first_ipv4_addr(&info).map(|ip| ip.to_string()).or_else(|| {
+                        info.get_hostname()
+                            .to_string()
+                            .strip_suffix('.')
+                            .map(|s| s.to_string())
+                    });
                     let port = info.get_port();
                     if let Ok(mut map) = state.providers.cast.discovered.lock() {
                         let now = std::time::Instant::now();
@@ -184,47 +188,49 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
 }
 
 pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(15));
-        let snapshot = match state.providers.bridge.discovered_bridges.lock() {
-            Ok(map) => map
-                .iter()
-                .map(|(id, entry)| (id.clone(), entry.bridge.http_addr, entry.last_seen))
-                .collect::<Vec<_>>(),
-            Err(_) => continue,
-        };
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(15));
+            let snapshot = match state.providers.bridge.discovered_bridges.lock() {
+                Ok(map) => map
+                    .iter()
+                    .map(|(id, entry)| (id.clone(), entry.bridge.http_addr, entry.last_seen))
+                    .collect::<Vec<_>>(),
+                Err(_) => continue,
+            };
 
-        let now = std::time::Instant::now();
-        for (id, http_addr, last_seen) in snapshot {
-            let ok = ping_bridge(http_addr);
-            if ok {
-                if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
-                    if let Some(entry) = map.get_mut(&id) {
-                        entry.last_seen = now;
+            let now = std::time::Instant::now();
+            for (id, http_addr, last_seen) in snapshot {
+                let ok = ping_bridge(http_addr);
+                if ok {
+                    if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
+                        if let Some(entry) = map.get_mut(&id) {
+                            entry.last_seen = now;
+                        }
                     }
+                } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
+                    let active_bridge_id = state
+                        .providers
+                        .bridge
+                        .bridges
+                        .lock()
+                        .ok()
+                        .and_then(|s| s.active_bridge_id.clone());
+                    if active_bridge_id.as_deref() == Some(&id) {
+                        continue;
+                    }
+                    if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
+                        map.remove(&id);
+                    }
+                    if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+                        cache.remove(&id);
+                    }
+                    if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+                        cache.remove(&id);
+                    }
+                    state.events.outputs_changed();
+                    tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");
                 }
-            } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
-                let active_bridge_id = state
-                    .providers
-                    .bridge
-                    .bridges
-                    .lock()
-                    .ok()
-                    .and_then(|s| s.active_bridge_id.clone());
-                if active_bridge_id.as_deref() == Some(&id) {
-                    continue;
-                }
-                if let Ok(mut map) = state.providers.bridge.discovered_bridges.lock() {
-                    map.remove(&id);
-                }
-                if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
-                    cache.remove(&id);
-                }
-                if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
-                    cache.remove(&id);
-                }
-                state.events.outputs_changed();
-                tracing::info!(bridge_id = %id, "mdns: bridge removed (health check)");
             }
         }
     });
@@ -247,12 +253,10 @@ fn property_value(info: &mdns_sd::ResolvedService, key: &str) -> Option<String> 
 }
 
 fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr> {
-    info.get_addresses()
-        .iter()
-        .find_map(|ip| match ip {
-            mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
-            _ => None,
-        })
+    info.get_addresses().iter().find_map(|ip| match ip {
+        mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
+        _ => None,
+    })
 }
 
 fn is_bridge_version_compatible(version: Option<&str>) -> bool {

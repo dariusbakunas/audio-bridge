@@ -5,11 +5,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use audio_bridge_types::PlaybackEndReason;
 use crate::events::EventBus;
 use crate::playback_transport::PlaybackTransport;
-use crate::state::{QueueState};
+use crate::state::QueueState;
 use crate::status_store::StatusStore;
+use audio_bridge_types::PlaybackEndReason;
 
 pub(crate) enum NextDispatchResult {
     Dispatched,
@@ -54,7 +54,11 @@ pub(crate) struct QueueService {
 
 impl QueueService {
     /// Create a queue service backed by the shared queue + status store.
-    pub(crate) fn new(queue: Arc<Mutex<QueueState>>, status: StatusStore, events: EventBus) -> Self {
+    pub(crate) fn new(
+        queue: Arc<Mutex<QueueState>>,
+        status: StatusStore,
+        events: EventBus,
+    ) -> Self {
         Self {
             queue,
             status,
@@ -70,7 +74,12 @@ impl QueueService {
     pub(crate) fn record_played_path(&self, path: &Path) {
         const MAX_HISTORY: usize = 100;
         let mut queue = self.queue.lock().unwrap();
-        if queue.history.back().map(|last| last == path).unwrap_or(false) {
+        if queue
+            .history
+            .back()
+            .map(|last| last == path)
+            .unwrap_or(false)
+        {
             return;
         }
         queue.history.push_back(path.to_path_buf());
@@ -455,22 +464,14 @@ mod tests {
             service.dispatch_next(&transport, false),
             NextDispatchResult::Dispatched
         ));
-        let has_previous = status
-            .inner()
-            .lock()
-            .unwrap()
-            .has_previous;
+        let has_previous = status.inner().lock().unwrap().has_previous;
         assert_eq!(has_previous, Some(false));
 
         assert!(matches!(
             service.dispatch_next(&transport, false),
             NextDispatchResult::Dispatched
         ));
-        let has_previous = status
-            .inner()
-            .lock()
-            .unwrap()
-            .has_previous;
+        let has_previous = status.inner().lock().unwrap().has_previous;
         assert_eq!(has_previous, Some(true));
     }
 

@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::events::{EventBus, MetadataEvent};
-use crate::state::MetadataWake;
 use crate::library::{CoverArt, TrackMeta};
 use crate::metadata_db::{CoverArtCandidate, MetadataDb, TrackRecord};
+use crate::state::MetadataWake;
 
 const COVER_CACHE_DIR: &str = ".audio-hub/art";
 const COVER_FILENAMES: [&str; 10] = [
@@ -77,7 +77,9 @@ impl CoverArtResolver {
         let relative_path = self
             .store
             .store_cover_art(&hint, &cover.mime_type, &cover.data)?;
-        let _ = self.db.set_album_cover_if_empty(album, artist, &relative_path)?;
+        let _ = self
+            .db
+            .set_album_cover_if_empty(album, artist, &relative_path)?;
         Ok(())
     }
 }
@@ -95,8 +97,7 @@ fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
             Some(mime) => mime.to_string(),
             None => continue,
         };
-        let data = std::fs::read(&path)
-            .with_context(|| format!("read cover art {:?}", path))?;
+        let data = std::fs::read(&path).with_context(|| format!("read cover art {:?}", path))?;
         return Ok(Some(CoverArt { mime_type, data }));
     }
     Ok(None)
@@ -186,8 +187,7 @@ impl CoverArtStore {
         let relative = PathBuf::from(COVER_CACHE_DIR).join(&filename);
         let full = self.root.join(&relative);
         if !full.exists() {
-            std::fs::write(&full, data)
-                .with_context(|| format!("write cover art {:?}", full))?;
+            std::fs::write(&full, data).with_context(|| format!("write cover art {:?}", full))?;
         }
         Ok(relative.to_string_lossy().to_string())
     }
@@ -274,8 +274,14 @@ mod tests {
 
     #[test]
     fn mime_and_extension_round_trip() {
-        assert_eq!(mime_for_extension(Some(std::ffi::OsStr::new("jpg"))), Some("image/jpeg"));
-        assert_eq!(mime_for_extension(Some(std::ffi::OsStr::new("png"))), Some("image/png"));
+        assert_eq!(
+            mime_for_extension(Some(std::ffi::OsStr::new("jpg"))),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            mime_for_extension(Some(std::ffi::OsStr::new("png"))),
+            Some("image/png")
+        );
         assert_eq!(extension_for_mime("image/jpeg"), Some("jpg"));
         assert_eq!(extension_for_mime("image/png"), Some("png"));
         assert_eq!(extension_for_mime("application/octet-stream"), None);
@@ -455,9 +461,7 @@ struct CoverArtClient {
 
 impl CoverArtClient {
     fn new(user_agent: &str) -> Self {
-        let config = ureq::Agent::config_builder()
-            .user_agent(user_agent)
-            .build();
+        let config = ureq::Agent::config_builder().user_agent(user_agent).build();
         Self {
             agent: ureq::Agent::new_with_config(config),
             last_request: Mutex::new(Instant::now() - Duration::from_millis(CAA_RATE_LIMIT_MS)),
@@ -488,10 +492,7 @@ impl CoverArtClient {
     }
 
     fn wait_rate_limit(&self) {
-        let mut last = self
-            .last_request
-            .lock()
-            .expect("cover art rate limit lock");
+        let mut last = self.last_request.lock().expect("cover art rate limit lock");
         let elapsed = last.elapsed();
         let limit = Duration::from_millis(CAA_RATE_LIMIT_MS);
         if elapsed < limit {

@@ -3,15 +3,11 @@
 use std::fs::File;
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rustfft::{FftPlanner, num_complex::Complex};
 use symphonia::core::{
-    audio::SampleBuffer,
-    codecs::DecoderOptions,
-    formats::FormatOptions,
-    io::MediaSourceStream,
-    meta::MetadataOptions,
-    probe::Hint,
+    audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
+    meta::MetadataOptions, probe::Hint,
 };
 
 pub struct AnalysisOptions {
@@ -78,8 +74,8 @@ pub fn analyze_track(path: &Path, options: AnalysisOptions) -> Result<AnalysisRe
         }
     });
 
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())?;
+    let mut decoder =
+        symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
 
     let max_samples = if options.max_seconds <= 0.0 {
         None
@@ -102,7 +98,8 @@ pub fn analyze_track(path: &Path, options: AnalysisOptions) -> Result<AnalysisRe
         .map(|frames| (frames / desired_cols).max(1))
         .unwrap_or(1);
 
-    let mut mono_buffer: std::collections::VecDeque<f32> = std::collections::VecDeque::with_capacity(window_size * 2);
+    let mut mono_buffer: std::collections::VecDeque<f32> =
+        std::collections::VecDeque::with_capacity(window_size * 2);
     let mut samples_seen: usize = 0;
 
     let mut planner = FftPlanner::<f32>::new();
@@ -300,7 +297,9 @@ pub fn analyze_track(path: &Path, options: AnalysisOptions) -> Result<AnalysisRe
     let mut notes = Vec::new();
     if let (Some(ratio), true) = (ultrasonic_ratio, sample_rate >= 88_200) {
         if ratio < 0.005 {
-            notes.push("Very low ultrasonic energy; likely upsampled from <=48kHz source.".to_string());
+            notes.push(
+                "Very low ultrasonic energy; likely upsampled from <=48kHz source.".to_string(),
+            );
         }
     }
     if let Some(dr) = dynamic_range_db {

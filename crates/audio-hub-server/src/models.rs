@@ -2,11 +2,11 @@
 //!
 //! Defines request/response structures for the hub server API.
 
+use crate::metadata_db::{AlbumSummary, ArtistSummary, TrackSummary};
+use audio_bridge_types::PlaybackStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
-use audio_bridge_types::PlaybackStatus;
-use crate::metadata_db::{AlbumSummary, ArtistSummary, TrackSummary};
 
 /// A library entry returned by directory listings.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -860,7 +860,9 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         let de: LibraryEntry = serde_json::from_str(&json).unwrap();
         match de {
-            LibraryEntry::Track { path, file_name, .. } => {
+            LibraryEntry::Track {
+                path, file_name, ..
+            } => {
                 assert_eq!(path, "/music/a.flac");
                 assert_eq!(file_name, "a.flac");
             }
@@ -885,7 +887,10 @@ mod tests {
             state: "online".to_string(),
             provider_id: Some("bridge:one".to_string()),
             provider_name: Some("Bridge".to_string()),
-            supported_rates: Some(SupportedRates { min_hz: 44_100, max_hz: 192_000 }),
+            supported_rates: Some(SupportedRates {
+                min_hz: 44_100,
+                max_hz: 192_000,
+            }),
             capabilities: OutputCapabilities {
                 device_select: true,
                 volume: false,

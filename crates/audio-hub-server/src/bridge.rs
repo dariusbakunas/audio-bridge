@@ -2,12 +2,12 @@
 //!
 //! Owns the control channel for a single bridge.
 
+use crossbeam_channel::TryRecvError;
+use crossbeam_channel::{Receiver, Sender};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use crossbeam_channel::{Receiver, Sender};
-use crossbeam_channel::TryRecvError;
 
 use crate::bridge_transport::BridgeTransportClient;
 
@@ -76,7 +76,12 @@ pub fn spawn_bridge_worker(
                         let _ = client.seek(ms).await;
                         status.mark_seek_in_flight();
                     }
-                    BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
+                    BridgeCommand::Play {
+                        path,
+                        ext_hint,
+                        seek_ms,
+                        start_paused,
+                    } => {
                         tracing::info!(
                             bridge_id = %bridge_id,
                             path = %path.to_string_lossy(),
@@ -86,14 +91,15 @@ pub fn spawn_bridge_worker(
                             "bridge command: play"
                         );
                         let title = title_from_path(&path);
-                        let _ = client.play_path(
-                            &path,
-                            ext_hint_option(&ext_hint),
-                            title.as_deref(),
-                            seek_ms,
-                            start_paused,
-                        )
-                        .await;
+                        let _ = client
+                            .play_path(
+                                &path,
+                                ext_hint_option(&ext_hint),
+                                title.as_deref(),
+                                seek_ms,
+                                start_paused,
+                            )
+                            .await;
 
                         status.on_play(path, false);
                     }
@@ -129,8 +135,8 @@ pub(crate) fn update_online_and_should_emit(bridge_online: &AtomicBool, new_stat
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn title_from_path_returns_file_name() {

@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use crossbeam_channel::{Receiver, Sender};
 use cpal::traits::DeviceTrait;
+use crossbeam_channel::{Receiver, Sender};
 use symphonia::core::probe::Hint;
 
 use audio_player::config::PlaybackConfig;
@@ -81,7 +81,9 @@ fn player_thread_main(
                 status.on_pause_toggle();
             }
             BridgeCommand::Seek { ms } => {
-                let Some(track) = current.as_ref() else { continue };
+                let Some(track) = current.as_ref() else {
+                    continue;
+                };
                 status.mark_seek_in_flight();
                 start_new_session(
                     &device_selected,
@@ -94,10 +96,13 @@ fn player_thread_main(
                     paused,
                 );
             }
-            BridgeCommand::Play { path, seek_ms, start_paused, .. } => {
-                current = Some(CurrentTrack {
-                    path: path.clone(),
-                });
+            BridgeCommand::Play {
+                path,
+                seek_ms,
+                start_paused,
+                ..
+            } => {
+                current = Some(CurrentTrack { path: path.clone() });
                 paused = start_paused;
                 start_new_session(
                     &device_selected,

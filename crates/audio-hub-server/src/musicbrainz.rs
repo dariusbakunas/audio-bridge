@@ -3,13 +3,13 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::config::MusicBrainzConfig;
 use crate::events::{EventBus, MetadataEvent};
-use crate::state::MetadataWake;
 use crate::metadata_db::{MetadataDb, MusicBrainzCandidate, TrackRecord};
+use crate::state::MetadataWake;
 
 const DEFAULT_BASE_URL: &str = "https://musicbrainz.org/ws/2";
 const DEFAULT_RATE_LIMIT_MS: u64 = 1000;
@@ -71,9 +71,7 @@ impl MusicBrainzClient {
             .trim_end_matches('/')
             .to_string();
         let rate_limit = Duration::from_millis(cfg.rate_limit_ms.unwrap_or(DEFAULT_RATE_LIMIT_MS));
-        let config = ureq::Agent::config_builder()
-            .user_agent(user_agent)
-            .build();
+        let config = ureq::Agent::config_builder().user_agent(user_agent).build();
         let agent = ureq::Agent::new_with_config(config);
 
         Ok(Some(Self {
@@ -95,9 +93,14 @@ impl MusicBrainzClient {
         let mut best = self.search_best_recording(&query)?;
         let mut query_label = query.clone();
 
-        if best.as_ref().map(|rec| rec.score.unwrap_or(0) < MIN_MATCH_SCORE).unwrap_or(true) {
+        if best
+            .as_ref()
+            .map(|rec| rec.score.unwrap_or(0) < MIN_MATCH_SCORE)
+            .unwrap_or(true)
+        {
             if let Some((fallback_title, fallback_album)) = fallback_parts(title, album) {
-                let fallback_query = build_query(&fallback_title, artist, fallback_album.as_deref());
+                let fallback_query =
+                    build_query(&fallback_title, artist, fallback_album.as_deref());
                 if fallback_query != query {
                     let fallback_best = self.search_best_recording(&fallback_query)?;
                     let fallback_score = fallback_best.as_ref().map(|rec| rec.score.unwrap_or(0));
@@ -218,8 +221,8 @@ impl MusicBrainzClient {
             .limit(1_000_000)
             .read_to_string()
             .context("musicbrainz response read failed")?;
-        let body: RecordingSearchResponse = serde_json::from_str(&body_str)
-            .context("musicbrainz response parse failed")?;
+        let body: RecordingSearchResponse =
+            serde_json::from_str(&body_str).context("musicbrainz response parse failed")?;
 
         let mut results = body
             .recordings
@@ -234,10 +237,7 @@ impl MusicBrainzClient {
                         (
                             Some(release.title.clone()),
                             Some(release.id.clone()),
-                            release
-                                .date
-                                .as_deref()
-                                .and_then(parse_year),
+                            release.date.as_deref().and_then(parse_year),
                         )
                     })
                     .unwrap_or((None, None, None));
@@ -297,8 +297,8 @@ impl MusicBrainzClient {
             .limit(1_000_000)
             .read_to_string()
             .context("musicbrainz response read failed")?;
-        let body: ReleaseSearchResponse = serde_json::from_str(&body_str)
-            .context("musicbrainz response parse failed")?;
+        let body: ReleaseSearchResponse =
+            serde_json::from_str(&body_str).context("musicbrainz response parse failed")?;
 
         let mut results = body
             .releases
@@ -311,10 +311,7 @@ impl MusicBrainzClient {
                     title: release.title,
                     artist_name,
                     artist_mbid,
-                    year: release
-                        .date
-                        .as_deref()
-                        .and_then(parse_year),
+                    year: release.date.as_deref().and_then(parse_year),
                 }
             })
             .collect::<Vec<_>>();
@@ -371,7 +368,11 @@ impl MusicBrainzClient {
                 bail!("musicbrainz request failed (status {code}) url={url}");
             }
             let snippet: String = trimmed.chars().take(300).collect();
-            let suffix = if trimmed.chars().count() > 300 { "..." } else { "" };
+            let suffix = if trimmed.chars().count() > 300 {
+                "..."
+            } else {
+                ""
+            };
             bail!("musicbrainz request failed (status {code}) url={url}: {snippet}{suffix}");
         }
         Ok(resp)
@@ -395,8 +396,8 @@ impl MusicBrainzClient {
             .limit(1_000_000)
             .read_to_string()
             .context("musicbrainz response read failed")?;
-        let body: RecordingSearchResponse = serde_json::from_str(&body_str)
-            .context("musicbrainz response parse failed")?;
+        let body: RecordingSearchResponse =
+            serde_json::from_str(&body_str).context("musicbrainz response parse failed")?;
 
         Ok(body
             .recordings
@@ -427,10 +428,7 @@ pub fn spawn_enrichment_loop(
             match db.list_musicbrainz_candidates(50) {
                 Ok(candidates) => {
                     if !candidates.is_empty() {
-                        tracing::info!(
-                            count = candidates.len(),
-                            "musicbrainz candidates fetched"
-                        );
+                        tracing::info!(count = candidates.len(), "musicbrainz candidates fetched");
                         events.metadata_event(MetadataEvent::MusicBrainzBatch {
                             count: candidates.len(),
                         });
@@ -445,11 +443,11 @@ pub fn spawn_enrichment_loop(
                             Ok(true) => attempted += 1,
                             Ok(false) => {}
                             Err(err) => {
-                            tracing::warn!(
-                                error = %err,
-                                path = %candidate.path,
-                                "musicbrainz background enrichment failed"
-                            );
+                                tracing::warn!(
+                                    error = %err,
+                                    path = %candidate.path,
+                                    "musicbrainz background enrichment failed"
+                                );
                             }
                         }
                     }
@@ -472,7 +470,11 @@ fn enrich_candidate(
     events: &EventBus,
     candidate: &MusicBrainzCandidate,
 ) -> Result<bool> {
-    let key = no_match_key(&candidate.title, &candidate.artist, candidate.album.as_deref());
+    let key = no_match_key(
+        &candidate.title,
+        &candidate.artist,
+        candidate.album.as_deref(),
+    );
     if candidate.no_match_key.as_deref() == Some(key.as_str()) {
         return Ok(false);
     }
@@ -637,10 +639,7 @@ fn fallback_parts(title: &str, album: Option<&str>) -> Option<(String, Option<St
     }
     let title = title_fallback.unwrap_or_else(|| title.trim().to_string());
     let album = album
-        .map(|value| {
-            album_fallback
-                .unwrap_or_else(|| value.trim().to_string())
-        })
+        .map(|value| album_fallback.unwrap_or_else(|| value.trim().to_string()))
         .filter(|value| !value.is_empty());
     Some((title, album))
 }
@@ -717,9 +716,7 @@ struct ReleaseSummary {
     date: Option<String>,
 }
 
-fn primary_artist(
-    credits: Option<&Vec<ArtistCredit>>,
-) -> (Option<String>, Option<String>) {
+fn primary_artist(credits: Option<&Vec<ArtistCredit>>) -> (Option<String>, Option<String>) {
     credits
         .and_then(|items| items.first())
         .map(|credit| {
@@ -747,7 +744,10 @@ mod tests {
     #[test]
     fn build_query_escapes_quotes() {
         let query = build_query("Track \"One\"", "Artist", None);
-        assert_eq!(query, "recording:\"Track \\\"One\\\"\" AND artist:\"Artist\"");
+        assert_eq!(
+            query,
+            "recording:\"Track \\\"One\\\"\" AND artist:\"Artist\""
+        );
     }
 
     #[test]
@@ -788,7 +788,10 @@ mod tests {
     #[test]
     fn fallback_parts_strips_album_only() {
         let fallback = fallback_parts("Track", Some("Album (Deluxe)"));
-        assert_eq!(fallback, Some(("Track".to_string(), Some("Album".to_string()))));
+        assert_eq!(
+            fallback,
+            Some(("Track".to_string(), Some("Album".to_string())))
+        );
     }
 
     #[test]
@@ -870,7 +873,9 @@ mod tests {
             .search_releases("Hunting High and Low (2015 Remaster)", "A-ha", 5)
             .expect("search releases");
         assert!(
-            releases.iter().any(|rel| rel.title.contains("Hunting High and Low")),
+            releases
+                .iter()
+                .any(|rel| rel.title.contains("Hunting High and Low")),
             "expected a matching release title"
         );
     }

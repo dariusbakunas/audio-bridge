@@ -65,11 +65,23 @@ impl PlayerStatusState {
             sample_rate: self.sample_rate,
             channels: self.channels,
             device: self.device.clone(),
-            underrun_frames: self.underrun_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
-            underrun_events: self.underrun_events.as_ref().map(|v| v.load(Ordering::Relaxed)),
+            underrun_frames: self
+                .underrun_frames
+                .as_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
+            underrun_events: self
+                .underrun_events
+                .as_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
             buffer_size_frames: self.buffer_size_frames,
-            buffered_frames: self.buffered_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
-            buffer_capacity_frames: self.buffer_capacity_frames.as_ref().map(|v| v.load(Ordering::Relaxed)),
+            buffered_frames: self
+                .buffered_frames
+                .as_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
+            buffer_capacity_frames: self
+                .buffer_capacity_frames
+                .as_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
             end_reason: self.end_reason,
         }
     }

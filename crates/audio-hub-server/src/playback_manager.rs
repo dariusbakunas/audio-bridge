@@ -5,11 +5,11 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::bridge::BridgePlayer;
+use crate::models::QueueMode;
 use crate::playback_transport::{ChannelTransport, PlaybackTransport};
 use crate::queue_service::QueueService;
-use crate::bridge::BridgePlayer;
 use crate::status_store::StatusStore;
-use crate::models::QueueMode;
 
 /// Coordinates playback commands and status updates for the active output.
 #[derive(Clone)]
@@ -105,9 +105,7 @@ impl PlaybackManager {
             .lock()
             .ok()
             .and_then(|guard| guard.now_playing.clone());
-        let has_previous = self
-            .queue_service
-            .has_previous(current.as_deref());
+        let has_previous = self.queue_service.has_previous(current.as_deref());
         self.status.set_has_previous(has_previous);
     }
 
@@ -119,10 +117,10 @@ impl PlaybackManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_channel::unbounded;
-    use tokio::sync::broadcast::error::TryRecvError;
     use crate::bridge::BridgeCommand;
     use crate::state::PlayerStatus;
+    use crossbeam_channel::unbounded;
+    use tokio::sync::broadcast::error::TryRecvError;
 
     fn make_manager() -> PlaybackManager {
         let (cmd_tx, _cmd_rx) = unbounded();
@@ -184,5 +182,4 @@ mod tests {
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0], std::path::PathBuf::from("/music/a.flac"));
     }
-
 }

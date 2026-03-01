@@ -6,7 +6,9 @@ use async_trait::async_trait;
 
 use audio_player::device;
 
-use crate::models::{OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse, SupportedRates};
+use crate::models::{
+    OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse, SupportedRates,
+};
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
@@ -75,19 +77,36 @@ impl OutputProvider for LocalProvider {
         provider_id: &str,
     ) -> Result<OutputsResponse, ProviderError> {
         if !Self::is_enabled(state) {
-            return Err(ProviderError::BadRequest("local outputs disabled".to_string()));
+            return Err(ProviderError::BadRequest(
+                "local outputs disabled".to_string(),
+            ));
         }
         if provider_id != Self::provider_id(state) {
             return Err(ProviderError::BadRequest("unknown provider id".to_string()));
         }
         let mut outputs = self.list_outputs(state).await;
-        if let Some(active_id) = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone() {
+        if let Some(active_id) = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone()
+        {
             if !outputs.iter().any(|o| o.id == active_id) {
                 self.inject_active_output_if_missing(state, &mut outputs, &active_id);
             }
         }
         Ok(OutputsResponse {
-            active_id: state.providers.bridge.bridges.lock().unwrap().active_output_id.clone(),
+            active_id: state
+                .providers
+                .bridge
+                .bridges
+                .lock()
+                .unwrap()
+                .active_output_id
+                .clone(),
             outputs,
         })
     }
@@ -161,10 +180,14 @@ impl OutputProvider for LocalProvider {
             .unwrap_or_else(|| format!("active device ({device_id})"));
         let suffix = Self::short_device_id(&device_id);
         let name = format!("{device_name} ({suffix})");
-        let supported_rates = status
-            .as_ref()
-            .and_then(|s| s.sample_rate)
-            .map(|sr| SupportedRates { min_hz: sr, max_hz: sr });
+        let supported_rates =
+            status
+                .as_ref()
+                .and_then(|s| s.sample_rate)
+                .map(|sr| SupportedRates {
+                    min_hz: sr,
+                    max_hz: sr,
+                });
         outputs.push(OutputInfo {
             id: active_output_id.to_string(),
             kind: "local".to_string(),
@@ -186,13 +209,11 @@ impl OutputProvider for LocalProvider {
     }
 
     /// Select a local output device and resume playback if needed.
-    async fn select_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError> {
+    async fn select_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError> {
         if !Self::is_enabled(state) {
-            return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
+            return Err(ProviderError::Unavailable(
+                "local outputs disabled".to_string(),
+            ));
         }
         let Some(device_id) = Self::parse_output_id(output_id) else {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
@@ -228,95 +249,108 @@ impl OutputProvider for LocalProvider {
         output_id: &str,
     ) -> Result<StatusResponse, ProviderError> {
         if !Self::is_enabled(state) {
-            return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
+            return Err(ProviderError::Unavailable(
+                "local outputs disabled".to_string(),
+            ));
         }
         if Self::parse_output_id(output_id).is_none() {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         }
-        let active_output_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_output_id = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone();
         if active_output_id.as_deref() != Some(output_id) {
-            return Err(ProviderError::BadRequest("output is not active".to_string()));
+            return Err(ProviderError::BadRequest(
+                "output is not active".to_string(),
+            ));
         }
         ensure_local_player(state).await?;
 
-            let status = state.playback.manager.status().inner().lock().unwrap();
-            let (title, artist, album, format, sample_rate, bitrate_kbps) =
-                match status.now_playing.as_ref() {
-                    Some(path) => {
-                        let lib = state.library.read().unwrap();
-                        match lib.find_track_by_path(path) {
-                            Some(crate::models::LibraryEntry::Track {
-                                file_name,
-                                sample_rate,
+        let status = state.playback.manager.status().inner().lock().unwrap();
+        let (title, artist, album, format, sample_rate, bitrate_kbps) =
+            match status.now_playing.as_ref() {
+                Some(path) => {
+                    let lib = state.library.read().unwrap();
+                    match lib.find_track_by_path(path) {
+                        Some(crate::models::LibraryEntry::Track {
+                            file_name,
+                            sample_rate,
+                            artist,
+                            album,
+                            format,
+                            ..
+                        }) => {
+                            let bitrate_kbps = estimate_bitrate_kbps(path, status.duration_ms);
+                            let title = state
+                                .metadata
+                                .db
+                                .track_record_by_path(&path.to_string_lossy())
+                                .ok()
+                                .flatten()
+                                .and_then(|record| record.title)
+                                .or_else(|| Some(file_name));
+                            (
+                                title,
                                 artist,
                                 album,
-                                format,
-                                ..
-                            }) => {
-                                let bitrate_kbps =
-                                    estimate_bitrate_kbps(path, status.duration_ms);
-                                let title = state
-                                    .metadata
-                                    .db
-                                    .track_record_by_path(&path.to_string_lossy())
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|record| record.title)
-                                    .or_else(|| Some(file_name));
-                                (title, artist, album, Some(format), sample_rate, bitrate_kbps)
-                            }
-                            _ => (None, None, None, None, None, None),
+                                Some(format),
+                                sample_rate,
+                                bitrate_kbps,
+                            )
                         }
+                        _ => (None, None, None, None, None, None),
                     }
-                    None => (None, None, None, None, None, None),
-                };
-            let resp = StatusResponse {
-                now_playing_track_id: status.now_playing.as_ref().and_then(|p| {
-                    state
-                        .metadata
-                        .db
-                        .track_id_for_path(&p.to_string_lossy())
-                        .ok()
-                        .flatten()
-                }),
-                paused: status.paused,
-                bridge_online: true,
-                elapsed_ms: status.elapsed_ms,
-                duration_ms: status.duration_ms,
-                source_codec: status.source_codec.clone(),
-                source_bit_depth: status.source_bit_depth,
-                container: status.container.clone(),
-                output_sample_format: status.output_sample_format.clone(),
-                resampling: status.resampling,
-                resample_from_hz: status.resample_from_hz,
-                resample_to_hz: status.resample_to_hz,
-                sample_rate,
-                channels: status.channels,
-                output_sample_rate: status.sample_rate,
-                output_device: status.output_device.clone(),
-                title,
-                artist,
-                album,
-                format,
-                output_id: Some(output_id.to_string()),
-                bitrate_kbps,
-                underrun_frames: None,
-                underrun_events: None,
-                buffer_size_frames: status.buffer_size_frames,
-                buffered_frames: status.buffered_frames,
-                buffer_capacity_frames: status.buffer_capacity_frames,
-                has_previous: status.has_previous,
+                }
+                None => (None, None, None, None, None, None),
             };
-            drop(status);
+        let resp = StatusResponse {
+            now_playing_track_id: status.now_playing.as_ref().and_then(|p| {
+                state
+                    .metadata
+                    .db
+                    .track_id_for_path(&p.to_string_lossy())
+                    .ok()
+                    .flatten()
+            }),
+            paused: status.paused,
+            bridge_online: true,
+            elapsed_ms: status.elapsed_ms,
+            duration_ms: status.duration_ms,
+            source_codec: status.source_codec.clone(),
+            source_bit_depth: status.source_bit_depth,
+            container: status.container.clone(),
+            output_sample_format: status.output_sample_format.clone(),
+            resampling: status.resampling,
+            resample_from_hz: status.resample_from_hz,
+            resample_to_hz: status.resample_to_hz,
+            sample_rate,
+            channels: status.channels,
+            output_sample_rate: status.sample_rate,
+            output_device: status.output_device.clone(),
+            title,
+            artist,
+            album,
+            format,
+            output_id: Some(output_id.to_string()),
+            bitrate_kbps,
+            underrun_frames: None,
+            underrun_events: None,
+            buffer_size_frames: status.buffer_size_frames,
+            buffered_frames: status.buffered_frames,
+            buffer_capacity_frames: status.buffer_capacity_frames,
+            has_previous: status.has_previous,
+        };
+        drop(status);
         Ok(resp)
     }
 
     /// Stop playback on a local output (best-effort).
-    async fn stop_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError> {
+    async fn stop_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError> {
         if !Self::is_enabled(state) {
             return Ok(());
         }
@@ -357,20 +391,26 @@ fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: Option<u64>) ->
 /// Ensure the local playback worker has been spawned.
 async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
     if !LocalProvider::is_enabled(state) {
-        return Err(ProviderError::Unavailable("local outputs disabled".to_string()));
+        return Err(ProviderError::Unavailable(
+            "local outputs disabled".to_string(),
+        ));
     }
-    if !state.providers.local
+    if !state
+        .providers
+        .local
         .running
         .load(std::sync::atomic::Ordering::Relaxed)
     {
-            let handle = crate::local_player::spawn_local_player(
-                state.playback.device_selection.local.clone(),
-                state.playback.manager.status().clone(),
-                audio_player::config::PlaybackConfig::default(),
-            );
+        let handle = crate::local_player::spawn_local_player(
+            state.playback.device_selection.local.clone(),
+            state.playback.manager.status().clone(),
+            audio_player::config::PlaybackConfig::default(),
+        );
         state.providers.bridge.player.lock().unwrap().cmd_tx = handle.cmd_tx.clone();
         state.providers.local.player.lock().unwrap().cmd_tx = handle.cmd_tx;
-        state.providers.local
+        state
+            .providers
+            .local
             .running
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
@@ -380,8 +420,8 @@ async fn ensure_local_player(state: &AppState) -> Result<(), ProviderError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn parse_output_id_accepts_valid() {

@@ -6,15 +6,11 @@
 
 use std::path::PathBuf;
 
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 
 use crate::models::{
-    LocalPlaybackPlayRequest,
-    LocalPlaybackPlayResponse,
-    LocalPlaybackRegisterRequest,
-    LocalPlaybackRegisterResponse,
-    LocalPlaybackSessionInfo,
-    LocalPlaybackSessionsResponse,
+    LocalPlaybackPlayRequest, LocalPlaybackPlayResponse, LocalPlaybackRegisterRequest,
+    LocalPlaybackRegisterResponse, LocalPlaybackSessionInfo, LocalPlaybackSessionsResponse,
 };
 use crate::state::AppState;
 
@@ -29,7 +25,9 @@ use crate::state::AppState;
 )]
 #[post("/local-playback/register")]
 /// Register or refresh a local playback session.
-pub async fn local_playback_register(body: web::Json<LocalPlaybackRegisterRequest>) -> impl Responder {
+pub async fn local_playback_register(
+    body: web::Json<LocalPlaybackRegisterRequest>,
+) -> impl Responder {
     let req = body.into_inner();
     let kind = req.kind.trim().to_ascii_lowercase();
     let name = req.name.trim().to_string();
@@ -37,7 +35,8 @@ pub async fn local_playback_register(body: web::Json<LocalPlaybackRegisterReques
     let app_version = req.app_version.trim().to_string();
 
     if kind.is_empty() || name.is_empty() || client_id.is_empty() || app_version.is_empty() {
-        return HttpResponse::BadRequest().body("kind, name, client_id, and app_version are required");
+        return HttpResponse::BadRequest()
+            .body("kind, name, client_id, and app_version are required");
     }
     let has_valid_kind_char = kind
         .chars()
@@ -46,7 +45,8 @@ pub async fn local_playback_register(body: web::Json<LocalPlaybackRegisterReques
         return HttpResponse::BadRequest().body("kind contains no valid characters");
     }
 
-    let session_id = crate::local_playback_sessions::register_session(kind, name, client_id, app_version);
+    let session_id =
+        crate::local_playback_sessions::register_session(kind, name, client_id, app_version);
     HttpResponse::Ok().json(LocalPlaybackRegisterResponse {
         play_url: format!("/local-playback/{session_id}/play"),
         session_id,
@@ -85,7 +85,11 @@ pub async fn local_playback_play(
     let _resolved_path = match state.metadata.db.track_path_for_id(payload.track_id) {
         Ok(Some(path)) => {
             let candidate = PathBuf::from(path);
-            match state.output.controller.canonicalize_under_root(&state, &candidate) {
+            match state
+                .output
+                .controller
+                .canonicalize_under_root(&state, &candidate)
+            {
                 Ok(path) => path,
                 Err(err) => return err.into_response(),
             }

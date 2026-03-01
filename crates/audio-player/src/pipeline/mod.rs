@@ -1,15 +1,15 @@
 //! Playback pipeline wiring: resample + playback + optional reporting/cancel.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
 use cpal::traits::StreamTrait;
 
-use crate::{playback, queue, resample};
 use crate::config::PlaybackConfig;
+use crate::{playback, queue, resample};
 /// Optional knobs for a single playback session (network sessions use these).
 ///
 /// This lets the pipeline wire in:
@@ -62,8 +62,7 @@ impl PlaybackState {
         }
     }
 
-    fn stop_reporter(self) {
-    }
+    fn stop_reporter(self) {}
 }
 
 /// Wire up the resampler + output stream and block until playback ends or is cancelled.
@@ -93,10 +92,10 @@ pub fn play_decoded_source(
             src_spec,
             dst_rate,
             resample::ResampleConfig {
-            chunk_frames: playback.chunk_frames,
-            buffer_seconds: playback.buffer_seconds,
-        },
-    )?;
+                chunk_frames: playback.chunk_frames,
+                buffer_seconds: playback.buffer_seconds,
+            },
+        )?;
         tracing::info!(rate_hz = dst_rate, "resampling");
         out
     };

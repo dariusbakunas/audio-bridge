@@ -4,10 +4,10 @@
 //! - listing available output devices
 //! - selecting either the default device or a device by substring match
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait};
-use std::sync::{Mutex, OnceLock};
 use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 
 /// Pick a CPAL output device.
 ///
@@ -90,18 +90,12 @@ pub fn pick_output_config(
 /// Prefer a fixed buffer size if the device advertises one.
 ///
 /// Returns `None` when the device only supports the default buffer size.
-pub fn pick_buffer_size(
-    config: &cpal::SupportedStreamConfig,
-) -> Option<cpal::BufferSize> {
+pub fn pick_buffer_size(config: &cpal::SupportedStreamConfig) -> Option<cpal::BufferSize> {
     match config.buffer_size() {
         cpal::SupportedBufferSize::Range { min, max } => {
             const MAX_FRAMES: u32 = 16_384;
             let chosen = if *max > MAX_FRAMES {
-                if *min > MAX_FRAMES {
-                    *min
-                } else {
-                    MAX_FRAMES
-                }
+                if *min > MAX_FRAMES { *min } else { MAX_FRAMES }
             } else {
                 *max
             };
@@ -111,11 +105,7 @@ pub fn pick_buffer_size(
     }
 }
 
-fn pick_rate_for_range(
-    min: u32,
-    max: u32,
-    target_rate: Option<u32>,
-) -> u32 {
+fn pick_rate_for_range(min: u32, max: u32, target_rate: Option<u32>) -> u32 {
     let target = target_rate.unwrap_or(u32::MAX);
     if target_rate.is_some() {
         if target >= min && target <= max {
@@ -233,7 +223,12 @@ pub fn list_device_infos(host: &cpal::Host) -> Result<Vec<DeviceInfo>> {
 
         update_cached_rates(&cache_key, min_rate, max_rate);
         let id = device_id_for(&d, &name, min_rate, max_rate);
-        out.push(DeviceInfo { id, name, min_rate, max_rate });
+        out.push(DeviceInfo {
+            id,
+            name,
+            min_rate,
+            max_rate,
+        });
     }
     Ok(out)
 }

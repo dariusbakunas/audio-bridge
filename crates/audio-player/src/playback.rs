@@ -6,10 +6,10 @@
 //! - applies basic channel mapping (mono↔stereo, best-effort otherwise)
 //! - converts `f32` samples to the device sample format
 
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cpal::traits::DeviceTrait;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::queue::{PopStrategy, SharedAudio};
 
@@ -149,7 +149,9 @@ where
                 if st.pos >= st.src.len() {
                     st.pos = 0;
                     st.src.clear();
-                    if let Some(v) = dstq_cb.pop(PopStrategy::NonBlocking { max_frames: refill_max_frames }) {
+                    if let Some(v) = dstq_cb.pop(PopStrategy::NonBlocking {
+                        max_frames: refill_max_frames,
+                    }) {
                         st.src = v;
                     } else {
                         // No more audio ready; fill the rest with silence.
@@ -196,7 +198,6 @@ where
         err_fn,
         None,
     )?;
-
 
     Ok(stream)
 }

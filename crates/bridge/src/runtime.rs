@@ -7,7 +7,7 @@ use cpal::traits::DeviceTrait;
 
 use crate::config::{BridgeListenConfig, BridgePlayConfig};
 use crate::{http_api, mdns, player};
-use audio_player::{decode, device, pipeline, config::PlaybackConfig, status::PlayerStatusState};
+use audio_player::{config::PlaybackConfig, decode, device, pipeline, status::PlayerStatusState};
 
 const MDNS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -28,9 +28,9 @@ pub fn run_play(config: BridgePlayConfig) -> Result<()> {
 
 /// Run the bridge HTTP API and playback worker.
 pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()> {
-    let device_selected = std::sync::Arc::new(std::sync::Mutex::new(
-        normalize_device_name(config.device.clone()),
-    ));
+    let device_selected = std::sync::Arc::new(std::sync::Mutex::new(normalize_device_name(
+        config.device.clone(),
+    )));
     let exclusive_selected = std::sync::Arc::new(std::sync::Mutex::new(false));
     let status = PlayerStatusState::shared();
     let volume = std::sync::Arc::new(player::BridgeVolumeState::new(100, false));
@@ -72,13 +72,15 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     {
         let mdns_handle = mdns_handle.clone();
         let http_bind = config.http_bind;
-        std::thread::spawn(move || loop {
-            std::thread::sleep(MDNS_REFRESH_INTERVAL);
-            if let Ok(mut g) = mdns_handle.lock() {
-                if let Some(ad) = g.as_ref() {
-                    ad.shutdown();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(MDNS_REFRESH_INTERVAL);
+                if let Ok(mut g) = mdns_handle.lock() {
+                    if let Some(ad) = g.as_ref() {
+                        ad.shutdown();
+                    }
+                    *g = mdns::spawn_mdns_advertiser(http_bind);
                 }
-                *g = mdns::spawn_mdns_advertiser(http_bind);
             }
         });
     }

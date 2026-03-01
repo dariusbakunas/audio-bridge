@@ -5,9 +5,11 @@
 use async_trait::async_trait;
 use crossbeam_channel::Sender;
 
-use crate::cast_v2::{spawn_cast_worker, CastDeviceDescriptor};
 use crate::bridge::BridgeCommand;
-use crate::models::{OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse};
+use crate::cast_v2::{CastDeviceDescriptor, spawn_cast_worker};
+use crate::models::{
+    OutputCapabilities, OutputInfo, OutputsResponse, ProviderInfo, StatusResponse,
+};
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
@@ -57,7 +59,9 @@ impl CastProvider {
             .ok()
             .and_then(|map| map.get(&device_id).cloned());
         let Some(found) = found else {
-            return Err(ProviderError::Unavailable("cast device offline".to_string()));
+            return Err(ProviderError::Unavailable(
+                "cast device offline".to_string(),
+            ));
         };
         let host = found
             .host
@@ -91,10 +95,20 @@ impl CastProvider {
     }
 
     fn active_output_id(state: &AppState) -> Option<String> {
-        state.providers.bridge.bridges.lock().unwrap().active_output_id.clone()
+        state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone()
     }
 
-    fn device_output_info(device: &crate::state::DiscoveredCast, active_id: &Option<String>) -> OutputInfo {
+    fn device_output_info(
+        device: &crate::state::DiscoveredCast,
+        active_id: &Option<String>,
+    ) -> OutputInfo {
         let id = Self::output_id(&device.id);
         let state = if active_id.as_deref() == Some(&id) {
             "active"
@@ -121,7 +135,11 @@ impl CastProvider {
         }
     }
 
-    fn idle_status(output_id: &str, device_name: Option<String>, bridge_online: bool) -> StatusResponse {
+    fn idle_status(
+        output_id: &str,
+        device_name: Option<String>,
+        bridge_online: bool,
+    ) -> StatusResponse {
         StatusResponse {
             now_playing_track_id: None,
             paused: true,
@@ -227,15 +245,13 @@ impl OutputProvider for CastProvider {
         if found.is_some() {
             Ok(())
         } else {
-            Err(ProviderError::Unavailable("cast device offline".to_string()))
+            Err(ProviderError::Unavailable(
+                "cast device offline".to_string(),
+            ))
         }
     }
 
-    async fn select_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError> {
+    async fn select_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError> {
         let cmd_tx = Self::ensure_worker_for_output(state, output_id)?;
         let has_session_owner = crate::session_registry::output_lock_owner(output_id).is_some();
 
@@ -330,11 +346,7 @@ impl OutputProvider for CastProvider {
         Ok(Self::idle_status(output_id, device_name, true))
     }
 
-    async fn stop_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError> {
+    async fn stop_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError> {
         if Self::parse_output_id(output_id).is_none() {
             return Err(ProviderError::BadRequest("invalid output id".to_string()));
         }
@@ -420,14 +432,18 @@ fn status_from_remote(
         }
         None => (None, None, None, None, None),
     };
-    let container = remote
-        .container
-        .clone()
-        .or_else(|| now_playing_path.as_ref().and_then(container_from_path).map(|s| s.to_string()));
+    let container = remote.container.clone().or_else(|| {
+        now_playing_path
+            .as_ref()
+            .and_then(container_from_path)
+            .map(|s| s.to_string())
+    });
     let source_codec = remote.source_codec.clone().or_else(|| format.clone());
-    let bitrate_kbps = remote
-        .duration_ms
-        .and_then(|duration_ms| now_playing_path.as_ref().and_then(|p| estimate_bitrate_kbps(p, duration_ms)));
+    let bitrate_kbps = remote.duration_ms.and_then(|duration_ms| {
+        now_playing_path
+            .as_ref()
+            .and_then(|p| estimate_bitrate_kbps(p, duration_ms))
+    });
     StatusResponse {
         now_playing_track_id: now_playing_path.as_ref().and_then(|path| {
             state

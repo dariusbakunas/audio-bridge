@@ -1,51 +1,32 @@
 //! Metadata-related API handlers.
 
 use actix_files::NamedFile;
-use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{HttpRequest, HttpResponse, Responder, get, post, web};
 use serde::Deserialize;
 use std::time::Instant;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::musicbrainz::MusicBrainzMatch;
 use crate::media_assets::MediaAssetStore;
-use crate::models::{
-    AlbumImageClearRequest,
-    AlbumImageSetRequest,
-    AlbumListResponse,
-    AlbumMetadataResponse,
-    AlbumMetadataUpdateRequest,
-    AlbumMetadataUpdateResponse,
-    AlbumProfileResponse,
-    AlbumProfileUpdateRequest,
-    ArtistImageClearRequest,
-    ArtistImageSetRequest,
-    ArtistListResponse,
-    ArtistProfileResponse,
-    ArtistProfileUpdateRequest,
-    MediaAssetInfo,
-    MusicBrainzMatchApplyRequest,
-    MusicBrainzMatchCandidate,
-    MusicBrainzMatchKind,
-    MusicBrainzMatchSearchRequest,
-    MusicBrainzMatchSearchResponse,
-    TextMetadata,
-    TrackListResponse,
-    TrackMetadataResponse,
-    TrackMetadataFieldsResponse,
-    TrackMetadataUpdateRequest,
-    TrackResolveResponse,
-    TrackAnalysisRequest,
-    TrackAnalysisResponse,
-    TrackAnalysisHeuristics,
-};
 use crate::metadata_db::{MediaAssetRecord, TextEntry};
-use crate::track_analysis::{analyze_track, AnalysisOptions};
-use base64::{engine::general_purpose, Engine as _};
+use crate::models::{
+    AlbumImageClearRequest, AlbumImageSetRequest, AlbumListResponse, AlbumMetadataResponse,
+    AlbumMetadataUpdateRequest, AlbumMetadataUpdateResponse, AlbumProfileResponse,
+    AlbumProfileUpdateRequest, ArtistImageClearRequest, ArtistImageSetRequest, ArtistListResponse,
+    ArtistProfileResponse, ArtistProfileUpdateRequest, MediaAssetInfo,
+    MusicBrainzMatchApplyRequest, MusicBrainzMatchCandidate, MusicBrainzMatchKind,
+    MusicBrainzMatchSearchRequest, MusicBrainzMatchSearchResponse, TextMetadata,
+    TrackAnalysisHeuristics, TrackAnalysisRequest, TrackAnalysisResponse, TrackListResponse,
+    TrackMetadataFieldsResponse, TrackMetadataResponse, TrackMetadataUpdateRequest,
+    TrackResolveResponse,
+};
+use crate::musicbrainz::MusicBrainzMatch;
 use crate::state::AppState;
 use crate::tag_writer::{
-    read_editable_vorbis_tags, supported_track_fields, tag_type_label, write_track_tags,
-    TrackTagUpdate,
+    TrackTagUpdate, read_editable_vorbis_tags, supported_track_fields, tag_type_label,
+    write_track_tags,
 };
+use crate::track_analysis::{AnalysisOptions, analyze_track};
+use base64::{Engine as _, engine::general_purpose};
 
 #[derive(Deserialize, ToSchema)]
 pub struct ListQuery {
@@ -164,7 +145,11 @@ pub async fn tracks_resolve(
     let path = match state.metadata.db.track_path_for_id(query.track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks resolve failed");
+            tracing::warn!(
+                track_id = query.track_id,
+                reason = "track_id_not_found",
+                "tracks resolve failed"
+            );
             return HttpResponse::NotFound().finish();
         }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
@@ -225,7 +210,11 @@ pub async fn tracks_metadata(
             })
         }
         Ok(None) => {
-            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks metadata missing");
+            tracing::warn!(
+                track_id = query.track_id,
+                reason = "track_id_not_found",
+                "tracks metadata missing"
+            );
             HttpResponse::NotFound().finish()
         }
         Err(err) => HttpResponse::InternalServerError().body(err),
@@ -251,12 +240,17 @@ pub async fn tracks_metadata_fields(
     let path = match state.metadata.db.track_path_for_id(query.track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id = query.track_id, reason = "track_id_not_found", "tracks metadata fields missing");
+            tracing::warn!(
+                track_id = query.track_id,
+                reason = "track_id_not_found",
+                "tracks metadata fields missing"
+            );
             return HttpResponse::NotFound().finish();
         }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+    {
         Ok(path) => path,
         Err(response) => return response,
     };
@@ -291,19 +285,36 @@ pub async fn tracks_metadata_update(
     let path = match state.metadata.db.track_path_for_id(request.track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id = request.track_id, reason = "track_id_not_found", "tracks metadata update failed");
+            tracing::warn!(
+                track_id = request.track_id,
+                reason = "track_id_not_found",
+                "tracks metadata update failed"
+            );
             return HttpResponse::NotFound().finish();
         }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+    {
         Ok(path) => path,
         Err(response) => return response,
     };
 
-    let title = request.title.as_deref().map(str::trim).filter(|v| !v.is_empty());
-    let artist = request.artist.as_deref().map(str::trim).filter(|v| !v.is_empty());
-    let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let title = request
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let artist = request
+        .artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let album = request
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
     let album_artist = request
         .album_artist
         .as_deref()
@@ -421,12 +432,16 @@ pub async fn tracks_analysis(
     let path = match state.metadata.db.track_path_for_id(request.track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id = request.track_id, "track analysis track id not found");
+            tracing::warn!(
+                track_id = request.track_id,
+                "track analysis track id not found"
+            );
             return HttpResponse::NotFound().body("track_id not found");
         }
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+    {
         Ok(path) => path,
         Err(response) => {
             tracing::warn!(
@@ -537,9 +552,15 @@ pub async fn albums_metadata_update(
     impl AlbumMetadataUpdateError {
         fn into_response(self) -> HttpResponse {
             match self {
-                AlbumMetadataUpdateError::BadRequest(message) => HttpResponse::BadRequest().body(message),
-                AlbumMetadataUpdateError::NotFound(message) => HttpResponse::NotFound().body(message),
-                AlbumMetadataUpdateError::Internal(message) => HttpResponse::InternalServerError().body(message),
+                AlbumMetadataUpdateError::BadRequest(message) => {
+                    HttpResponse::BadRequest().body(message)
+                }
+                AlbumMetadataUpdateError::NotFound(message) => {
+                    HttpResponse::NotFound().body(message)
+                }
+                AlbumMetadataUpdateError::Internal(message) => {
+                    HttpResponse::InternalServerError().body(message)
+                }
             }
         }
     }
@@ -547,7 +568,11 @@ pub async fn albums_metadata_update(
     let request = body.into_inner();
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
-    let album = request.album.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let album = request
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
     let album_artist = request
         .album_artist
         .as_deref()
@@ -560,11 +585,7 @@ pub async fn albums_metadata_update(
         .map(str::trim)
         .filter(|v| !v.is_empty());
 
-    if album.is_none()
-        && album_artist.is_none()
-        && year.is_none()
-        && track_artist.is_none()
-    {
+    if album.is_none() && album_artist.is_none() && year.is_none() && track_artist.is_none() {
         return HttpResponse::BadRequest().body("no metadata fields provided");
     }
 
@@ -585,94 +606,103 @@ pub async fn albums_metadata_update(
     tracing::info!(album_id, track_count, "album metadata update started");
 
     let state_for_update = state.clone();
-    let update_result = tokio::task::spawn_blocking(move || -> Result<i64, AlbumMetadataUpdateError> {
-        for path in paths {
-            let full_path = crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
-                .map_err(|response| match response.status().as_u16() {
-                    400 => AlbumMetadataUpdateError::BadRequest(format!(
-                        "track path outside library root: {path}"
-                    )),
-                    404 => AlbumMetadataUpdateError::NotFound(format!(
-                        "track not found during album update: {path}"
-                    )),
-                    _ => AlbumMetadataUpdateError::Internal(format!(
-                        "failed to resolve track path for album update: {path}"
-                    )),
-                })?;
+    let update_result =
+        tokio::task::spawn_blocking(move || -> Result<i64, AlbumMetadataUpdateError> {
+            for path in paths {
+                let full_path =
+                    crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+                        .map_err(|response| match response.status().as_u16() {
+                            400 => AlbumMetadataUpdateError::BadRequest(format!(
+                                "track path outside library root: {path}"
+                            )),
+                            404 => AlbumMetadataUpdateError::NotFound(format!(
+                                "track not found during album update: {path}"
+                            )),
+                            _ => AlbumMetadataUpdateError::Internal(format!(
+                                "failed to resolve track path for album update: {path}"
+                            )),
+                        })?;
 
-            if let Err(err) = write_track_tags(
-                &full_path,
-                TrackTagUpdate {
-                    title: None,
-                    artist: track_artist_owned.as_deref(),
-                    album: album_owned.as_deref(),
-                    album_artist: album_artist_owned.as_deref(),
-                    year,
-                    track_number: None,
-                    disc_number: None,
-                    extra_tags: None,
-                    clear_title: false,
-                    clear_artist: false,
-                    clear_album: false,
-                    clear_album_artist: false,
-                    clear_year: false,
-                    clear_track_number: false,
-                    clear_disc_number: false,
-                    clear_extra_tags: None,
-                },
-            ) {
-                return Err(AlbumMetadataUpdateError::Internal(format!(
-                    "album metadata update failed for {path}: {err}"
-                )));
-            }
-
-            if let Err(response) = metadata_service.rescan_track(&state_for_update.library, &full_path) {
-                return Err(match response.status().as_u16() {
-                    400 => AlbumMetadataUpdateError::BadRequest(format!(
-                        "track rescan rejected after tag update: {path}"
-                    )),
-                    404 => AlbumMetadataUpdateError::NotFound(format!(
-                        "track disappeared during rescan: {path}"
-                    )),
-                    _ => AlbumMetadataUpdateError::Internal(format!(
-                        "track rescan failed after tag update: {path}"
-                    )),
-                });
-            }
-        }
-
-        let mut updated_album_id = album_id;
-        if album_owned.is_some() || album_artist_owned.is_some() || year.is_some() {
-            match metadata_service.update_album_metadata(
-                album_id,
-                album_owned.as_deref(),
-                album_artist_owned.as_deref(),
-                year,
-            ) {
-                Ok(Some(new_id)) => {
-                    updated_album_id = new_id;
-                }
-                Ok(None) => {
-                    return Err(AlbumMetadataUpdateError::NotFound(format!(
-                        "album not found: {album_id}"
-                    )));
-                }
-                Err(err) => {
+                if let Err(err) = write_track_tags(
+                    &full_path,
+                    TrackTagUpdate {
+                        title: None,
+                        artist: track_artist_owned.as_deref(),
+                        album: album_owned.as_deref(),
+                        album_artist: album_artist_owned.as_deref(),
+                        year,
+                        track_number: None,
+                        disc_number: None,
+                        extra_tags: None,
+                        clear_title: false,
+                        clear_artist: false,
+                        clear_album: false,
+                        clear_album_artist: false,
+                        clear_year: false,
+                        clear_track_number: false,
+                        clear_disc_number: false,
+                        clear_extra_tags: None,
+                    },
+                ) {
                     return Err(AlbumMetadataUpdateError::Internal(format!(
-                        "album metadata db update failed: {err}"
+                        "album metadata update failed for {path}: {err}"
                     )));
                 }
-            }
-        }
 
-        Ok(updated_album_id)
-    })
-    .await;
+                if let Err(response) =
+                    metadata_service.rescan_track(&state_for_update.library, &full_path)
+                {
+                    return Err(match response.status().as_u16() {
+                        400 => AlbumMetadataUpdateError::BadRequest(format!(
+                            "track rescan rejected after tag update: {path}"
+                        )),
+                        404 => AlbumMetadataUpdateError::NotFound(format!(
+                            "track disappeared during rescan: {path}"
+                        )),
+                        _ => AlbumMetadataUpdateError::Internal(format!(
+                            "track rescan failed after tag update: {path}"
+                        )),
+                    });
+                }
+            }
+
+            let mut updated_album_id = album_id;
+            if album_owned.is_some() || album_artist_owned.is_some() || year.is_some() {
+                match metadata_service.update_album_metadata(
+                    album_id,
+                    album_owned.as_deref(),
+                    album_artist_owned.as_deref(),
+                    year,
+                ) {
+                    Ok(Some(new_id)) => {
+                        updated_album_id = new_id;
+                    }
+                    Ok(None) => {
+                        return Err(AlbumMetadataUpdateError::NotFound(format!(
+                            "album not found: {album_id}"
+                        )));
+                    }
+                    Err(err) => {
+                        return Err(AlbumMetadataUpdateError::Internal(format!(
+                            "album metadata db update failed: {err}"
+                        )));
+                    }
+                }
+            }
+
+            Ok(updated_album_id)
+        })
+        .await;
 
     match update_result {
         Ok(Ok(updated_album_id)) => {
             let elapsed_ms = started_at.elapsed().as_millis() as u64;
-            tracing::info!(album_id, track_count, elapsed_ms, "album metadata update finished");
+            tracing::info!(
+                album_id,
+                track_count,
+                elapsed_ms,
+                "album metadata update finished"
+            );
             HttpResponse::Ok().json(AlbumMetadataUpdateResponse {
                 album_id: updated_album_id,
             })
@@ -837,7 +867,8 @@ pub async fn album_profile(
         Ok(false) => return HttpResponse::NotFound().finish(),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     }
-    let (original_year, edition_year, edition_label) = match db.album_edition_fields(query.album_id) {
+    let (original_year, edition_year, edition_label) = match db.album_edition_fields(query.album_id)
+    {
         Ok(values) => values,
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
@@ -962,10 +993,11 @@ pub async fn album_profile_update(
         return HttpResponse::BadRequest().body("no profile fields provided");
     }
 
-    let (original_year, edition_year, edition_label) = match db.album_edition_fields(request.album_id) {
-        Ok(values) => values,
-        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-    };
+    let (original_year, edition_year, edition_label) =
+        match db.album_edition_fields(request.album_id) {
+            Ok(values) => values,
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        };
     let notes = match db.album_notes(request.album_id, lang) {
         Ok(value) => value.map(map_text_metadata),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
@@ -1235,7 +1267,11 @@ pub async fn track_cover(
     let cover_rel = match metadata_service.cover_path_for_track_id(path.id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id = path.id, reason = "cover_not_set", "track cover missing");
+            tracing::warn!(
+                track_id = path.id,
+                reason = "cover_not_set",
+                "track cover missing"
+            );
             return HttpResponse::NotFound().finish();
         }
         Err(err) => return HttpResponse::InternalServerError().body(err),
@@ -1262,7 +1298,11 @@ pub async fn album_cover(
     let cover_rel = match metadata_service.cover_path_for_album_id(path.id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(album_id = path.id, reason = "cover_not_set", "album cover missing");
+            tracing::warn!(
+                album_id = path.id,
+                reason = "cover_not_set",
+                "album cover missing"
+            );
             return HttpResponse::NotFound().finish();
         }
         Err(err) => return HttpResponse::InternalServerError().body(err),
@@ -1308,10 +1348,15 @@ fn serve_cover_art(state: &AppState, cover_rel: &str, req: &HttpRequest) -> Http
 )]
 #[get("/artists")]
 /// List artists from the metadata database.
-pub async fn artists_list(state: web::Data<AppState>, query: web::Query<ListQuery>) -> impl Responder {
+pub async fn artists_list(
+    state: web::Data<AppState>,
+    query: web::Query<ListQuery>,
+) -> impl Responder {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
-    match state.metadata.db
+    match state
+        .metadata
+        .db
         .list_artists(query.search.as_deref(), limit, offset)
     {
         Ok(items) => HttpResponse::Ok().json(ArtistListResponse { items }),
@@ -1343,12 +1388,11 @@ pub async fn albums_list(
 ) -> impl Responder {
     let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
-    match state.metadata.db.list_albums(
-        query.artist_id,
-        query.search.as_deref(),
-        limit,
-        offset,
-    ) {
+    match state
+        .metadata
+        .db
+        .list_albums(query.artist_id, query.search.as_deref(), limit, offset)
+    {
         Ok(items) => HttpResponse::Ok().json(AlbumListResponse { items }),
         Err(err) => {
             tracing::warn!(error = %err, "albums list failed");
@@ -1440,27 +1484,25 @@ pub async fn musicbrainz_match_search(
                 }
             }
         }
-        MusicBrainzMatchKind::Album => {
-            match client.search_releases(title, artist, limit) {
-                Ok(items) => items
-                    .into_iter()
-                    .map(|item| MusicBrainzMatchCandidate {
-                        recording_mbid: None,
-                        release_mbid: Some(item.release_mbid),
-                        artist_mbid: item.artist_mbid,
-                        title: item.title,
-                        artist: item.artist_name.unwrap_or_else(|| artist.to_string()),
-                        release_title: None,
-                        score: item.score,
-                        year: item.year,
-                    })
-                    .collect::<Vec<_>>(),
-                Err(err) => {
-                    tracing::warn!(error = %err, title, artist, "musicbrainz album search failed");
-                    return HttpResponse::InternalServerError().body(err.to_string());
-                }
+        MusicBrainzMatchKind::Album => match client.search_releases(title, artist, limit) {
+            Ok(items) => items
+                .into_iter()
+                .map(|item| MusicBrainzMatchCandidate {
+                    recording_mbid: None,
+                    release_mbid: Some(item.release_mbid),
+                    artist_mbid: item.artist_mbid,
+                    title: item.title,
+                    artist: item.artist_name.unwrap_or_else(|| artist.to_string()),
+                    release_title: None,
+                    score: item.score,
+                    year: item.year,
+                })
+                .collect::<Vec<_>>(),
+            Err(err) => {
+                tracing::warn!(error = %err, title, artist, "musicbrainz album search failed");
+                return HttpResponse::InternalServerError().body(err.to_string());
             }
-        }
+        },
     };
     HttpResponse::Ok().json(MusicBrainzMatchSearchResponse { items: results })
 }
@@ -1516,8 +1558,11 @@ pub async fn musicbrainz_match_apply(
                 release_candidates: Vec::new(),
             };
             let override_existing = override_existing.unwrap_or(true);
-            if let Err(err) = state.metadata.db
-                .apply_musicbrainz_with_override(&record, &mb, override_existing)
+            if let Err(err) =
+                state
+                    .metadata
+                    .db
+                    .apply_musicbrainz_with_override(&record, &mb, override_existing)
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
             }
@@ -1526,12 +1571,14 @@ pub async fn musicbrainz_match_apply(
                 album = ?record.album,
                 "manual musicbrainz match applied (track)"
             );
-            state.events.metadata_event(crate::events::MetadataEvent::MusicBrainzLookupSuccess {
-                track_id: Some(track_id),
-                recording_mbid: mb.recording_mbid.clone(),
-                artist_mbid: mb.artist_mbid.clone(),
-                album_mbid: mb.album_mbid.clone(),
-            });
+            state
+                .events
+                .metadata_event(crate::events::MetadataEvent::MusicBrainzLookupSuccess {
+                    track_id: Some(track_id),
+                    recording_mbid: mb.recording_mbid.clone(),
+                    artist_mbid: mb.artist_mbid.clone(),
+                    album_mbid: mb.album_mbid.clone(),
+                });
             state.metadata.wake.notify();
         }
         MusicBrainzMatchApplyRequest::Album {
@@ -1558,8 +1605,11 @@ pub async fn musicbrainz_match_apply(
                 release_candidates: Vec::new(),
             };
             let override_existing = override_existing.unwrap_or(true);
-            if let Err(err) = state.metadata.db
-                .apply_album_musicbrainz(album_id, &mb, override_existing)
+            if let Err(err) =
+                state
+                    .metadata
+                    .db
+                    .apply_album_musicbrainz(album_id, &mb, override_existing)
             {
                 return HttpResponse::InternalServerError().body(err.to_string());
             }

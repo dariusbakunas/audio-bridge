@@ -11,16 +11,22 @@ use crate::bridge::BridgeCommand;
 use crate::bridge_manager::{merge_bridges, parse_output_id};
 use crate::bridge_transport::BridgeTransportClient;
 use crate::models::QueueMode;
-use crate::output_providers::cast_provider::CastProvider;
 use crate::output_controller::OutputControllerError;
+use crate::output_providers::cast_provider::CastProvider;
 use crate::session_registry::BoundOutputError;
 use crate::state::AppState;
 
 #[derive(Debug)]
+/// Session-scoped playback dispatch failures converted into HTTP responses.
 pub enum SessionPlaybackError {
     SessionNotFound,
-    NoOutputSelected { session_id: String },
-    OutputLockMissing { session_id: String, output_id: String },
+    NoOutputSelected {
+        session_id: String,
+    },
+    OutputLockMissing {
+        session_id: String,
+        output_id: String,
+    },
     OutputInUse {
         session_id: String,
         output_id: String,
@@ -49,6 +55,7 @@ pub enum SessionPlaybackError {
 }
 
 impl SessionPlaybackError {
+    /// Convert an internal playback error into a user-facing HTTP error response.
     pub fn into_response(self) -> HttpResponse {
         match self {
             SessionPlaybackError::SessionNotFound => HttpResponse::NotFound()
@@ -114,6 +121,7 @@ fn controller_error_reason(err: &OutputControllerError) -> String {
     }
 }
 
+/// Stateless helper for dispatching session playback commands to active outputs.
 pub struct SessionPlaybackManager;
 
 struct BridgeTarget {
@@ -123,6 +131,7 @@ struct BridgeTarget {
 }
 
 impl SessionPlaybackManager {
+    /// Create a new playback manager instance.
     pub fn new() -> Self {
         Self
     }
@@ -131,9 +140,11 @@ impl SessionPlaybackManager {
         match crate::session_registry::require_bound_output(session_id) {
             Ok(output_id) => Ok(output_id),
             Err(BoundOutputError::SessionNotFound) => Err(SessionPlaybackError::SessionNotFound),
-            Err(BoundOutputError::NoOutputSelected) => Err(SessionPlaybackError::NoOutputSelected {
-                session_id: session_id.to_string(),
-            }),
+            Err(BoundOutputError::NoOutputSelected) => {
+                Err(SessionPlaybackError::NoOutputSelected {
+                    session_id: session_id.to_string(),
+                })
+            }
             Err(BoundOutputError::OutputLockMissing { output_id }) => {
                 Err(SessionPlaybackError::OutputLockMissing {
                     session_id: session_id.to_string(),
@@ -151,17 +162,16 @@ impl SessionPlaybackManager {
         }
     }
 
-    fn bridge_target(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Option<BridgeTarget> {
+    fn bridge_target(&self, state: &AppState, output_id: &str) -> Option<BridgeTarget> {
         let (bridge_id, device_id) = parse_output_id(output_id).ok()?;
         let http_addr = {
             let bridges_state = state.providers.bridge.bridges.lock().ok()?;
             let discovered = state.providers.bridge.discovered_bridges.lock().ok()?;
             let merged = merge_bridges(&bridges_state.bridges, &discovered);
-            merged.iter().find(|b| b.id == bridge_id).map(|b| b.http_addr)?
+            merged
+                .iter()
+                .find(|b| b.id == bridge_id)
+                .map(|b| b.http_addr)?
         };
         Some(BridgeTarget {
             output_id: output_id.to_string(),
@@ -170,11 +180,7 @@ impl SessionPlaybackManager {
         })
     }
 
-    fn cast_worker(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Option<Sender<BridgeCommand>> {
+    fn cast_worker(&self, state: &AppState, output_id: &str) -> Option<Sender<BridgeCommand>> {
         if !output_id.starts_with("cast:") {
             return None;
         }
@@ -195,14 +201,15 @@ impl SessionPlaybackManager {
             state.providers.bridge.public_base_url.clone(),
             Some(state.metadata.db.clone()),
         );
-        let devices = client
-            .list_devices()
-            .await
-            .map_err(|err| SessionPlaybackError::SelectFailed {
-                session_id: session_id.to_string(),
-                output_id: target.output_id.clone(),
-                reason: format!("list_devices_failed {err:#}"),
-            })?;
+        let devices =
+            client
+                .list_devices()
+                .await
+                .map_err(|err| SessionPlaybackError::SelectFailed {
+                    session_id: session_id.to_string(),
+                    output_id: target.output_id.clone(),
+                    reason: format!("list_devices_failed {err:#}"),
+                })?;
         let Some(device_name) = devices
             .iter()
             .find(|d| d.id == target.device_id)
@@ -214,14 +221,13 @@ impl SessionPlaybackManager {
                 reason: "unknown_device".to_string(),
             });
         };
-        client
-            .set_device(&device_name, None)
-            .await
-            .map_err(|err| SessionPlaybackError::SelectFailed {
+        client.set_device(&device_name, None).await.map_err(|err| {
+            SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id: target.output_id.clone(),
                 reason: format!("set_device_failed {err:#}"),
-            })?;
+            }
+        })?;
 
         let ext_hint = path
             .extension()
@@ -257,8 +263,7 @@ impl SessionPlaybackManager {
         session_id: &str,
         path: PathBuf,
     ) -> Result<String, SessionPlaybackError> {
-        self
-            .play_path_with_options(state, session_id, path, None, false)
+        self.play_path_with_options(state, session_id, path, None, false)
             .await
     }
 
@@ -297,7 +302,12 @@ impl SessionPlaybackManager {
                 .await;
         }
 
-        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+        if let Err(err) = state
+            .output
+            .controller
+            .select_output(state, &output_id)
+            .await
+        {
             return Err(SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id,
@@ -339,7 +349,10 @@ impl SessionPlaybackManager {
                     .ok()
                     .and_then(|cache| cache.get(bridge_id).cloned())
             });
-            let live_status = BridgeTransportClient::new(target.http_addr).status().await.ok();
+            let live_status = BridgeTransportClient::new(target.http_addr)
+                .status()
+                .await
+                .ok();
             let status = if let Some(fetched) = live_status {
                 if let Some(bridge_id) = bridge_id.as_ref() {
                     if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
@@ -418,7 +431,14 @@ impl SessionPlaybackManager {
                 })
             });
         let (title, artist, album, format) = now_playing_track_id
-            .and_then(|track_id| state.metadata.db.track_record_by_id(track_id).ok().flatten())
+            .and_then(|track_id| {
+                state
+                    .metadata
+                    .db
+                    .track_record_by_id(track_id)
+                    .ok()
+                    .flatten()
+            })
             .map(|record| {
                 (
                     record.title.or(Some(record.file_name)),
@@ -467,12 +487,13 @@ impl SessionPlaybackManager {
     ) -> Result<(), SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
         if let Some(tx) = self.cast_worker(state, &output_id) {
-            tx.send(BridgeCommand::PauseToggle)
-                .map_err(|err| SessionPlaybackError::CommandFailed {
+            tx.send(BridgeCommand::PauseToggle).map_err(|err| {
+                SessionPlaybackError::CommandFailed {
                     session_id: session_id.to_string(),
                     output_id: output_id.clone(),
                     reason: format!("cast_send_failed {err}"),
-                })?;
+                }
+            })?;
             state.events.status_changed();
             return Ok(());
         }
@@ -488,7 +509,12 @@ impl SessionPlaybackManager {
             state.events.status_changed();
             return Ok(());
         }
-        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+        if let Err(err) = state
+            .output
+            .controller
+            .select_output(state, &output_id)
+            .await
+        {
             return Err(SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id,
@@ -515,12 +541,13 @@ impl SessionPlaybackManager {
     ) -> Result<(), SessionPlaybackError> {
         let output_id = self.bound_output_id(session_id)?;
         if let Some(tx) = self.cast_worker(state, &output_id) {
-            tx.send(BridgeCommand::Seek { ms })
-                .map_err(|err| SessionPlaybackError::CommandFailed {
+            tx.send(BridgeCommand::Seek { ms }).map_err(|err| {
+                SessionPlaybackError::CommandFailed {
                     session_id: session_id.to_string(),
                     output_id: output_id.clone(),
                     reason: format!("cast_send_failed {err}"),
-                })?;
+                }
+            })?;
             state.events.status_changed();
             return Ok(());
         }
@@ -536,7 +563,12 @@ impl SessionPlaybackManager {
             state.events.status_changed();
             return Ok(());
         }
-        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+        if let Err(err) = state
+            .output
+            .controller
+            .select_output(state, &output_id)
+            .await
+        {
             return Err(SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id,
@@ -583,23 +615,25 @@ impl SessionPlaybackManager {
             state.events.status_changed();
             return Ok(());
         }
-        if let Err(err) = state.output.controller.select_output(state, &output_id).await {
+        if let Err(err) = state
+            .output
+            .controller
+            .select_output(state, &output_id)
+            .await
+        {
             return Err(SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id,
                 reason: controller_error_reason(&err),
             });
         }
-        state
-            .output
-            .controller
-            .stop(state)
-            .await
-            .map_err(|err| SessionPlaybackError::CommandFailed {
+        state.output.controller.stop(state).await.map_err(|err| {
+            SessionPlaybackError::CommandFailed {
                 session_id: session_id.to_string(),
                 output_id,
                 reason: controller_error_reason(&err),
-            })
+            }
+        })
     }
 
     pub async fn volume(
@@ -673,7 +707,13 @@ impl SessionPlaybackManager {
             .unwrap_or(false);
         let (now_playing_track_id, title, artist, album, format, sample_rate, duration_ms) =
             match now_track_id {
-                Some(track_id) => match state.metadata.db.track_record_by_id(track_id).ok().flatten() {
+                Some(track_id) => match state
+                    .metadata
+                    .db
+                    .track_record_by_id(track_id)
+                    .ok()
+                    .flatten()
+                {
                     Some(record) => (
                         Some(track_id),
                         record.title.or(Some(record.file_name)),
@@ -742,7 +782,13 @@ impl SessionPlaybackManager {
             return;
         };
         status.now_playing_track_id = Some(track_id);
-        let Some(record) = state.metadata.db.track_record_by_id(track_id).ok().flatten() else {
+        let Some(record) = state
+            .metadata
+            .db
+            .track_record_by_id(track_id)
+            .ok()
+            .flatten()
+        else {
             return;
         };
         if status.sample_rate.is_none() {

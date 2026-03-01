@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
 use crate::metadata_db::MetadataDb;
+use anyhow::Result;
 
 pub fn build_stream_url_for(
     path: &PathBuf,

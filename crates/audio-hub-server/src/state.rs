@@ -2,11 +2,11 @@
 //!
 //! Holds the in-memory library, playback state, and provider registries.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
-use std::sync::{Condvar};
-use std::sync::atomic::AtomicBool;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::Condvar;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock};
 
 use audio_bridge_types::BridgeStatus;
 use crossbeam_channel::Sender;
@@ -15,12 +15,12 @@ use crate::bridge::{BridgeCommand, BridgePlayer};
 use crate::config::BridgeConfigResolved;
 use crate::events::{EventBus, LogBus};
 use crate::library::LibraryIndex;
+use crate::metadata_db::MetadataDb;
 use crate::metadata_service::MetadataService;
 use crate::models::StatusResponse;
+use crate::musicbrainz::MusicBrainzClient;
 use crate::output_controller::OutputController;
 use crate::playback_manager::PlaybackManager;
-use crate::metadata_db::MetadataDb;
-use crate::musicbrainz::MusicBrainzClient;
 use crate::session_playback_manager::SessionPlaybackManager;
 
 #[derive(Clone)]
@@ -184,7 +184,11 @@ impl AppState {
                 musicbrainz,
                 wake: metadata_wake,
             },
-            providers: ProviderState { bridge, local, cast },
+            providers: ProviderState {
+                bridge,
+                local,
+                cast,
+            },
             playback: PlaybackState {
                 manager: playback_manager,
                 device_selection,
@@ -266,9 +270,11 @@ pub struct BridgeProviderState {
     /// Active bridge status stream subscriptions.
     pub status_streams: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Cached device lists by bridge id.
-    pub device_cache: Arc<Mutex<std::collections::HashMap<String, Vec<crate::bridge_transport::HttpDeviceInfo>>>>,
+    pub device_cache:
+        Arc<Mutex<std::collections::HashMap<String, Vec<crate::bridge_transport::HttpDeviceInfo>>>>,
     /// Cached status snapshots by bridge id.
-    pub status_cache: Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
+    pub status_cache:
+        Arc<Mutex<std::collections::HashMap<String, crate::bridge_transport::HttpStatusResponse>>>,
     /// Bridges that were already reset (stop command) after hub start.
     pub stop_on_join_done: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Whether the bridge worker loop is running.
@@ -358,7 +364,8 @@ impl OutputSettingsState {
                 out.disabled.extend(disabled.iter().cloned());
             }
             if let Some(renames) = cfg.renames.as_ref() {
-                out.renames.extend(renames.iter().map(|(k, v)| (k.clone(), v.clone())));
+                out.renames
+                    .extend(renames.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
             if let Some(exclusive) = cfg.exclusive.as_ref() {
                 out.exclusive.extend(exclusive.iter().cloned());
@@ -370,7 +377,8 @@ impl OutputSettingsState {
     pub fn from_api(settings: &crate::models::OutputSettings) -> Self {
         let mut out = Self::default();
         out.disabled.extend(settings.disabled.iter().cloned());
-        out.renames.extend(settings.renames.iter().map(|(k, v)| (k.clone(), v.clone())));
+        out.renames
+            .extend(settings.renames.iter().map(|(k, v)| (k.clone(), v.clone())));
         out.exclusive.extend(settings.exclusive.iter().cloned());
         out
     }

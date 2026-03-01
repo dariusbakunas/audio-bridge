@@ -62,7 +62,17 @@ impl LibraryIndex {
             .unwrap_or("")
             .to_ascii_uppercase();
         for entry in entries.iter_mut() {
-            if let LibraryEntry::Track { path, ext_hint: hint, duration_ms, sample_rate, album, artist, format, .. } = entry {
+            if let LibraryEntry::Track {
+                path,
+                ext_hint: hint,
+                duration_ms,
+                sample_rate,
+                album,
+                artist,
+                format,
+                ..
+            } = entry
+            {
                 if path == path_str.as_ref() {
                     *duration_ms = meta.duration_ms;
                     *sample_rate = meta.sample_rate;
@@ -98,7 +108,10 @@ impl LibraryIndex {
             sample_rate: meta.sample_rate,
             album: meta.album.clone(),
             artist: meta.artist.clone(),
-            format: meta.format.clone().unwrap_or_else(|| "<unknown>".to_string()),
+            format: meta
+                .format
+                .clone()
+                .unwrap_or_else(|| "<unknown>".to_string()),
         };
         entries.retain(|entry| {
             if let LibraryEntry::Track { path, .. } = entry {
@@ -175,10 +188,19 @@ where
     tracing::info!(root = %root.display(), "scanning library");
 
     let mut entries_by_dir = std::collections::HashMap::new();
-    scan_dir(&root, &root, &mut entries_by_dir, &mut on_track, &mut on_dir)?;
+    scan_dir(
+        &root,
+        &root,
+        &mut entries_by_dir,
+        &mut on_track,
+        &mut on_dir,
+    )?;
 
     tracing::info!(root = %root.display(), dirs = entries_by_dir.len(), "library scan complete");
-    Ok(LibraryIndex { root, entries_by_dir })
+    Ok(LibraryIndex {
+        root,
+        entries_by_dir,
+    })
 }
 
 fn scan_dir<F, D>(
@@ -206,7 +228,13 @@ where
                 .unwrap_or("<unknown>")
                 .to_string();
             let path_str = path.to_string_lossy().to_string();
-            dirs.push((name.to_lowercase(), LibraryEntry::Dir { path: path_str, name }));
+            dirs.push((
+                name.to_lowercase(),
+                LibraryEntry::Dir {
+                    path: path_str,
+                    name,
+                },
+            ));
             continue;
         }
         if !path.is_file() {

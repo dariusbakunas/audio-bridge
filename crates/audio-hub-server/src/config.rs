@@ -89,8 +89,8 @@ pub struct BridgeConfigResolved {
 impl ServerConfig {
     /// Load configuration from disk.
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = std::fs::read_to_string(path)
-            .with_context(|| format!("read config {:?}", path))?;
+        let raw =
+            std::fs::read_to_string(path).with_context(|| format!("read config {:?}", path))?;
         let cfg = toml::from_str::<ServerConfig>(&raw)
             .with_context(|| format!("parse config {:?}", path))?;
         Ok(cfg)
@@ -144,9 +144,7 @@ pub fn bind_from_config(cfg: &ServerConfig) -> Result<Option<std::net::SocketAdd
     let Some(bind) = cfg.bind.as_deref() else {
         return Ok(None);
     };
-    let addr = bind
-        .parse()
-        .with_context(|| format!("parse bind {bind}"))?;
+    let addr = bind.parse().with_context(|| format!("parse bind {bind}"))?;
     Ok(Some(addr))
 }
 
@@ -170,12 +168,8 @@ pub fn public_base_url_from_config(
 }
 
 /// Update output settings in the config file on disk.
-pub fn update_output_settings(
-    path: &Path,
-    settings: &OutputSettingsConfig,
-) -> Result<()> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("read config {:?}", path))?;
+pub fn update_output_settings(path: &Path, settings: &OutputSettingsConfig) -> Result<()> {
+    let raw = std::fs::read_to_string(path).with_context(|| format!("read config {:?}", path))?;
     let mut doc = raw
         .parse::<toml_edit::DocumentMut>()
         .with_context(|| format!("parse config {:?}", path))?;
@@ -209,8 +203,7 @@ pub fn update_output_settings(
         doc["outputs"] = toml_edit::Item::Table(outputs);
     }
 
-    std::fs::write(path, doc.to_string())
-        .with_context(|| format!("write config {:?}", path))?;
+    std::fs::write(path, doc.to_string()).with_context(|| format!("write config {:?}", path))?;
     Ok(())
 }
 

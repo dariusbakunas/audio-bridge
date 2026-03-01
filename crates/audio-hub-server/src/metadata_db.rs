@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::musicbrainz::MusicBrainzMatch;
 use uuid::Uuid;
@@ -179,20 +179,16 @@ impl MetadataDb {
         Self::new_at_path_with_media_root(db_path, None)
     }
 
-    pub fn new_at_path_with_media_root(
-        db_path: &Path,
-        media_root: Option<&Path>,
-    ) -> Result<Self> {
+    pub fn new_at_path_with_media_root(db_path: &Path, media_root: Option<&Path>) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create metadata dir {:?}", parent))?;
         }
 
-        let manager = SqliteConnectionManager::file(&db_path)
-            .with_init(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-                Ok(())
-            });
+        let manager = SqliteConnectionManager::file(&db_path).with_init(|conn| {
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            Ok(())
+        });
         let pool = Pool::builder()
             .max_size(4)
             .build(manager)
@@ -245,7 +241,9 @@ impl MetadataDb {
             .prepare("SELECT id, path FROM tracks")
             .context("prepare path migration query")?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
             .context("run path migration query")?;
         let mut updates: Vec<(i64, String, String)> = Vec::new();
         for row in rows {
@@ -283,10 +281,7 @@ impl MetadataDb {
                 }
                 Err(err) => {
                     return Err(err).with_context(|| {
-                        format!(
-                            "migrate track path old={} new={}",
-                            old_path, rel_path
-                        )
+                        format!("migrate track path old={} new={}", old_path, rel_path)
                     });
                 }
             }
@@ -333,45 +328,44 @@ impl MetadataDb {
                 WHERE t.path = ?1
                 "#,
                 params![&record_path],
-                |row| Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
-                )),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                    ))
+                },
             )
             .optional()
             .context("lookup existing track")?;
         let (existing_artist_id, existing_album_id, keep_album_link) = if let Some((
-                                                                                       mtime_ms,
-                                                                                       size_bytes,
-                                                                                       artist_id,
-                                                                                       album_id,
-                                                                                       track_mbid,
-                                                                                       _artist_mbid,
-                                                                                       album_mbid,
-                                                                                       album_title,
-                                                                                       album_artist,
-                                                                                       disc_number,
-                                                                                       bit_depth,
-                                                                                   )) = existing
+            mtime_ms,
+            size_bytes,
+            artist_id,
+            album_id,
+            track_mbid,
+            _artist_mbid,
+            album_mbid,
+            album_title,
+            album_artist,
+            disc_number,
+            bit_depth,
+        )) = existing
         {
             let album_title_same = match (record.album.as_deref(), album_title.as_deref()) {
                 (Some(a), Some(b)) => a == b,
                 (None, None) => true,
                 _ => false,
             };
-            let desired_album_artist = record
-                .album_artist
-                .as_deref()
-                .or(record.artist.as_deref());
+            let desired_album_artist = record.album_artist.as_deref().or(record.artist.as_deref());
             let album_artist_same = match (desired_album_artist, album_artist.as_deref()) {
                 (Some(a), Some(b)) => a == b,
                 (None, None) => true,
@@ -399,20 +393,23 @@ impl MetadataDb {
         } else {
             existing_artist_id
         };
-        let album_artist_id = if let Some(name) = record
-            .album_artist
-            .as_deref()
-            .or(record.artist.as_deref())
-        {
-            Some(upsert_artist(&tx, name)?)
-        } else {
-            None
-        };
+        let album_artist_id =
+            if let Some(name) = record.album_artist.as_deref().or(record.artist.as_deref()) {
+                Some(upsert_artist(&tx, name)?)
+            } else {
+                None
+            };
         let album_id = if keep_album_link {
             existing_album_id
         } else if let Some(title) = record.album.as_deref() {
             if let Some(uuid) = record.album_uuid.as_deref() {
-                Some(upsert_album_with_uuid(&tx, uuid, title, album_artist_id, record.year)?)
+                Some(upsert_album_with_uuid(
+                    &tx,
+                    uuid,
+                    title,
+                    album_artist_id,
+                    record.year,
+                )?)
             } else {
                 Some(upsert_album(&tx, title, album_artist_id, record.year)?)
             }
@@ -458,7 +455,7 @@ impl MetadataDb {
                 Option::<String>::None
             ],
         )
-            .context("upsert track")?;
+        .context("upsert track")?;
 
         if let Some(album_id) = album_id {
             tx.execute(
@@ -472,11 +469,7 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub fn apply_musicbrainz(
-        &self,
-        record: &TrackRecord,
-        mb: &MusicBrainzMatch,
-    ) -> Result<()> {
+    pub fn apply_musicbrainz(&self, record: &TrackRecord, mb: &MusicBrainzMatch) -> Result<()> {
         self.apply_musicbrainz_with_override(record, mb, false)
     }
 
@@ -506,15 +499,12 @@ impl MetadataDb {
         let album_id = if album_id.is_some() {
             album_id
         } else if let Some(title) = record.album.as_deref() {
-            let album_artist_id = if let Some(name) = record
-                .album_artist
-                .as_deref()
-                .or(record.artist.as_deref())
-            {
-                find_artist_id(&tx, name)?
-            } else {
-                None
-            };
+            let album_artist_id =
+                if let Some(name) = record.album_artist.as_deref().or(record.artist.as_deref()) {
+                    find_artist_id(&tx, name)?
+                } else {
+                    None
+                };
             find_album_id(&tx, title, album_artist_id)?
         } else {
             None
@@ -684,9 +674,8 @@ impl MetadataDb {
     pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
-        conn
-            .query_row(
-                r#"
+        conn.query_row(
+            r#"
                 SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title, al.uuid,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
                        t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
@@ -696,48 +685,37 @@ impl MetadataDb {
                 LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.path = ?1
                 "#,
-                params![db_path],
-                |row| {
-                    let path: String = row.get(0)?;
-                    Ok(TrackRecord {
-                        path: self.path_from_db(path),
-                        file_name: row.get(1)?,
-                        title: row.get(2)?,
-                        artist: row.get(3)?,
-                        album_artist: row.get(4)?,
-                        album: row.get(5)?,
-                        album_uuid: row.get(6)?,
-                        track_number: row
-                            .get::<_, Option<i64>>(7)?
-                            .map(|v| v as u32),
-                        disc_number: row
-                            .get::<_, Option<i64>>(8)?
-                            .map(|v| v as u32),
-                        year: row.get(9)?,
-                        duration_ms: row
-                            .get::<_, Option<i64>>(10)?
-                            .map(|v| v as u64),
-                        sample_rate: row
-                            .get::<_, Option<i64>>(11)?
-                            .map(|v| v as u32),
-                        bit_depth: row
-                            .get::<_, Option<i64>>(12)?
-                            .map(|v| v as u32),
-                        format: row.get(13)?,
-                        mtime_ms: row.get(14)?,
-                        size_bytes: row.get(15)?,
-                    })
-                },
-            )
-            .optional()
-            .context("fetch track record")
+            params![db_path],
+            |row| {
+                let path: String = row.get(0)?;
+                Ok(TrackRecord {
+                    path: self.path_from_db(path),
+                    file_name: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    album_artist: row.get(4)?,
+                    album: row.get(5)?,
+                    album_uuid: row.get(6)?,
+                    track_number: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
+                    disc_number: row.get::<_, Option<i64>>(8)?.map(|v| v as u32),
+                    year: row.get(9)?,
+                    duration_ms: row.get::<_, Option<i64>>(10)?.map(|v| v as u64),
+                    sample_rate: row.get::<_, Option<i64>>(11)?.map(|v| v as u32),
+                    bit_depth: row.get::<_, Option<i64>>(12)?.map(|v| v as u32),
+                    format: row.get(13)?,
+                    mtime_ms: row.get(14)?,
+                    size_bytes: row.get(15)?,
+                })
+            },
+        )
+        .optional()
+        .context("fetch track record")
     }
 
     pub fn track_record_by_id(&self, track_id: i64) -> Result<Option<TrackRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
-        conn
-            .query_row(
-                r#"
+        conn.query_row(
+            r#"
                 SELECT t.path, t.file_name, t.title, ar.name, aa.name, al.title, al.uuid,
                        t.track_number, t.disc_number, al.year, t.duration_ms,
                        t.sample_rate, t.bit_depth, t.format, t.mtime_ms, t.size_bytes
@@ -747,54 +725,43 @@ impl MetadataDb {
                 LEFT JOIN artists aa ON aa.id = al.artist_id
                 WHERE t.id = ?1
                 "#,
-                params![track_id],
-                |row| {
-                    let path: String = row.get(0)?;
-                    Ok(TrackRecord {
-                        path: self.path_from_db(path),
-                        file_name: row.get(1)?,
-                        title: row.get(2)?,
-                        artist: row.get(3)?,
-                        album_artist: row.get(4)?,
-                        album: row.get(5)?,
-                        album_uuid: row.get(6)?,
-                        track_number: row
-                            .get::<_, Option<i64>>(7)?
-                            .map(|v| v as u32),
-                        disc_number: row
-                            .get::<_, Option<i64>>(8)?
-                            .map(|v| v as u32),
-                        year: row.get(9)?,
-                        duration_ms: row
-                            .get::<_, Option<i64>>(10)?
-                            .map(|v| v as u64),
-                        sample_rate: row
-                            .get::<_, Option<i64>>(11)?
-                            .map(|v| v as u32),
-                        bit_depth: row
-                            .get::<_, Option<i64>>(12)?
-                            .map(|v| v as u32),
-                        format: row.get(13)?,
-                        mtime_ms: row.get(14)?,
-                        size_bytes: row.get(15)?,
-                    })
-                },
-            )
-            .optional()
-            .context("fetch track record")
+            params![track_id],
+            |row| {
+                let path: String = row.get(0)?;
+                Ok(TrackRecord {
+                    path: self.path_from_db(path),
+                    file_name: row.get(1)?,
+                    title: row.get(2)?,
+                    artist: row.get(3)?,
+                    album_artist: row.get(4)?,
+                    album: row.get(5)?,
+                    album_uuid: row.get(6)?,
+                    track_number: row.get::<_, Option<i64>>(7)?.map(|v| v as u32),
+                    disc_number: row.get::<_, Option<i64>>(8)?.map(|v| v as u32),
+                    year: row.get(9)?,
+                    duration_ms: row.get::<_, Option<i64>>(10)?.map(|v| v as u64),
+                    sample_rate: row.get::<_, Option<i64>>(11)?.map(|v| v as u32),
+                    bit_depth: row.get::<_, Option<i64>>(12)?.map(|v| v as u32),
+                    format: row.get(13)?,
+                    mtime_ms: row.get(14)?,
+                    size_bytes: row.get(15)?,
+                })
+            },
+        )
+        .optional()
+        .context("fetch track record")
     }
 
     pub fn track_id_for_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
-        conn
-            .query_row(
-                "SELECT id FROM tracks WHERE path = ?1",
-                params![db_path],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("fetch track id for path")
+        conn.query_row(
+            "SELECT id FROM tracks WHERE path = ?1",
+            params![db_path],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("fetch track id for path")
     }
 
     pub fn track_path_for_id(&self, track_id: i64) -> Result<Option<String>> {
@@ -813,14 +780,13 @@ impl MetadataDb {
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
-        conn
-            .query_row(
-                "SELECT album_id FROM tracks WHERE path = ?1",
-                params![db_path],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("fetch album id for track")
+        conn.query_row(
+            "SELECT album_id FROM tracks WHERE path = ?1",
+            params![db_path],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("fetch album id for track")
     }
 
     pub fn album_marker_candidates(&self) -> Result<Vec<AlbumMarkerCandidate>> {
@@ -869,10 +835,7 @@ impl MetadataDb {
         .context("lookup album uuid by title/artist")
     }
 
-    pub fn list_musicbrainz_candidates(
-        &self,
-        limit: i64,
-    ) -> Result<Vec<MusicBrainzCandidate>> {
+    pub fn list_musicbrainz_candidates(&self, limit: i64) -> Result<Vec<MusicBrainzCandidate>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
             r#"
@@ -907,11 +870,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
-    pub fn album_cover_path(
-        &self,
-        album: &str,
-        artist: Option<&str>,
-    ) -> Result<Option<String>> {
+    pub fn album_cover_path(&self, album: &str, artist: Option<&str>) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let artist_id = if let Some(artist) = artist {
             find_artist_id(&conn, artist)?
@@ -1008,11 +967,7 @@ impl MetadataDb {
         Ok(cover.filter(|value| !value.trim().is_empty()))
     }
 
-    pub fn set_album_cover_by_id_if_empty(
-        &self,
-        album_id: i64,
-        cover_path: &str,
-    ) -> Result<bool> {
+    pub fn set_album_cover_by_id_if_empty(&self, album_id: i64, cover_path: &str) -> Result<bool> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
         let updated = tx.execute(
@@ -1046,11 +1001,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
-    pub fn increment_cover_art_fail(
-        &self,
-        album_id: i64,
-        error: &str,
-    ) -> Result<i64> {
+    pub fn increment_cover_art_fail(&self, album_id: i64, error: &str) -> Result<i64> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.execute(
             "UPDATE albums SET caa_fail_count = COALESCE(caa_fail_count, 0) + 1, caa_last_error = ?1 WHERE id = ?2",
@@ -1118,7 +1069,12 @@ impl MetadataDb {
         Ok(())
     }
 
-    pub fn list_artists(&self, search: Option<&str>, limit: i64, offset: i64) -> Result<Vec<ArtistSummary>> {
+    pub fn list_artists(
+        &self,
+        search: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ArtistSummary>> {
         let conn = self.pool.get().context("open metadata db")?;
         let search_like = search.map(|s| format!("%{}%", s.to_lowercase()));
         let mut stmt = if search_like.is_some() {
@@ -1191,8 +1147,51 @@ impl MetadataDb {
             LIMIT ?3 OFFSET ?4
             "#,
         )?;
-        let rows = stmt.query_map(
-            params![artist_id, search_like, limit, offset],
+        let rows = stmt.query_map(params![artist_id, search_like, limit, offset], |row| {
+            let album_id: i64 = row.get(0)?;
+            let cover_path: Option<String> = row.get(11)?;
+            let max_bit_depth: Option<i64> = row.get(12)?;
+            let hi_res = max_bit_depth.unwrap_or(0) >= 24;
+            let cover_art_url = cover_path
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(|_| format!("/albums/{}/cover", album_id));
+            Ok(AlbumSummary {
+                id: album_id,
+                uuid: row.get(1)?,
+                title: row.get(2)?,
+                artist: row.get(3)?,
+                artist_id: row.get(4)?,
+                year: row.get(5)?,
+                original_year: row.get(6)?,
+                edition_year: row.get(7)?,
+                edition_label: row.get(8)?,
+                mbid: row.get(9)?,
+                track_count: row.get(10)?,
+                cover_art_path: cover_path,
+                cover_art_url,
+                hi_res,
+            })
+        })?;
+
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>> {
+        let conn = self.pool.get().context("open metadata db")?;
+        conn.query_row(
+            r#"
+                SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year,
+                       al.original_year, al.edition_year, al.edition_label, al.mbid,
+                       COUNT(t.id) AS track_count, al.cover_art_path,
+                       MAX(t.bit_depth) AS max_bit_depth
+                FROM albums al
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN tracks t ON t.album_id = al.id
+                WHERE al.id = ?1
+                GROUP BY al.id
+                "#,
+            params![album_id],
             |row| {
                 let album_id: i64 = row.get(0)?;
                 let cover_path: Option<String> = row.get(11)?;
@@ -1219,56 +1218,9 @@ impl MetadataDb {
                     hi_res,
                 })
             },
-        )?;
-
-        Ok(rows.filter_map(Result::ok).collect())
-    }
-
-    pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>> {
-        let conn = self.pool.get().context("open metadata db")?;
-        conn
-            .query_row(
-                r#"
-                SELECT al.id, al.uuid, al.title, ar.name, al.artist_id, al.year,
-                       al.original_year, al.edition_year, al.edition_label, al.mbid,
-                       COUNT(t.id) AS track_count, al.cover_art_path,
-                       MAX(t.bit_depth) AS max_bit_depth
-                FROM albums al
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-                LEFT JOIN tracks t ON t.album_id = al.id
-                WHERE al.id = ?1
-                GROUP BY al.id
-                "#,
-                params![album_id],
-                |row| {
-                    let album_id: i64 = row.get(0)?;
-                    let cover_path: Option<String> = row.get(11)?;
-                    let max_bit_depth: Option<i64> = row.get(12)?;
-                    let hi_res = max_bit_depth.unwrap_or(0) >= 24;
-                    let cover_art_url = cover_path
-                        .as_deref()
-                        .filter(|value| !value.trim().is_empty())
-                        .map(|_| format!("/albums/{}/cover", album_id));
-                    Ok(AlbumSummary {
-                        id: album_id,
-                        uuid: row.get(1)?,
-                        title: row.get(2)?,
-                        artist: row.get(3)?,
-                        artist_id: row.get(4)?,
-                        year: row.get(5)?,
-                        original_year: row.get(6)?,
-                        edition_year: row.get(7)?,
-                        edition_label: row.get(8)?,
-                        mbid: row.get(9)?,
-                        track_count: row.get(10)?,
-                        cover_art_path: cover_path,
-                        cover_art_url,
-                        hi_res,
-                    })
-                },
-            )
-            .optional()
-            .context("select album summary by id")
+        )
+        .optional()
+        .context("select album summary by id")
     }
 
     pub fn artist_exists(&self, artist_id: i64) -> Result<bool> {
@@ -1770,12 +1722,14 @@ fn relative_from_absolute(path: &Path, media_root: &Path) -> Option<PathBuf> {
 }
 
 fn is_blank(value: &Option<String>) -> bool {
-    value.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true)
+    value
+        .as_deref()
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true)
 }
 
 fn backfill_uuids(conn: &Connection, table: &str) -> Result<()> {
-    let mut stmt = conn
-        .prepare(&format!("SELECT id FROM {table} WHERE uuid IS NULL"))?;
+    let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE uuid IS NULL"))?;
     let ids = stmt.query_map([], |row| row.get::<_, i64>(0))?;
     for id in ids.filter_map(Result::ok) {
         let uuid = Uuid::new_v4().to_string();
@@ -1808,7 +1762,11 @@ fn ensure_row_uuid(conn: &Connection, table: &str, id: i64) -> Result<()> {
         )
         .optional()
         .with_context(|| format!("select {table} uuid"))?;
-    if existing.as_deref().map(|v| v.trim().is_empty()).unwrap_or(true) {
+    if existing
+        .as_deref()
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true)
+    {
         let uuid = Uuid::new_v4().to_string();
         conn.execute(
             &format!("UPDATE {table} SET uuid = ?1 WHERE id = ?2"),
@@ -1986,8 +1944,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
         return Ok(());
     }
     if version < 4 {
-        conn.execute("ALTER TABLE albums ADD COLUMN caa_release_candidates TEXT", [])
-            .context("migrate albums caa_release_candidates")?;
+        conn.execute(
+            "ALTER TABLE albums ADD COLUMN caa_release_candidates TEXT",
+            [],
+        )
+        .context("migrate albums caa_release_candidates")?;
         conn.execute(
             "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
             params![SCHEMA_VERSION.to_string()],
@@ -2198,7 +2159,12 @@ fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
     Ok(id)
 }
 
-fn upsert_album(conn: &Connection, title: &str, artist_id: Option<i64>, year: Option<i32>) -> Result<i64> {
+fn upsert_album(
+    conn: &Connection,
+    title: &str,
+    artist_id: Option<i64>,
+    year: Option<i32>,
+) -> Result<i64> {
     conn.execute(
         "INSERT OR IGNORE INTO albums (uuid, title, artist_id, year, sort_title) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![Uuid::new_v4().to_string(), title, artist_id, year, title.to_lowercase()],

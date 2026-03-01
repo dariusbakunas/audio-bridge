@@ -8,10 +8,9 @@
 //! The API is designed to make shutdown deterministic (`close()` + draining semantics)
 //! while keeping the playback callback real-time friendly.
 
-
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Thread-safe bounded queue for interleaved `f32` audio samples.
@@ -296,10 +295,7 @@ pub fn wait_until_done_and_empty_or_cancel(q: &Arc<SharedAudio>, cancel: &Arc<At
             return true;
         }
 
-        let (ng, _timeout) = q
-            .cv
-            .wait_timeout(g, Duration::from_millis(50))
-            .unwrap();
+        let (ng, _timeout) = q.cv.wait_timeout(g, Duration::from_millis(50)).unwrap();
         g = ng;
     }
 }
@@ -358,8 +354,7 @@ mod tests {
                 .pop(PopStrategy::BlockingUpTo { max_frames: 8 })
                 .unwrap();
             assert_eq!(out.len(), 4);
-            let out2 = q_pop
-                .pop(PopStrategy::BlockingUpTo { max_frames: 8 });
+            let out2 = q_pop.pop(PopStrategy::BlockingUpTo { max_frames: 8 });
             assert!(out2.is_none());
         });
 

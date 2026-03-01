@@ -12,7 +12,7 @@ use prost::Message;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, ClientConnection, SignatureScheme, StreamOwned};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::bridge::BridgeCommand;
 use crate::events::EventBus;
@@ -160,7 +160,11 @@ pub fn spawn_cast_worker(
         let mut pending_pause_toggle = false;
         let mut stop_in_flight = false;
 
-        let _ = conn.send_json(RECEIVER_ID, NAMESPACE_CONNECTION, &json!({ "type": "CONNECT" }));
+        let _ = conn.send_json(
+            RECEIVER_ID,
+            NAMESPACE_CONNECTION,
+            &json!({ "type": "CONNECT" }),
+        );
 
         loop {
             match cmd_rx.try_recv() {
@@ -169,7 +173,8 @@ pub fn spawn_cast_worker(
                     BridgeCommand::PauseToggle => {
                         if let Some(session) = session.as_ref() {
                             if let Some(media_session_id) = session.media_session_id {
-                                let paused = cast_current_paused(&output_id, &cast_statuses, &status);
+                                let paused =
+                                    cast_current_paused(&output_id, &cast_statuses, &status);
                                 tracing::info!(
                                     output_id = %output_id,
                                     cast_id = %device.id,
@@ -255,7 +260,12 @@ pub fn spawn_cast_worker(
                             }
                         }
                     }
-                    BridgeCommand::Play { path, ext_hint, seek_ms, start_paused } => {
+                    BridgeCommand::Play {
+                        path,
+                        ext_hint,
+                        seek_ms,
+                        start_paused,
+                    } => {
                         stop_in_flight = false;
                         pending_play = Some((path, ext_hint, seek_ms, start_paused));
                         ensure_session(&mut conn, &mut session, &device, &mut request_id);
@@ -268,7 +278,8 @@ pub fn spawn_cast_worker(
             if let Some((path, ext_hint, seek_ms, start_paused)) = pending_play.take() {
                 if let Some(session) = session.as_ref() {
                     current_path = Some(path.clone());
-                    let url = match build_stream_url_for(&path, &public_base_url, metadata.as_ref()) {
+                    let url = match build_stream_url_for(&path, &public_base_url, metadata.as_ref())
+                    {
                         Ok(url) => url,
                         Err(err) => {
                             tracing::warn!(error = %err, path = %path.display(), "cast stream url build failed");
@@ -294,7 +305,8 @@ pub fn spawn_cast_worker(
             }
 
             if last_ping.elapsed() > Duration::from_secs(5) {
-                let _ = conn.send_json(RECEIVER_ID, NAMESPACE_HEARTBEAT, &json!({ "type": "PING" }));
+                let _ =
+                    conn.send_json(RECEIVER_ID, NAMESPACE_HEARTBEAT, &json!({ "type": "PING" }));
                 last_ping = Instant::now();
             }
             if last_status_poll.elapsed() > Duration::from_millis(500) {
@@ -408,7 +420,9 @@ fn handle_message(
         return;
     }
     let payload = msg.payload_utf8.unwrap_or_default();
-    let Ok(value) = serde_json::from_str::<Value>(&payload) else { return };
+    let Ok(value) = serde_json::from_str::<Value>(&payload) else {
+        return;
+    };
     let msg_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match msg.namespace.as_str() {
@@ -470,7 +484,8 @@ fn handle_message(
                         "cast media status parsed"
                     );
                     if let Some(sess) = session.as_mut() {
-                        sess.media_session_id = status_info.media_session_id.or(sess.media_session_id);
+                        sess.media_session_id =
+                            status_info.media_session_id.or(sess.media_session_id);
                         if *pending_pause_toggle {
                             if let Some(media_session_id) = sess.media_session_id {
                                 let paused = cast_current_paused(output_id, cast_statuses, status);
@@ -559,14 +574,23 @@ fn cast_current_paused(
         .lock()
         .ok()
         .and_then(|map| map.get(output_id).map(|s| s.paused))
-        .unwrap_or_else(|| status.inner().lock().ok().map(|s| s.paused).unwrap_or(false))
+        .unwrap_or_else(|| {
+            status
+                .inner()
+                .lock()
+                .ok()
+                .map(|s| s.paused)
+                .unwrap_or(false)
+        })
 }
 
 fn is_active_cast_output(
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
     device_id: &str,
 ) -> bool {
-    let Ok(guard) = bridge_state.lock() else { return false };
+    let Ok(guard) = bridge_state.lock() else {
+        return false;
+    };
     let expected = format!("cast:{device_id}");
     guard.active_output_id.as_deref() == Some(expected.as_str())
 }
@@ -615,7 +639,9 @@ fn apply_media_status(
     if should_clear {
         *current_path = None;
     }
-    remote.now_playing = current_path.as_ref().map(|path| path.to_string_lossy().to_string());
+    remote.now_playing = current_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
     let prior_paused = status
         .inner()
         .lock()
@@ -645,10 +671,13 @@ fn apply_media_status(
     let should_session_advance = end_reason == Some(PlaybackEndReason::Eof);
     if should_session_advance && !*session_auto_advance_in_flight {
         if let Some(session_id) = bound_session_id.as_deref() {
-            if let Ok(Some(next_track_id)) = crate::session_registry::queue_next_track_id(session_id) {
+            if let Ok(Some(next_track_id)) =
+                crate::session_registry::queue_next_track_id(session_id)
+            {
                 let Some(next_path) = metadata
                     .and_then(|db| db.track_path_for_id(next_track_id).ok().flatten())
-                    .map(PathBuf::from) else {
+                    .map(PathBuf::from)
+                else {
                     tracing::warn!(
                         output_id = %output_id,
                         session_id = %session_id,
@@ -672,8 +701,9 @@ fn apply_media_status(
                 *session_auto_advance_in_flight = true;
                 if let Ok(mut statuses) = cast_statuses.lock() {
                     let mut next_remote = remote.clone();
-                    next_remote.now_playing =
-                        current_path.as_ref().map(|path| path.to_string_lossy().to_string());
+                    next_remote.now_playing = current_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().to_string());
                     next_remote.paused = false;
                     next_remote.elapsed_ms = None;
                     next_remote.end_reason = None;
@@ -734,8 +764,14 @@ fn parse_media_status(payload: &Value) -> Option<MediaStatus> {
     let statuses = payload.get("status")?.as_array()?;
     let status = statuses.first()?;
     let media_session_id = status.get("mediaSessionId").and_then(|v| v.as_i64());
-    let player_state = status.get("playerState").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let idle_reason = status.get("idleReason").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let player_state = status
+        .get("playerState")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let idle_reason = status
+        .get("idleReason")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let current_time_s = status.get("currentTime").and_then(|v| v.as_f64());
     let duration_s = status
         .get("media")
@@ -817,8 +853,7 @@ struct TrackMetadata {
 
 fn track_metadata(path: &PathBuf, metadata: Option<&MetadataDb>) -> TrackMetadata {
     let path_str = path.to_string_lossy().to_string();
-    let record = metadata
-        .and_then(|db| db.track_record_by_path(&path_str).ok().flatten());
+    let record = metadata.and_then(|db| db.track_record_by_path(&path_str).ok().flatten());
     TrackMetadata {
         path: path_str,
         title: record.as_ref().and_then(|r| r.title.clone()),
@@ -863,7 +898,10 @@ fn server_name_for(host: &str) -> ServerName<'static> {
 }
 
 fn is_timeout(err: &std::io::Error) -> bool {
-    matches!(err.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 #[derive(Debug)]

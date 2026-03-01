@@ -1,8 +1,8 @@
 //! Session management API handlers.
 
-use actix_web::{get, post, web, Error, HttpRequest, HttpResponse, Responder};
 use actix_web::http::header;
 use actix_web::web::Bytes;
+use actix_web::{Error, HttpRequest, HttpResponse, Responder, get, post, web};
 use futures_util::{Stream, stream::unfold};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -16,29 +16,12 @@ use utoipa::ToSchema;
 
 use crate::events::HubEvent;
 use crate::models::{
-    LocalPlaybackPlayResponse,
-    OutputInUseError,
-    QueueAddRequest,
-    QueueClearRequest,
-    QueuePlayFromRequest,
-    QueueRemoveRequest,
-    QueueResponse,
-    SessionCreateRequest,
-    SessionCreateResponse,
-    SessionDetailResponse,
-    SessionDeleteResponse,
-    SessionHeartbeatRequest,
-    SessionLockInfo,
-    SessionLocksResponse,
-    SessionMuteRequest,
-    SessionReleaseOutputResponse,
-    SessionSelectOutputRequest,
-    SessionSelectOutputResponse,
-    SessionSummary,
-    SessionVolumeResponse,
-    SessionVolumeSetRequest,
-    SessionsListResponse,
-    StatusResponse,
+    LocalPlaybackPlayResponse, OutputInUseError, QueueAddRequest, QueueClearRequest,
+    QueuePlayFromRequest, QueueRemoveRequest, QueueResponse, SessionCreateRequest,
+    SessionCreateResponse, SessionDeleteResponse, SessionDetailResponse, SessionHeartbeatRequest,
+    SessionLockInfo, SessionLocksResponse, SessionMuteRequest, SessionReleaseOutputResponse,
+    SessionSelectOutputRequest, SessionSelectOutputResponse, SessionSummary, SessionVolumeResponse,
+    SessionVolumeSetRequest, SessionsListResponse, StatusResponse,
 };
 use crate::session_playback_manager::SessionPlaybackError;
 use crate::state::AppState;
@@ -194,7 +177,11 @@ pub async fn sessions_create(body: web::Json<SessionCreateRequest>) -> impl Resp
 #[get("/sessions")]
 /// List known sessions.
 pub async fn sessions_list(query: web::Query<SessionViewerQuery>) -> impl Responder {
-    let viewer_client_id = query.client_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let viewer_client_id = query
+        .client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let sessions = crate::session_registry::list_sessions_visible(viewer_client_id)
         .into_iter()
         .map(|s| SessionSummary {
@@ -254,8 +241,13 @@ pub async fn sessions_get(
     query: web::Query<SessionViewerQuery>,
 ) -> impl Responder {
     let session_id = id.into_inner();
-    let viewer_client_id = query.client_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let Some(s) = crate::session_registry::get_session_visible(&session_id, viewer_client_id) else {
+    let viewer_client_id = query
+        .client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let Some(s) = crate::session_registry::get_session_visible(&session_id, viewer_client_id)
+    else {
         return HttpResponse::NotFound().body("session not found");
     };
     HttpResponse::Ok().json(SessionDetailResponse {
@@ -337,12 +329,18 @@ pub async fn sessions_select_output(
             return HttpResponse::NotFound().body("session not found");
         };
         if !matches!(session.mode, crate::models::SessionMode::Local) {
-            return HttpResponse::BadRequest().body("browser outputs can only be selected by local sessions");
+            return HttpResponse::BadRequest()
+                .body("browser outputs can only be selected by local sessions");
         }
     }
     let previous_output_id = crate::session_registry::get_session(&session_id)
         .and_then(|session| session.active_output_id);
-    let pre_switch_status = state.output.session_playback.status(&state, &session_id).await.ok();
+    let pre_switch_status = state
+        .output
+        .session_playback
+        .status(&state, &session_id)
+        .await
+        .ok();
     let resume_path = pre_switch_status
         .as_ref()
         .and_then(|status| status.now_playing_track_id)
@@ -355,13 +353,20 @@ pub async fn sessions_select_output(
                 .and_then(|track_id| state.metadata.db.track_path_for_id(track_id).ok().flatten())
                 .map(PathBuf::from)
         });
-    let resume_elapsed_ms = pre_switch_status.as_ref().and_then(|status| status.elapsed_ms);
+    let resume_elapsed_ms = pre_switch_status
+        .as_ref()
+        .and_then(|status| status.elapsed_ms);
     let resume_paused = pre_switch_status
         .as_ref()
         .map(|status| status.paused)
         .unwrap_or(false);
     if previous_output_id.as_deref() != Some(output_id.as_str()) && resume_path.is_some() {
-        if let Err(err) = state.output.session_playback.stop(&state, &session_id).await {
+        if let Err(err) = state
+            .output
+            .session_playback
+            .stop(&state, &session_id)
+            .await
+        {
             tracing::warn!(
                 session_id = %session_id,
                 previous_output_id = ?previous_output_id,
@@ -472,10 +477,7 @@ pub async fn sessions_release_output(
 )]
 #[actix_web::delete("/sessions/{id}")]
 /// Delete a session and release any held output lock.
-pub async fn sessions_delete(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn sessions_delete(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
     let session_id = id.into_inner();
     if let Some(session) = crate::session_registry::get_session(&session_id) {
         if PROTECTED_SESSION_NAMES
@@ -485,7 +487,12 @@ pub async fn sessions_delete(
             return HttpResponse::Forbidden().body("default session cannot be deleted");
         }
         if session.active_output_id.is_some() {
-            if let Err(err) = state.output.session_playback.stop(&state, &session_id).await {
+            if let Err(err) = state
+                .output
+                .session_playback
+                .stop(&state, &session_id)
+                .await
+            {
                 return err.into_response();
             }
         }
@@ -517,12 +524,14 @@ pub async fn sessions_delete(
 )]
 #[get("/sessions/{id}/status")]
 /// Return playback status for the output bound to this session.
-pub async fn sessions_status(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn sessions_status(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
     let session_id = id.into_inner();
-    match state.output.session_playback.status(&state, &session_id).await {
+    match state
+        .output
+        .session_playback
+        .status(&state, &session_id)
+        .await
+    {
         Ok(resp) => {
             cache_session_status(&state, &session_id, &resp);
             HttpResponse::Ok().json(resp)
@@ -554,12 +563,14 @@ pub async fn sessions_status(
 )]
 #[get("/sessions/{id}/volume")]
 /// Return volume state for the output bound to this session.
-pub async fn sessions_volume(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn sessions_volume(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
     let session_id = id.into_inner();
-    match state.output.session_playback.volume(&state, &session_id).await {
+    match state
+        .output
+        .session_playback
+        .volume(&state, &session_id)
+        .await
+    {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err(err) => err.into_response(),
     }
@@ -654,7 +665,12 @@ pub async fn sessions_status_stream(
     id: web::Path<String>,
 ) -> impl Responder {
     let session_id = id.into_inner();
-    let initial = match state.output.session_playback.status(&state, &session_id).await {
+    let initial = match state
+        .output
+        .session_playback
+        .status(&state, &session_id)
+        .await
+    {
         Ok(resp) => {
             cache_session_status(&state, &session_id, &resp);
             resp
@@ -718,15 +734,16 @@ pub async fn sessions_status_stream(
                         .await
                     {
                         cache_session_status(&ctx.state, &ctx.session_id, &status);
-                        let json = serde_json::to_string(&status)
-                            .unwrap_or_else(|_| "null".to_string());
+                        let json =
+                            serde_json::to_string(&status).unwrap_or_else(|_| "null".to_string());
                         if ctx.last_status.as_deref() != Some(json.as_str()) {
                             ctx.last_status = Some(json.clone());
                             ctx.pending.push_back(session_sse_event("status", &json));
                         }
-                    } else if let Some(status) = cached_session_status(&ctx.state, &ctx.session_id) {
-                        let json = serde_json::to_string(&status)
-                            .unwrap_or_else(|_| "null".to_string());
+                    } else if let Some(status) = cached_session_status(&ctx.state, &ctx.session_id)
+                    {
+                        let json =
+                            serde_json::to_string(&status).unwrap_or_else(|_| "null".to_string());
                         if ctx.last_status.as_deref() != Some(json.as_str()) {
                             ctx.last_status = Some(json.clone());
                             ctx.pending.push_back(session_sse_event("status", &json));
@@ -810,8 +827,8 @@ pub async fn sessions_queue_stream(
                 if refresh {
                     if let Ok(snapshot) = crate::session_registry::queue_snapshot(&ctx.session_id) {
                         let queue = build_queue_response(&ctx.state, snapshot);
-                        let json = serde_json::to_string(&queue)
-                            .unwrap_or_else(|_| "null".to_string());
+                        let json =
+                            serde_json::to_string(&queue).unwrap_or_else(|_| "null".to_string());
                         if ctx.last_queue.as_deref() != Some(json.as_str()) {
                             ctx.last_queue = Some(json.clone());
                             ctx.pending.push_back(session_sse_event("queue", &json));
@@ -842,12 +859,14 @@ pub async fn sessions_queue_stream(
 )]
 #[post("/sessions/{id}/pause")]
 /// Toggle pause/resume for the session output.
-pub async fn sessions_pause(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn sessions_pause(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
     let session_id = id.into_inner();
-    match state.output.session_playback.pause_toggle(&state, &session_id).await {
+    match state
+        .output
+        .session_playback
+        .pause_toggle(&state, &session_id)
+        .await
+    {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -901,12 +920,14 @@ pub async fn sessions_seek(
 )]
 #[post("/sessions/{id}/stop")]
 /// Stop playback for the session output.
-pub async fn sessions_stop(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn sessions_stop(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
     let session_id = id.into_inner();
-    match state.output.session_playback.stop(&state, &session_id).await {
+    match state
+        .output
+        .session_playback
+        .stop(&state, &session_id)
+        .await
+    {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -1050,14 +1071,15 @@ fn is_local_session(session_id: &str) -> bool {
     )
 }
 
-fn canonical_track_path_by_id(
-    state: &web::Data<AppState>,
-    track_id: i64,
-) -> Option<PathBuf> {
+fn canonical_track_path_by_id(state: &web::Data<AppState>, track_id: i64) -> Option<PathBuf> {
     let raw_path = match state.metadata.db.track_path_for_id(track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id, reason = "track_id_not_found", "queue track path lookup failed");
+            tracing::warn!(
+                track_id,
+                reason = "track_id_not_found",
+                "queue track path lookup failed"
+            );
             return None;
         }
         Err(err) => {
@@ -1079,16 +1101,17 @@ fn canonical_track_path_by_id(
     }
 }
 
-fn resolve_queue_add_track_ids(
-    state: &web::Data<AppState>,
-    body: &QueueAddRequest,
-) -> Vec<i64> {
+fn resolve_queue_add_track_ids(state: &web::Data<AppState>, body: &QueueAddRequest) -> Vec<i64> {
     let mut resolved = Vec::new();
     for track_id in &body.track_ids {
         if canonical_track_path_by_id(state, *track_id).is_some() {
             resolved.push(*track_id);
         } else {
-            tracing::warn!(track_id, reason = "track_path_missing", "queue add dropped unknown track id");
+            tracing::warn!(
+                track_id,
+                reason = "track_path_missing",
+                "queue add dropped unknown track id"
+            );
         }
     }
     resolved
@@ -1100,11 +1123,12 @@ fn build_local_playback_response(
 ) -> Result<LocalPlaybackPlayResponse, HttpResponse> {
     let conn = req.connection_info();
     let base_url = format!("{}://{}", conn.scheme(), conn.host());
-    let url = format!("{}/stream/track/{}", base_url.trim_end_matches('/'), track_id);
-    Ok(LocalPlaybackPlayResponse {
-        url,
-        track_id,
-    })
+    let url = format!(
+        "{}/stream/track/{}",
+        base_url.trim_end_matches('/'),
+        track_id
+    );
+    Ok(LocalPlaybackPlayResponse { url, track_id })
 }
 
 #[utoipa::path(
@@ -1120,7 +1144,10 @@ fn build_local_playback_response(
 )]
 #[get("/sessions/{id}/queue")]
 /// Return queue for a session.
-pub async fn sessions_queue_list(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+pub async fn sessions_queue_list(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+) -> impl Responder {
     let session_id = id.into_inner();
     if let Err(resp) = require_session(&session_id) {
         return resp;
@@ -1276,7 +1303,11 @@ pub async fn sessions_queue_play_from(
 
     let canonical = {
         let candidate = PathBuf::from(&path);
-        match state.output.controller.canonicalize_under_root(&state, &candidate) {
+        match state
+            .output
+            .controller
+            .canonicalize_under_root(&state, &candidate)
+        {
             Ok(path) => path,
             Err(err) => return err.into_response(),
         }
@@ -1301,7 +1332,12 @@ pub async fn sessions_queue_play_from(
         return HttpResponse::Ok().json(payload);
     }
 
-    match state.output.session_playback.play_path(&state, &session_id, canonical).await {
+    match state
+        .output
+        .session_playback
+        .play_path(&state, &session_id, canonical)
+        .await
+    {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -1525,7 +1561,13 @@ fn build_queue_item(
     now_playing: bool,
     played: bool,
 ) -> crate::models::QueueItem {
-    let record = match state.metadata.db.track_record_by_id(track_id).ok().flatten() {
+    let record = match state
+        .metadata
+        .db
+        .track_record_by_id(track_id)
+        .ok()
+        .flatten()
+    {
         Some(record) => record,
         None => return crate::models::QueueItem::Missing { id: Some(track_id) },
     };
@@ -1556,8 +1598,8 @@ mod tests {
     use crate::events::{EventBus, LogBus};
     use crate::models::{SessionMode, SessionSelectOutputRequest};
     use crate::state::{
-        BridgeProviderState, BridgeState, CastProviderState, DeviceSelectionState, LocalProviderState,
-        MetadataWake, PlayerStatus, QueueState,
+        BridgeProviderState, BridgeState, CastProviderState, DeviceSelectionState,
+        LocalProviderState, MetadataWake, PlayerStatus, QueueState,
     };
 
     fn make_state() -> web::Data<AppState> {
@@ -1591,7 +1633,9 @@ mod tests {
             enabled: false,
             id: "local".to_string(),
             name: "Local Host".to_string(),
-            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+            player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+                cmd_tx: local_cmd_tx,
+            })),
             running: Arc::new(AtomicBool::new(false)),
         });
 
@@ -1599,7 +1643,8 @@ mod tests {
         let events = EventBus::new();
         let status_store = crate::status_store::StatusStore::new(status, events.clone());
         let queue = Arc::new(Mutex::new(QueueState::default()));
-        let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
+        let queue_service =
+            crate::queue_service::QueueService::new(queue, status_store.clone(), events.clone());
         let playback_manager = crate::playback_manager::PlaybackManager::new(
             bridge_state.player.clone(),
             status_store,
@@ -1680,7 +1725,12 @@ mod tests {
             );
         }
         {
-            let library_root = state.library.read().expect("library lock").root().to_path_buf();
+            let library_root = state
+                .library
+                .read()
+                .expect("library lock")
+                .root()
+                .to_path_buf();
             let track_path = library_root.join("test-track.flac");
             std::fs::write(&track_path, b"fixture").expect("write track fixture");
             let fs_meta = std::fs::metadata(&track_path).expect("track fixture metadata");
@@ -1764,13 +1814,17 @@ mod tests {
         );
         crate::session_registry::bind_output(&session_id, &old_output_id, false)
             .expect("bind old output");
-        crate::session_registry::queue_add_track_ids(&session_id, vec![track_id]).expect("queue add");
+        crate::session_registry::queue_add_track_ids(&session_id, vec![track_id])
+            .expect("queue add");
         let found = crate::session_registry::queue_play_from(&session_id, track_id)
             .expect("queue play_from");
         assert!(found, "queued track should be found");
 
         let req = actix_web::test::TestRequest::post()
-            .uri(&format!("/sessions/{}/select-output", urlencoding::encode(&session_id)))
+            .uri(&format!(
+                "/sessions/{}/select-output",
+                urlencoding::encode(&session_id)
+            ))
             .set_json(SessionSelectOutputRequest {
                 output_id: new_output_id.clone(),
                 force: false,

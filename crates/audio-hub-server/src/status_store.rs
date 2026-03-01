@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use audio_bridge_types::BridgeStatus;
 
-use crate::queue_service::AutoAdvanceInputs;
 use crate::events::EventBus;
+use crate::queue_service::AutoAdvanceInputs;
 use crate::state::PlayerStatus;
 
 /// Shared playback status tracker and update entry points.
@@ -33,7 +33,9 @@ impl StatusStore {
     where
         F: FnOnce(&mut PlayerStatus),
     {
-        let Ok(mut s) = self.inner.lock() else { return false };
+        let Ok(mut s) = self.inner.lock() else {
+            return false;
+        };
         let prev = s.clone();
         f(&mut s);
         *s != prev
@@ -43,7 +45,9 @@ impl StatusStore {
     where
         F: FnOnce(&mut PlayerStatus) -> R,
     {
-        let Ok(mut s) = self.inner.lock() else { return None };
+        let Ok(mut s) = self.inner.lock() else {
+            return None;
+        };
         let prev = s.clone();
         let result = f(&mut s);
         Some((result, *s != prev))
@@ -217,9 +221,7 @@ impl StatusStore {
         remote: &BridgeStatus,
         last_duration_ms: Option<u64>,
     ) -> (AutoAdvanceInputs, bool) {
-        let result = self.update_status_with(|s| {
-            reduce_remote_status(s, remote, last_duration_ms)
-        });
+        let result = self.update_status_with(|s| reduce_remote_status(s, remote, last_duration_ms));
         let Some((inputs, changed)) = result else {
             return (
                 AutoAdvanceInputs {
@@ -241,7 +243,6 @@ impl StatusStore {
         (inputs, changed)
     }
 
-
     fn apply_remote_status(
         state: &mut PlayerStatus,
         remote: &BridgeStatus,
@@ -249,11 +250,7 @@ impl StatusStore {
     ) -> AutoAdvanceInputs {
         let prior_paused = state.paused;
         if prior_paused != remote.paused {
-            tracing::debug!(
-                prior_paused,
-                paused = remote.paused,
-                "bridge status update"
-            );
+            tracing::debug!(prior_paused, paused = remote.paused, "bridge status update");
         }
         let was_playing = state.now_playing.is_some();
         if state.now_playing.is_none() {
@@ -309,7 +306,11 @@ impl StatusStore {
             seek_in_flight: state.seek_in_flight,
             auto_advance_in_flight: state.auto_advance_in_flight,
             manual_advance_in_flight: state.manual_advance_in_flight,
-            now_playing: if should_clear { was_playing } else { state.now_playing.is_some() },
+            now_playing: if should_clear {
+                was_playing
+            } else {
+                state.now_playing.is_some()
+            },
         }
     }
 }
@@ -633,7 +634,10 @@ mod tests {
 
         let _ = store.reduce_remote_and_inputs(&remote, None);
         let status = store.inner().lock().unwrap();
-        assert_eq!(status.now_playing, Some(PathBuf::from("/music/remote.flac")));
+        assert_eq!(
+            status.now_playing,
+            Some(PathBuf::from("/music/remote.flac"))
+        );
     }
 
     #[test]

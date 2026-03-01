@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
 use actix_web::body::SizedStream;
-use actix_web::http::{header, StatusCode};
+use actix_web::http::{StatusCode, header};
+use actix_web::{HttpRequest, HttpResponse, Responder, get, post, web};
 use serde::Deserialize;
 use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -43,14 +43,21 @@ pub struct TranscodeByIdQuery {
 )]
 #[get("/library")]
 /// List library entries for the requested directory.
-pub async fn list_library(state: web::Data<AppState>, query: web::Query<LibraryQuery>) -> impl Responder {
+pub async fn list_library(
+    state: web::Data<AppState>,
+    query: web::Query<LibraryQuery>,
+) -> impl Responder {
     let dir = query
         .dir
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| state.library.read().unwrap().root().to_path_buf());
 
-    let dir = match state.output.controller.canonicalize_under_root(&state, &dir) {
+    let dir = match state
+        .output
+        .controller
+        .canonicalize_under_root(&state, &dir)
+    {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };
@@ -98,7 +105,11 @@ fn path_for_track_id(state: &web::Data<AppState>, track_id: i64) -> Result<PathB
     let raw = match state.metadata.db.track_path_for_id(track_id) {
         Ok(Some(path)) => path,
         Ok(None) => {
-            tracing::warn!(track_id, reason = "track_id_not_found", "stream track lookup failed");
+            tracing::warn!(
+                track_id,
+                reason = "track_id_not_found",
+                "stream track lookup failed"
+            );
             return Err(HttpResponse::NotFound().finish());
         }
         Err(err) => return Err(HttpResponse::InternalServerError().body(err.to_string())),
@@ -111,12 +122,12 @@ fn path_for_track_id(state: &web::Data<AppState>, track_id: i64) -> Result<PathB
         .map_err(|err| err.into_response())
 }
 
-async fn stream_file(
-    state: &web::Data<AppState>,
-    req: HttpRequest,
-    path: PathBuf,
-) -> HttpResponse {
-    let path = match state.output.controller.canonicalize_under_root(state, &path) {
+async fn stream_file(state: &web::Data<AppState>, req: HttpRequest, path: PathBuf) -> HttpResponse {
+    let path = match state
+        .output
+        .controller
+        .canonicalize_under_root(state, &path)
+    {
         Ok(dir) => dir,
         Err(err) => return err.into_response(),
     };
@@ -272,15 +283,11 @@ async fn transcode_file(path: PathBuf, format: &str, bitrate_kbps: Option<u32>) 
             "audio/aac"
         }
         "wav" => {
-            cmd.arg("-c:a")
-                .arg("pcm_s16le")
-                .arg("-f")
-                .arg("wav");
+            cmd.arg("-c:a").arg("pcm_s16le").arg("-f").arg("wav");
             "audio/wav"
         }
         _ => {
-            return HttpResponse::BadRequest()
-                .body("invalid format (use mp3, opus, aac, wav)");
+            return HttpResponse::BadRequest().body("invalid format (use mp3, opus, aac, wav)");
         }
     };
 
@@ -299,8 +306,7 @@ async fn transcode_file(path: PathBuf, format: &str, bitrate_kbps: Option<u32>) 
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => {
-            return HttpResponse::InternalServerError()
-                .body("failed to capture ffmpeg output");
+            return HttpResponse::InternalServerError().body("failed to capture ffmpeg output");
         }
     };
 
@@ -367,7 +373,8 @@ pub async fn rescan_track(
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let root = state.library.read().unwrap().root().to_path_buf();
-    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path) {
+    let full_path = match crate::metadata_service::MetadataService::resolve_track_path(&root, &path)
+    {
         Ok(path) => path,
         Err(response) => return response,
     };

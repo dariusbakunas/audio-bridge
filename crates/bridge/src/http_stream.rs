@@ -90,9 +90,8 @@ impl HttpRangeSource {
             return Ok(len);
         }
         let (data, len) = self.fetch_range(0, 0)?;
-        let len = len.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "content length unavailable")
-        })?;
+        let len =
+            len.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "content length unavailable"))?;
         self.buf_start = 0;
         self.buf = data;
         self.len = Some(len);
@@ -112,7 +111,9 @@ impl HttpRangeSource {
                 attempt,
                 "http range request"
             );
-            let resp = self.agent.get(&self.url)
+            let resp = self
+                .agent
+                .get(&self.url)
                 .config()
                 .timeout_per_call(Some(self.config.timeout))
                 .build()
@@ -290,9 +291,8 @@ impl HttpRangeSource {
             return Ok((buf, len));
         }
         self.mark_error();
-        Err(last_err.unwrap_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "http range request failed")
-        }))
+        Err(last_err
+            .unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, "http range request failed")))
     }
 
     /// Fill the in-memory buffer starting at the current position.
@@ -302,7 +302,9 @@ impl HttpRangeSource {
         }
 
         let start = self.pos;
-        let mut end = start.saturating_add(self.config.block_size as u64).saturating_sub(1);
+        let mut end = start
+            .saturating_add(self.config.block_size as u64)
+            .saturating_sub(1);
         if let Some(len) = self.len {
             if len > 0 {
                 end = end.min(len.saturating_sub(1));
@@ -445,12 +447,7 @@ mod tests {
     #[test]
     fn new_source_initializes_empty_buffer() {
         let cfg = HttpRangeConfig::default();
-        let source = HttpRangeSource::new(
-            "http://example/track.flac".to_string(),
-            cfg,
-            None,
-            None,
-        );
+        let source = HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None, None);
         assert_eq!(source.pos, 0);
         assert!(source.len.is_none());
         assert!(source.buf.is_empty());
@@ -482,12 +479,8 @@ mod tests {
     #[test]
     fn read_reads_from_buffer_and_advances() {
         let cfg = HttpRangeConfig::default();
-        let mut source = HttpRangeSource::new(
-            "http://example/track.flac".to_string(),
-            cfg,
-            None,
-            None,
-        );
+        let mut source =
+            HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None, None);
         source.len = Some(4);
         source.buf_start = 0;
         source.buf = vec![1, 2, 3, 4];
@@ -518,12 +511,8 @@ mod tests {
     #[test]
     fn seek_start_sets_position() {
         let cfg = HttpRangeConfig::default();
-        let mut source = HttpRangeSource::new(
-            "http://example/track.flac".to_string(),
-            cfg,
-            None,
-            None,
-        );
+        let mut source =
+            HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None, None);
         let pos = source.seek(SeekFrom::Start(5)).unwrap();
         assert_eq!(pos, 5);
         assert_eq!(source.pos, 5);
@@ -532,12 +521,8 @@ mod tests {
     #[test]
     fn seek_current_allows_negative() {
         let cfg = HttpRangeConfig::default();
-        let mut source = HttpRangeSource::new(
-            "http://example/track.flac".to_string(),
-            cfg,
-            None,
-            None,
-        );
+        let mut source =
+            HttpRangeSource::new("http://example/track.flac".to_string(), cfg, None, None);
         source.pos = 5;
         let pos = source.seek(SeekFrom::Current(-3)).unwrap();
         assert_eq!(pos, 2);

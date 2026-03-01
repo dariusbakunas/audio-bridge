@@ -2,20 +2,17 @@
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use cpal::traits::DeviceTrait;
     use coreaudio::audio_unit::macos_helpers::{
-        get_device_id_from_name,
-        get_hogging_pid,
-        set_device_sample_rate,
-        toggle_hog_mode,
+        get_device_id_from_name, get_hogging_pid, set_device_sample_rate, toggle_hog_mode,
     };
+    use cpal::traits::DeviceTrait;
     use objc2_core_audio::AudioDeviceID;
-    use objc2_core_audio::kAudioDevicePropertyNominalSampleRate;
-    use objc2_core_audio::kAudioObjectPropertyElementMaster;
-    use objc2_core_audio::kAudioObjectPropertyScopeGlobal;
     use objc2_core_audio::AudioObjectGetPropertyData;
     use objc2_core_audio::AudioObjectPropertyAddress;
     use objc2_core_audio::AudioObjectPropertySelector;
+    use objc2_core_audio::kAudioDevicePropertyNominalSampleRate;
+    use objc2_core_audio::kAudioObjectPropertyElementMaster;
+    use objc2_core_audio::kAudioObjectPropertyScopeGlobal;
     use std::ptr::NonNull;
 
     pub struct ExclusiveGuard {
@@ -35,7 +32,11 @@ mod macos {
         }
     }
 
-    pub fn maybe_acquire(device: &cpal::Device, sample_rate: u32, enabled: bool) -> Option<ExclusiveGuard> {
+    pub fn maybe_acquire(
+        device: &cpal::Device,
+        sample_rate: u32,
+        enabled: bool,
+    ) -> Option<ExclusiveGuard> {
         if !enabled {
             return None;
         }
@@ -126,7 +127,7 @@ mod macos {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos::{maybe_acquire, current_nominal_rate, ExclusiveGuard};
+pub use macos::{ExclusiveGuard, current_nominal_rate, maybe_acquire};
 
 #[cfg(not(target_os = "macos"))]
 pub struct ExclusiveGuard;

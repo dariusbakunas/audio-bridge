@@ -6,9 +6,9 @@ pub mod cli;
 pub mod config;
 pub mod runtime;
 
+mod exclusive;
 mod http_api;
 mod http_stream;
-mod exclusive;
 mod mdns;
 mod player;
 mod status;

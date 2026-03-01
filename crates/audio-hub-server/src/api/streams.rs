@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use actix_web::http::header;
 use actix_web::web::Bytes;
-use actix_web::{get, web, Error, HttpResponse, Responder};
-use futures_util::{stream::unfold, Stream};
+use actix_web::{Error, HttpResponse, Responder, get, web};
+use futures_util::{Stream, stream::unfold};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Duration, Interval, MissedTickBehavior};
@@ -156,8 +156,8 @@ pub async fn outputs_stream(state: web::Data<AppState>) -> impl Responder {
                     let outputs = normalize_outputs_response(
                         ctx.state.output.controller.list_outputs(&ctx.state).await,
                     );
-                    let json = serde_json::to_string(&outputs)
-                        .unwrap_or_else(|_| "null".to_string());
+                    let json =
+                        serde_json::to_string(&outputs).unwrap_or_else(|_| "null".to_string());
                     if emit_unchanged || ctx.last_outputs.as_deref() != Some(json.as_str()) {
                         ctx.last_outputs = Some(json.clone());
                         ctx.pending.push_back(sse_event("outputs", &json));

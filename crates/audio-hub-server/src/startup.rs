@@ -8,36 +8,39 @@ use std::sync::{Arc, Mutex};
 
 use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
-use actix_web::{App, HttpServer, web};
-use actix_web::dev::{Service, ServiceRequest, ServiceResponse};
 use actix_web::Error;
-use futures_util::future::{ok, LocalBoxFuture, Ready};
-use std::task::{Context, Poll};
+use actix_web::dev::{Service, ServiceRequest, ServiceResponse};
+use actix_web::{App, HttpServer, web};
 use anyhow::{Context as AnyhowContext, Result};
-use rustls::ServerConfig as RustlsConfig;
 use crossbeam_channel::unbounded;
+use futures_util::future::{LocalBoxFuture, Ready, ok};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rustls::ServerConfig as RustlsConfig;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api;
+use crate::bridge_device_streams::{
+    spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config,
+};
 use crate::bridge_transport::BridgeTransportClient;
-use crate::bridge_device_streams::{spawn_bridge_device_streams_for_config, spawn_bridge_status_streams_for_config};
 use crate::config;
 use crate::cover_art::CoverArtFetcher;
 use crate::discovery::{
-    spawn_cast_mdns_discovery,
-    spawn_discovered_health_watcher,
-    spawn_mdns_discovery,
+    spawn_cast_mdns_discovery, spawn_discovered_health_watcher, spawn_mdns_discovery,
 };
+use crate::events::LogBus;
 use crate::metadata_db::MetadataDb;
 use crate::metadata_service::MetadataService;
 use crate::musicbrainz::{MusicBrainzClient, spawn_enrichment_loop};
-use crate::events::LogBus;
-use crate::state::MetadataWake;
 use crate::openapi;
-use crate::state::{AppState, BridgeProviderState, BridgeState, CastProviderState, LocalProviderState, PlayerStatus, QueueState};
+use crate::state::MetadataWake;
+use crate::state::{
+    AppState, BridgeProviderState, BridgeState, CastProviderState, LocalProviderState,
+    PlayerStatus, QueueState,
+};
 
 /// Build server state and start the Actix HTTP server.
 pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> Result<()> {
@@ -62,8 +65,12 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     }
     let events = crate::events::EventBus::new();
     let metadata_wake = MetadataWake::new();
-    let (metadata_db, library) =
-        init_metadata_db_and_library(&media_dir, metadata_db_path, events.clone(), metadata_wake.clone())?;
+    let (metadata_db, library) = init_metadata_db_and_library(
+        &media_dir,
+        metadata_db_path,
+        events.clone(),
+        metadata_wake.clone(),
+    )?;
     let musicbrainz = init_musicbrainz(&cfg)?;
     let bridges = config::bridges_from_config(&cfg)?;
     tracing::info!(
@@ -81,19 +88,15 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .map(|b| b.http_addr)
     });
 
-    let output_settings_state = crate::state::OutputSettingsState::from_config(cfg.outputs.as_ref());
+    let output_settings_state =
+        crate::state::OutputSettingsState::from_config(cfg.outputs.as_ref());
     let active_exclusive = active_output_id
         .as_deref()
         .map(|id| output_settings_state.is_exclusive(id))
         .unwrap_or(false);
-    apply_active_bridge_device(
-        None,
-        active_http_addr,
-        &public_base_url,
-        active_exclusive,
-    )
-    .await;
-    let bridge_state = build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
+    apply_active_bridge_device(None, active_http_addr, &public_base_url, active_exclusive).await;
+    let bridge_state =
+        build_bridge_state(bridges, active_bridge_id, active_output_id, public_base_url);
     let playback_manager = build_playback_manager(bridge_state.player.clone(), events.clone());
     let (local_state, device_selection) = build_local_state(&cfg);
     let cast_state = Arc::new(CastProviderState::new());
@@ -250,15 +253,9 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     });
 
     if let Some(tls_config) = tls_config {
-        server
-            .bind_rustls_0_22(bind, tls_config)?
-            .run()
-            .await?;
+        server.bind_rustls_0_22(bind, tls_config)?.run().await?;
     } else {
-        server
-            .bind(bind)?
-            .run()
-            .await?;
+        server.bind(bind)?.run().await?;
     }
 
     Ok(())
@@ -323,7 +320,9 @@ fn spawn_library_watcher(state: web::Data<AppState>) {
                             if path.is_dir() {
                                 continue;
                             }
-                            if let Err(response) = metadata_service.rescan_track(&state.library, &path) {
+                            if let Err(response) =
+                                metadata_service.rescan_track(&state.library, &path)
+                            {
                                 let status = response.status();
                                 if status != actix_web::http::StatusCode::NOT_FOUND
                                     && status != actix_web::http::StatusCode::BAD_REQUEST
@@ -424,7 +423,11 @@ where
         let path = req.path().to_string();
         let should_log = should_log_path(&path);
         let method = req.method().clone();
-        let peer = req.connection_info().realip_remote_addr().unwrap_or("-").to_string();
+        let peer = req
+            .connection_info()
+            .realip_remote_addr()
+            .unwrap_or("-")
+            .to_string();
         let ua = req
             .headers()
             .get("User-Agent")
@@ -481,14 +484,10 @@ fn load_config(path: Option<&PathBuf>) -> Result<(config::ServerConfig, Option<P
                     let cfg = config::ServerConfig::load(path)?;
                     Ok((cfg, Some(path.to_path_buf())))
                 } else {
-                    Err(anyhow::anyhow!(
-                        "config file is required; use --config"
-                    ))
+                    Err(anyhow::anyhow!("config file is required; use --config"))
                 }
             } else {
-                Err(anyhow::anyhow!(
-                    "config file is required; use --config"
-                ))
+                Err(anyhow::anyhow!("config file is required; use --config"))
             }
         }
     }
@@ -506,7 +505,10 @@ fn resolve_bind(
     })
 }
 
-fn resolve_tls_config(args: &crate::Args, cfg: &config::ServerConfig) -> Result<Option<RustlsConfig>> {
+fn resolve_tls_config(
+    args: &crate::Args,
+    cfg: &config::ServerConfig,
+) -> Result<Option<RustlsConfig>> {
     let cert_path = args
         .tls_cert
         .as_ref()
@@ -532,8 +534,8 @@ fn resolve_tls_config(args: &crate::Args, cfg: &config::ServerConfig) -> Result<
         return Err(anyhow::anyhow!("tls cert is empty: {:?}", cert_path));
     }
 
-    let key_file = std::fs::File::open(&key_path)
-        .with_context(|| format!("open tls key {:?}", key_path))?;
+    let key_file =
+        std::fs::File::open(&key_path).with_context(|| format!("open tls key {:?}", key_path))?;
     let mut key_reader = std::io::BufReader::new(key_file);
     let key = rustls_pemfile::private_key(&mut key_reader)
         .with_context(|| format!("read tls key {:?}", key_path))?
@@ -547,10 +549,7 @@ fn resolve_tls_config(args: &crate::Args, cfg: &config::ServerConfig) -> Result<
 }
 
 /// Resolve the media directory from args + config.
-fn resolve_media_dir(
-    dir: Option<PathBuf>,
-    cfg: &config::ServerConfig,
-) -> Result<PathBuf> {
+fn resolve_media_dir(dir: Option<PathBuf>, cfg: &config::ServerConfig) -> Result<PathBuf> {
     Ok(match dir {
         Some(dir) => dir,
         None => config::media_dir_from_config(cfg)?,
@@ -589,7 +588,10 @@ fn init_musicbrainz(cfg: &config::ServerConfig) -> Result<Option<Arc<MusicBrainz
     }
     .map(Arc::new);
     if let Some(client) = musicbrainz.as_ref() {
-        tracing::info!(user_agent = client.user_agent(), "musicbrainz enrichment enabled");
+        tracing::info!(
+            user_agent = client.user_agent(),
+            "musicbrainz enrichment enabled"
+        );
     } else {
         tracing::info!("musicbrainz enrichment disabled");
     }
@@ -625,13 +627,9 @@ async fn apply_active_bridge_device(
     exclusive: bool,
 ) {
     if let (Some(device_name), Some(http_addr)) = (device_to_set, active_http_addr) {
-        let _ = BridgeTransportClient::new_with_base(
-            http_addr,
-            public_base_url.to_string(),
-            None,
-        )
-        .set_device(&device_name, Some(exclusive))
-        .await;
+        let _ = BridgeTransportClient::new_with_base(http_addr, public_base_url.to_string(), None)
+            .set_device(&device_name, Some(exclusive))
+            .await;
     }
 }
 
@@ -665,7 +663,8 @@ fn build_playback_manager(
     let status = Arc::new(Mutex::new(PlayerStatus::default()));
     let queue = Arc::new(Mutex::new(QueueState::default()));
     let status_store = crate::status_store::StatusStore::new(status, events.clone());
-    let queue_service = crate::queue_service::QueueService::new(queue, status_store.clone(), events);
+    let queue_service =
+        crate::queue_service::QueueService::new(queue, status_store.clone(), events);
     crate::playback_manager::PlaybackManager::new(player, status_store, queue_service)
 }
 
@@ -673,10 +672,7 @@ fn build_local_state(
     cfg: &config::ServerConfig,
 ) -> (Arc<LocalProviderState>, crate::state::DeviceSelectionState) {
     let local_enabled = cfg.local_outputs.unwrap_or(false);
-    let local_id = cfg
-        .local_id
-        .clone()
-        .unwrap_or_else(|| "local".to_string());
+    let local_id = cfg.local_id.clone().unwrap_or_else(|| "local".to_string());
     let local_name = cfg
         .local_name
         .clone()
@@ -706,7 +702,9 @@ fn build_local_state(
         enabled: local_enabled,
         id: local_id,
         name: local_name,
-        player: Arc::new(Mutex::new(crate::bridge::BridgePlayer { cmd_tx: local_cmd_tx })),
+        player: Arc::new(Mutex::new(crate::bridge::BridgePlayer {
+            cmd_tx: local_cmd_tx,
+        })),
         running: Arc::new(AtomicBool::new(false)),
     });
     let device_selection = crate::state::DeviceSelectionState {

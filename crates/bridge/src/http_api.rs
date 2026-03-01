@@ -9,14 +9,14 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use actix_web::http::header;
-use actix_web::{App, http::StatusCode, middleware::Logger, web, Error, HttpResponse, HttpServer};
 use actix_web::web::Bytes;
-use futures_util::{Stream, stream::unfold};
+use actix_web::{App, Error, HttpResponse, HttpServer, http::StatusCode, middleware::Logger, web};
 use crossbeam_channel::Sender;
+use futures_util::{Stream, stream::unfold};
 
-use audio_player::device;
 use crate::player::{BridgeVolumeState, PlayerCommand};
 use crate::status::{BridgeStatusState, StatusSnapshot};
+use audio_player::device;
 
 /// Health check response payload.
 #[derive(serde::Serialize)]
@@ -123,10 +123,7 @@ pub(crate) fn spawn_http_server(
         let runner = match HttpServer::new(move || {
             App::new()
                 .app_data(web::Data::new(state.clone()))
-                .wrap(
-                    Logger::new("http request method=%m path=%U status=%s")
-                        .exclude("/health")
-                )
+                .wrap(Logger::new("http request method=%m path=%U status=%s").exclude("/health"))
                 .route("/health", web::get().to(health))
                 .route("/devices", web::get().to(list_devices))
                 .route("/devices/stream", web::get().to(devices_stream))
@@ -420,8 +417,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(body: &web::Bytes) -> Result<T, Ht
 
 fn build_devices_response(state: &AppState) -> Result<DevicesResponse, String> {
     let host = cpal::default_host();
-    let devices = device::list_device_infos(&host)
-        .map_err(|e| format!("{e:#}"))?;
+    let devices = device::list_device_infos(&host).map_err(|e| format!("{e:#}"))?;
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();
     for dev in devices {

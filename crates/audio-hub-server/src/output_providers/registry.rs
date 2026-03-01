@@ -5,7 +5,9 @@
 use actix_web::HttpResponse;
 use async_trait::async_trait;
 
-use crate::models::{OutputInfo, OutputsResponse, ProvidersResponse, SessionVolumeResponse, StatusResponse};
+use crate::models::{
+    OutputInfo, OutputsResponse, ProvidersResponse, SessionVolumeResponse, StatusResponse,
+};
 use crate::output_providers::bridge_provider::BridgeProvider;
 use crate::output_providers::cast_provider::CastProvider;
 use crate::output_providers::local_provider::LocalProvider;
@@ -59,11 +61,7 @@ pub(crate) trait OutputProvider: Send + Sync {
     /// Ensure the active output is connected.
     async fn ensure_active_connected(&self, state: &AppState) -> Result<(), ProviderError>;
     /// Select the active output for this provider.
-    async fn select_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError>;
+    async fn select_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError>;
     /// Return status for the requested output id.
     async fn status_for_output(
         &self,
@@ -71,11 +69,7 @@ pub(crate) trait OutputProvider: Send + Sync {
         output_id: &str,
     ) -> Result<StatusResponse, ProviderError>;
     /// Stop playback on a specific output id (best-effort).
-    async fn stop_output(
-        &self,
-        state: &AppState,
-        output_id: &str,
-    ) -> Result<(), ProviderError>;
+    async fn stop_output(&self, state: &AppState, output_id: &str) -> Result<(), ProviderError>;
     /// Refresh provider devices (best-effort).
     async fn refresh_provider(
         &self,
@@ -184,7 +178,14 @@ impl OutputRegistry {
         for provider in &self.providers {
             outputs.extend(provider.list_outputs(state).await);
         }
-        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone();
         if let Some(active_id) = active_id.as_deref() {
             if !outputs.iter().any(|o| o.id == active_id) {
                 for provider in &self.providers {
@@ -207,7 +208,14 @@ impl OutputRegistry {
         if is_output_disabled(state, output_id) {
             return Err(ProviderError::BadRequest("output is disabled".to_string()));
         }
-        let previous = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let previous = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone();
         tracing::info!(
             from_output = ?previous,
             to_output = %output_id,
@@ -278,7 +286,9 @@ impl OutputRegistry {
     ) -> Result<SessionVolumeResponse, ProviderError> {
         for provider in &self.providers {
             if provider.can_handle_output_id(output_id) {
-                return provider.set_volume_for_output(state, output_id, value).await;
+                return provider
+                    .set_volume_for_output(state, output_id, value)
+                    .await;
             }
         }
         Err(ProviderError::BadRequest("invalid output id".to_string()))
@@ -304,7 +314,14 @@ impl OutputRegistry {
         &self,
         state: &AppState,
     ) -> Result<(), ProviderError> {
-        let active_id = state.providers.bridge.bridges.lock().unwrap().active_output_id.clone();
+        let active_id = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap()
+            .active_output_id
+            .clone();
         let Some(active_id) = active_id else {
             return Err(ProviderError::Unavailable(
                 "no active output selected".to_string(),
@@ -334,7 +351,10 @@ impl OutputRegistry {
 }
 
 fn apply_output_settings(resp: &mut OutputsResponse, state: &AppState) {
-    let settings = state.output_settings.lock().unwrap_or_else(|err| err.into_inner());
+    let settings = state
+        .output_settings
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let disabled = &settings.disabled;
     let renames = &settings.renames;
     resp.outputs.retain(|o| !disabled.contains(&o.id));
@@ -361,8 +381,8 @@ fn is_output_disabled(state: &AppState, output_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
 
     struct MockProvider {
         output_id: String,
@@ -534,9 +554,8 @@ mod tests {
         let inject_flag = provider.inject_called.clone();
         let registry = OutputRegistry::new(vec![Box::new(provider)]);
 
-        let _ = actix_web::rt::System::new().block_on(async {
-            registry.list_outputs(&state).await
-        });
+        let _ =
+            actix_web::rt::System::new().block_on(async { registry.list_outputs(&state).await });
 
         assert!(*inject_flag.lock().unwrap());
     }
@@ -545,9 +564,8 @@ mod tests {
     fn ensure_active_connected_fails_without_active() {
         let state = make_state(None);
         let registry = OutputRegistry::new(Vec::new());
-        let result = actix_web::rt::System::new().block_on(async {
-            registry.ensure_active_connected(&state).await
-        });
+        let result = actix_web::rt::System::new()
+            .block_on(async { registry.ensure_active_connected(&state).await });
         assert!(matches!(result, Err(ProviderError::Unavailable(_))));
     }
 
@@ -558,9 +576,8 @@ mod tests {
         let provider = MockProvider::new(&active, "bridge", true);
         let registry = OutputRegistry::new(vec![Box::new(provider)]);
 
-        let result = actix_web::rt::System::new().block_on(async {
-            registry.ensure_active_connected(&state).await
-        });
+        let result = actix_web::rt::System::new()
+            .block_on(async { registry.ensure_active_connected(&state).await });
         assert!(result.is_ok());
     }
 }

@@ -2,21 +2,21 @@
 //!
 //! Receives HTTP playback commands and streams audio via the audio-player pipeline.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use crossbeam_channel::{Receiver, Sender};
 use cpal::traits::DeviceTrait;
+use crossbeam_channel::{Receiver, Sender};
 use symphonia::core::probe::Hint;
 
+use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
+use crate::status::BridgeStatusState;
+use audio_bridge_types::PlaybackEndReason;
 use audio_player::config::PlaybackConfig;
 use audio_player::decode;
 use audio_player::device;
-use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
 use audio_player::pipeline;
-use crate::status::BridgeStatusState;
-use audio_bridge_types::PlaybackEndReason;
 
 /// Commands accepted by the playback worker thread.
 #[derive(Debug, Clone)]
@@ -30,9 +30,15 @@ pub(crate) enum PlayerCommand {
     PauseToggle,
     Resume,
     Stop,
-    Seek { ms: u64 },
-    SetVolume { value: u8 },
-    SetMute { muted: bool },
+    Seek {
+        ms: u64,
+    },
+    SetVolume {
+        value: u8,
+    },
+    SetMute {
+        muted: bool,
+    },
 }
 
 /// Handle for sending commands to the playback worker.
@@ -157,7 +163,9 @@ fn player_thread_main(
                 }
             }
             PlayerCommand::Seek { ms } => {
-                let Some(track) = current.as_ref() else { continue };
+                let Some(track) = current.as_ref() else {
+                    continue;
+                };
                 let url = track.url.clone();
                 let ext_hint = track.ext_hint.clone();
                 let title = track.title.clone();
@@ -224,10 +232,7 @@ fn player_thread_main(
     }
 }
 
-fn preupdate_status_on_play(
-    status: &Arc<Mutex<BridgeStatusState>>,
-    now_playing: &str,
-) {
+fn preupdate_status_on_play(status: &Arc<Mutex<BridgeStatusState>>, now_playing: &str) {
     if let Ok(mut s) = status.lock() {
         s.clear_playback();
         s.end_reason = None;
@@ -340,7 +345,10 @@ fn play_one_http(
     session_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut hint = Hint::new();
-    if let Some(ext) = ext_hint.as_ref().and_then(|s| if s.is_empty() { None } else { Some(s) }) {
+    if let Some(ext) = ext_hint
+        .as_ref()
+        .and_then(|s| if s.is_empty() { None } else { Some(s) })
+    {
         hint.with_extension(ext);
     } else if let Some(ext) = infer_ext_from_url(&url) {
         hint.with_extension(&ext);
@@ -474,10 +482,7 @@ fn play_one_http(
     result
 }
 
-fn effective_playback_for_seek(
-    playback: &PlaybackConfig,
-    seek_ms: Option<u64>,
-) -> PlaybackConfig {
+fn effective_playback_for_seek(playback: &PlaybackConfig, seek_ms: Option<u64>) -> PlaybackConfig {
     let mut playback_eff = playback.clone();
     if seek_ms.is_some() {
         playback_eff.buffer_seconds = playback_eff.buffer_seconds.min(1.0);

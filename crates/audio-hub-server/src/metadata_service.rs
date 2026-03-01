@@ -1,8 +1,8 @@
 //! Shared metadata operations (scan/rescan/update helpers).
 
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::RwLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use actix_web::HttpResponse;
 use anyhow::Result;
@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::cover_art::CoverArtResolver;
 use crate::events::{EventBus, MetadataEvent};
-use crate::library::{probe_track, scan_library_with_meta, LibraryIndex, TrackMeta};
+use crate::library::{LibraryIndex, TrackMeta, probe_track, scan_library_with_meta};
 use crate::metadata_db::{AlbumSummary, MetadataDb, TrackRecord};
 use crate::state::MetadataWake;
 
@@ -131,8 +131,7 @@ impl MetadataService {
         };
         let mut normalized_meta = meta.clone();
         let original_album = normalized_meta.album.clone();
-        let (album, disc_number, source) =
-            normalize_album_and_disc(full_path, &normalized_meta);
+        let (album, disc_number, source) = normalize_album_and_disc(full_path, &normalized_meta);
         if let (Some(original), Some(normalized), Some(source)) =
             (original_album, album.clone(), source)
         {
@@ -142,13 +141,14 @@ impl MetadataService {
                     .track_id_for_path(&full_path.to_string_lossy())
                     .ok()
                     .flatten();
-                self.events.metadata_event(MetadataEvent::AlbumNormalization {
-                    track_id,
-                    original_album: original,
-                    normalized_album: normalized.clone(),
-                    disc_number,
-                    source: source.to_string(),
-                });
+                self.events
+                    .metadata_event(MetadataEvent::AlbumNormalization {
+                        track_id,
+                        original_album: original,
+                        normalized_album: normalized.clone(),
+                        disc_number,
+                        source: source.to_string(),
+                    });
             }
         }
         normalized_meta.album = album;
@@ -252,7 +252,7 @@ impl MetadataService {
         Ok(index)
     }
 
-fn scan_library_with_paths(
+    fn scan_library_with_paths(
         &self,
         emit_events: bool,
     ) -> Result<(LibraryIndex, std::collections::HashSet<String>)> {
@@ -273,13 +273,14 @@ fn scan_library_with_paths(
                             .track_id_for_path(&path.to_string_lossy())
                             .ok()
                             .flatten();
-                        self.events.metadata_event(MetadataEvent::AlbumNormalization {
-                            track_id,
-                            original_album: original,
-                            normalized_album: normalized.clone(),
-                            disc_number,
-                            source: source.to_string(),
-                        });
+                        self.events
+                            .metadata_event(MetadataEvent::AlbumNormalization {
+                                track_id,
+                                original_album: original,
+                                normalized_album: normalized.clone(),
+                                disc_number,
+                                source: source.to_string(),
+                            });
                     }
                 }
                 normalized_meta.album = album;
@@ -309,10 +310,11 @@ fn scan_library_with_paths(
                     self.events
                         .metadata_event(MetadataEvent::LibraryScanAlbumStart { album });
                 } else {
-                    self.events.metadata_event(MetadataEvent::LibraryScanAlbumFinish {
-                        album,
-                        tracks: count,
-                    });
+                    self.events
+                        .metadata_event(MetadataEvent::LibraryScanAlbumFinish {
+                            album,
+                            tracks: count,
+                        });
                 }
             },
         )?;
@@ -409,7 +411,12 @@ fn scan_library_with_paths(
     }
 
     fn album_uuid_for_track(&self, path: &Path, meta: &TrackMeta) -> Option<String> {
-        let Some(album_title) = meta.album.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
+        let Some(album_title) = meta
+            .album
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        else {
             return None;
         };
         let dir = path.parent()?;
@@ -587,7 +594,10 @@ fn parse_disc_number(raw: &str) -> Option<u32> {
             }
         }
     }
-    let tokens: Vec<&str> = lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|s| !s.is_empty()).collect();
+    let tokens: Vec<&str> = lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect();
     for window in tokens.windows(2) {
         if ["disc", "disk", "cd"].contains(&window[0]) {
             if let Ok(num) = window[1].parse::<u32>() {
@@ -641,8 +651,7 @@ mod tests {
             ..TrackMeta::default()
         };
 
-        let record =
-            MetadataService::build_track_record(&path, "song.flac", &meta, &fs_meta, None);
+        let record = MetadataService::build_track_record(&path, "song.flac", &meta, &fs_meta, None);
         assert_eq!(record.title.as_deref(), Some("Title"));
         assert_eq!(record.artist.as_deref(), Some("Artist"));
         assert_eq!(record.album.as_deref(), Some("Album"));
@@ -664,7 +673,9 @@ mod tests {
         std::fs::write(&other, b"audio").expect("write file");
 
         let result = MetadataService::resolve_track_path(&root, &other.to_string_lossy());
-        assert!(matches!(result, Err(resp) if resp.status() == actix_web::http::StatusCode::BAD_REQUEST));
+        assert!(
+            matches!(result, Err(resp) if resp.status() == actix_web::http::StatusCode::BAD_REQUEST)
+        );
     }
 
     #[test]

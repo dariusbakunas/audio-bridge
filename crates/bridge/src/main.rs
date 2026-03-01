@@ -18,9 +18,10 @@ const VERSION: &str = concat!(
 fn main() -> Result<()> {
     let args = cli::Args::parse();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("info,bridge=info")
-        }))
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,bridge=info")),
+        )
         .init();
 
     if args.list_devices {

@@ -4,7 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 use reqwest::Url;
 use tokio::net::lookup_host;
@@ -120,7 +120,10 @@ impl MediaAssetStore {
         if path.is_absolute() {
             return Err(anyhow!("asset path must be relative"));
         }
-        if path.components().any(|component| matches!(component, std::path::Component::ParentDir)) {
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
             return Err(anyhow!("asset path must not contain parent segments"));
         }
         let full_path = self.root.join(path);

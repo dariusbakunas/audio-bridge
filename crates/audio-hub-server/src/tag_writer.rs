@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use lofty::{read_from_path, Accessor, AudioFile, ItemKey, ItemValue, Tag, TagType, TaggedFileExt};
+use lofty::{Accessor, AudioFile, ItemKey, ItemValue, Tag, TagType, TaggedFileExt, read_from_path};
 
 const STANDARD_VORBIS_KEYS: &[&str] = &[
     "TITLE",
@@ -170,8 +170,10 @@ pub fn supported_track_fields(path: &Path) -> (Option<TagType>, Vec<String>) {
         | Some(TagType::Id3v2)
         | Some(TagType::Id3v1)
         | Some(TagType::Ape) => {
-            let mut names: Vec<String> =
-                STANDARD_TRACK_FIELDS.iter().map(|field| (*field).to_string()).collect();
+            let mut names: Vec<String> = STANDARD_TRACK_FIELDS
+                .iter()
+                .map(|field| (*field).to_string())
+                .collect();
             if tag_type == Some(TagType::VorbisComments) {
                 if let Ok(tags) = read_vorbis_comment_tags(path) {
                     for key in tags.keys() {

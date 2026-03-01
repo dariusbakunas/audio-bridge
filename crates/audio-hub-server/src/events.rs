@@ -9,18 +9,25 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
-use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
+use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetadataEvent {
-    LibraryScanAlbumStart { album: String },
-    LibraryScanAlbumFinish { album: String, tracks: usize },
-    MusicBrainzBatch { count: usize },
+    LibraryScanAlbumStart {
+        album: String,
+    },
+    LibraryScanAlbumFinish {
+        album: String,
+        tracks: usize,
+    },
+    MusicBrainzBatch {
+        count: usize,
+    },
     MusicBrainzLookupStart {
         track_id: Option<i64>,
         title: String,
@@ -47,9 +54,16 @@ pub enum MetadataEvent {
         track_id: Option<i64>,
         error: String,
     },
-    CoverArtBatch { count: usize },
-    CoverArtFetchStart { album_id: i64, mbid: String },
-    CoverArtFetchSuccess { album_id: i64 },
+    CoverArtBatch {
+        count: usize,
+    },
+    CoverArtFetchStart {
+        album_id: i64,
+        mbid: String,
+    },
+    CoverArtFetchSuccess {
+        album_id: i64,
+    },
     CoverArtFetchFailure {
         album_id: i64,
         mbid: String,

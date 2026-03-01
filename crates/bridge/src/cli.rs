@@ -46,7 +46,6 @@ pub struct Args {
     /// Allow insecure TLS when streaming from the hub.
     #[arg(long, default_value_t = false)]
     pub tls_insecure: bool,
-
 }
 
 /// Bridge subcommands.

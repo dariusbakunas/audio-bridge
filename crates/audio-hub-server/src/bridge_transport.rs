@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::Result;
 use reqwest::Client;
 
-use audio_bridge_types::BridgeStatus;
 use crate::metadata_db::MetadataDb;
+use audio_bridge_types::BridgeStatus;
 
 /// HTTP response payload for the bridge device list.
 #[derive(Debug, serde::Deserialize)]
@@ -94,9 +94,7 @@ pub struct BridgeTransportClient {
 impl BridgeTransportClient {
     /// Create a new async client for a bridge HTTP address.
     pub fn new(http_addr: SocketAddr) -> Self {
-        let client = Client::builder()
-            .build()
-            .expect("build reqwest client");
+        let client = Client::builder().build().expect("build reqwest client");
         Self {
             http_addr,
             client,
@@ -120,7 +118,8 @@ impl BridgeTransportClient {
     /// Fetch the list of devices from the bridge.
     pub async fn list_devices(&self) -> Result<Vec<HttpDeviceInfo>> {
         let url = format!("http://{}/devices", self.http_addr);
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .timeout(Duration::from_secs(2))
             .send()
@@ -158,7 +157,8 @@ impl BridgeTransportClient {
     /// Fetch the current bridge status snapshot.
     pub async fn status(&self) -> Result<HttpStatusResponse> {
         let url = format!("http://{}/status", self.http_addr);
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .timeout(Duration::from_secs(2))
             .send()
@@ -222,7 +222,8 @@ impl BridgeTransportClient {
     /// Fetch current bridge volume snapshot.
     pub async fn volume(&self) -> Result<HttpVolumeResponse> {
         let endpoint = format!("http://{}/volume", self.http_addr);
-        let resp = self.client
+        let resp = self
+            .client
             .get(&endpoint)
             .timeout(Duration::from_secs(2))
             .send()
@@ -324,7 +325,8 @@ impl BridgeTransportClient {
         F: FnMut(HttpDevicesSnapshot) + Send,
     {
         let url = format!("http://{}/devices/stream", self.http_addr);
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Accept", "text/event-stream")
             .send()
@@ -379,7 +381,8 @@ impl BridgeTransportClient {
         F: FnMut(HttpStatusResponse) + Send,
     {
         let url = format!("http://{}/status/stream", self.http_addr);
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Accept", "text/event-stream")
             .send()

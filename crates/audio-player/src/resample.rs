@@ -10,12 +10,12 @@ use std::thread;
 use anyhow::Result;
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    calculate_cutoff, Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters,
-    SincInterpolationType, WindowFunction,
+    Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction, calculate_cutoff,
 };
 use symphonia::core::audio::SignalSpec;
 
-use crate::queue::{calc_max_buffered_samples, PopStrategy, SharedAudio};
+use crate::queue::{PopStrategy, SharedAudio, calc_max_buffered_samples};
 
 /// Configuration for the streaming resampler stage.
 #[derive(Clone, Copy, Debug)]
@@ -55,7 +55,8 @@ pub fn start_resampler(
     let src_rate = src_spec.rate;
     let channels = src_spec.channels.count();
 
-    let max_buffered_samples = max_buffered_samples_for_resample(dst_rate, channels, cfg.buffer_seconds);
+    let max_buffered_samples =
+        max_buffered_samples_for_resample(dst_rate, channels, cfg.buffer_seconds);
     let dstq = Arc::new(SharedAudio::new(channels, max_buffered_samples));
 
     let f_ratio = dst_rate as f64 / src_rate as f64;
@@ -104,19 +105,21 @@ pub fn start_resampler(
         };
 
         loop {
-            let interleaved = match srcq.pop(PopStrategy::BlockingExact { frames: chunk_in_frames }) {
+            let interleaved = match srcq.pop(PopStrategy::BlockingExact {
+                frames: chunk_in_frames,
+            }) {
                 Some(v) => v,
                 None => break,
             };
 
-            let input_adapter =
-                match InterleavedSlice::new(&interleaved, channels, chunk_in_frames) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::error!("interleaved slice (input) error: {e:#}");
-                        break;
-                    }
-                };
+            let input_adapter = match InterleavedSlice::new(&interleaved, channels, chunk_in_frames)
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::error!("interleaved slice (input) error: {e:#}");
+                    break;
+                }
+            };
 
             let out_capacity_frames = out_interleaved.len() / channels;
             let mut output_adapter = match InterleavedSlice::new_mut(
@@ -151,7 +154,9 @@ pub fn start_resampler(
             dstq_thread.push_interleaved_blocking(&out_interleaved[..produced_samples]);
         }
 
-        while let Some(tail) = srcq.pop(PopStrategy::BlockingUpTo { max_frames: chunk_in_frames }) {
+        while let Some(tail) = srcq.pop(PopStrategy::BlockingUpTo {
+            max_frames: chunk_in_frames,
+        }) {
             let tail_frames = tail.len() / channels;
             if tail_frames == 0 {
                 continue;
@@ -210,11 +215,7 @@ fn normalize_chunk_frames(chunk_frames: usize) -> usize {
     chunk_frames.max(1)
 }
 
-fn max_buffered_samples_for_resample(
-    dst_rate: u32,
-    channels: usize,
-    buffer_seconds: f32,
-) -> usize {
+fn max_buffered_samples_for_resample(dst_rate: u32, channels: usize, buffer_seconds: f32) -> usize {
     calc_max_buffered_samples(dst_rate, channels, buffer_seconds)
 }
 

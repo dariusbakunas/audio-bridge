@@ -11,9 +11,7 @@ pub(crate) struct MdnsAdvertiser {
 }
 
 /// Start advertising the bridge via mDNS.
-pub(crate) fn spawn_mdns_advertiser(
-    http_bind: std::net::SocketAddr,
-) -> Option<MdnsAdvertiser> {
+pub(crate) fn spawn_mdns_advertiser(http_bind: std::net::SocketAddr) -> Option<MdnsAdvertiser> {
     let daemon = match ServiceDaemon::new() {
         Ok(d) => d,
         Err(e) => {

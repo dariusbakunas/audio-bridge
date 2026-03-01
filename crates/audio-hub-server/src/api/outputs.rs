@@ -1,17 +1,13 @@
 //! Output-related API handlers.
 
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 
+use crate::bridge_manager::{merge_bridges, parse_provider_id};
 use crate::models::{
-    OutputSelectRequest,
-    OutputSettings,
-    OutputSettingsResponse,
-    OutputsResponse,
-    ProviderOutputs,
+    OutputSelectRequest, OutputSettings, OutputSettingsResponse, OutputsResponse, ProviderOutputs,
     ProvidersResponse,
 };
 use crate::state::AppState;
-use crate::bridge_manager::{merge_bridges, parse_provider_id};
 
 #[utoipa::path(
     get,
@@ -41,7 +37,9 @@ pub async fn provider_outputs_list(
     state: web::Data<AppState>,
     id: web::Path<String>,
 ) -> impl Responder {
-    match state.output.controller
+    match state
+        .output
+        .controller
         .outputs_for_provider(&state, id.as_str())
         .await
     {
@@ -64,7 +62,6 @@ pub async fn outputs_list(state: web::Data<AppState>) -> impl Responder {
         state.output.controller.list_outputs(&state).await,
     ))
 }
-
 
 #[utoipa::path(
     get,
@@ -100,7 +97,10 @@ pub async fn outputs_settings(state: web::Data<AppState>) -> impl Responder {
             outputs,
         });
     }
-    HttpResponse::Ok().json(OutputSettingsResponse { settings, providers: payload })
+    HttpResponse::Ok().json(OutputSettingsResponse {
+        settings,
+        providers: payload,
+    })
 }
 
 #[utoipa::path(
@@ -164,11 +164,13 @@ pub async fn outputs_settings_update(
 )]
 #[post("/providers/{id}/refresh")]
 /// Refresh outputs for the requested provider.
-pub async fn provider_refresh(
-    state: web::Data<AppState>,
-    id: web::Path<String>,
-) -> impl Responder {
-    match state.output.controller.refresh_provider(&state, id.as_str()).await {
+pub async fn provider_refresh(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+    match state
+        .output
+        .controller
+        .refresh_provider(&state, id.as_str())
+        .await
+    {
         Ok(()) => HttpResponse::Ok().finish(),
         Err(err) => err.into_response(),
     }
@@ -189,7 +191,12 @@ pub async fn outputs_select(
     state: web::Data<AppState>,
     body: web::Json<OutputSelectRequest>,
 ) -> impl Responder {
-    match state.output.controller.select_output(&state, &body.id).await {
+    match state
+        .output
+        .controller
+        .select_output(&state, &body.id)
+        .await
+    {
         Ok(()) => {
             state.events.outputs_changed();
             HttpResponse::Ok().finish()
