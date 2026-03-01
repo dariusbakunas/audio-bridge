@@ -12,6 +12,7 @@ use crate::models::{
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
+/// Output provider for local device playback (`local:<provider_id>:<device_id>`).
 pub(crate) struct LocalProvider;
 
 impl LocalProvider {

@@ -114,12 +114,14 @@ pub fn spawn_bridge_worker(
     });
 }
 
+/// Derive a human-readable title from a track path for bridge status displays.
 fn title_from_path(path: &PathBuf) -> Option<String> {
     path.file_name()
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
 }
 
+/// Convert an extension hint into an optional argument for bridge play requests.
 fn ext_hint_option(ext_hint: &str) -> Option<&str> {
     if ext_hint.trim().is_empty() {
         None
@@ -128,6 +130,7 @@ fn ext_hint_option(ext_hint: &str) -> Option<&str> {
     }
 }
 
+/// Update bridge online/offline state and report whether it changed.
 pub(crate) fn update_online_and_should_emit(bridge_online: &AtomicBool, new_status: bool) -> bool {
     let was_online = bridge_online.swap(new_status, Ordering::Relaxed);
     was_online != new_status

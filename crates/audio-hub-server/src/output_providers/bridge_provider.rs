@@ -15,6 +15,7 @@ use crate::models::{
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
+/// Output provider for bridge-backed outputs (`bridge:<bridge_id>:<device_id>`).
 pub(crate) struct BridgeProvider;
 
 impl BridgeProvider {
@@ -140,6 +141,7 @@ impl BridgeProvider {
         Ok(())
     }
 
+    /// List bridge outputs across configured and discovered bridges.
     async fn list_outputs_internal(state: &AppState) -> Vec<OutputInfo> {
         let (merged, active_bridge_id, active_output_id) = {
             let bridges_state = state.providers.bridge.bridges.lock().unwrap();

@@ -13,10 +13,15 @@ use crate::state::AppState;
 /// Errors returned by the output controller facade.
 #[derive(Debug)]
 pub(crate) enum OutputControllerError {
+    /// No active output is currently selected.
     NoActiveOutput,
+    /// Request targeted a different output than the currently active one.
     UnsupportedOutput { requested: String, active: String },
+    /// Active output exists but is currently offline/unreachable.
     OutputOffline { output_id: String },
+    /// Underlying player command channel is unavailable.
     PlayerOffline,
+    /// Prebuilt HTTP response from lower-level provider/controller logic.
     Http(HttpResponse),
 }
 

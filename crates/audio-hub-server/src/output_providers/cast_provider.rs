@@ -13,9 +13,11 @@ use crate::models::{
 use crate::output_providers::registry::{OutputProvider, ProviderError};
 use crate::state::AppState;
 
+/// Output provider for Chromecast outputs (`cast:<device_id>`).
 pub(crate) struct CastProvider;
 
 impl CastProvider {
+    /// Static provider id used for provider listings and routing.
     fn provider_id() -> &'static str {
         "cast"
     }
@@ -24,6 +26,7 @@ impl CastProvider {
         format!("cast:{device_id}")
     }
 
+    /// Parse `cast:<device_id>` and return the device id.
     pub(crate) fn parse_output_id(output_id: &str) -> Option<String> {
         let mut parts = output_id.splitn(2, ':');
         let kind = parts.next().unwrap_or("");
@@ -34,6 +37,7 @@ impl CastProvider {
         Some(id.to_string())
     }
 
+    /// Ensure a cast worker exists for the output and return its command sender.
     pub(crate) fn ensure_worker_for_output(
         state: &AppState,
         output_id: &str,

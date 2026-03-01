@@ -11,23 +11,39 @@ use crate::state::QueueState;
 use crate::status_store::StatusStore;
 use audio_bridge_types::PlaybackEndReason;
 
+/// Result of attempting to dispatch the next queued track.
 pub(crate) enum NextDispatchResult {
+    /// Next track was dispatched successfully.
     Dispatched,
+    /// Queue was empty.
     Empty,
+    /// Dispatch failed (transport/channel error).
     Failed,
 }
 
+/// Snapshot of status fields used to decide auto-advance behavior.
 pub(crate) struct AutoAdvanceInputs {
+    /// Duration from previous known local status.
     pub last_duration_ms: Option<u64>,
+    /// Duration from latest remote status.
     pub remote_duration_ms: Option<u64>,
+    /// Elapsed from latest remote status.
     pub remote_elapsed_ms: Option<u64>,
+    /// Reported playback end reason.
     pub end_reason: Option<PlaybackEndReason>,
+    /// Effective elapsed from merged status.
     pub elapsed_ms: Option<u64>,
+    /// Effective duration from merged status.
     pub duration_ms: Option<u64>,
+    /// Whether user explicitly paused playback.
     pub user_paused: bool,
+    /// Whether a seek operation is still in flight.
     pub seek_in_flight: bool,
+    /// Whether auto-advance already dispatched.
     pub auto_advance_in_flight: bool,
+    /// Whether manual next/previous is in flight.
     pub manual_advance_in_flight: bool,
+    /// Whether status currently has a playing track.
     pub now_playing: bool,
 }
 
@@ -46,6 +62,7 @@ fn should_auto_advance(inputs: &AutoAdvanceInputs) -> bool {
 }
 
 #[derive(Clone)]
+/// Queue mutation service and auto-advance coordinator.
 pub(crate) struct QueueService {
     queue: Arc<Mutex<QueueState>>,
     status: StatusStore,
@@ -71,6 +88,7 @@ impl QueueService {
         &self.queue
     }
 
+    /// Add path to played history (deduplicated tail, bounded to 100 entries).
     pub(crate) fn record_played_path(&self, path: &Path) {
         const MAX_HISTORY: usize = 100;
         let mut queue = self.queue.lock().unwrap();
@@ -88,6 +106,7 @@ impl QueueService {
         }
     }
 
+    /// Returns `true` when history contains an item different from current.
     pub(crate) fn has_previous(&self, current: Option<&Path>) -> bool {
         let queue = self.queue.lock().unwrap();
         for path in queue.history.iter().rev() {

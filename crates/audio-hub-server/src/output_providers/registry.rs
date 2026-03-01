@@ -15,6 +15,7 @@ use crate::state::AppState;
 use tracing::warn;
 
 #[derive(Debug)]
+/// Normalized error type produced by output providers.
 pub(crate) enum ProviderError {
     /// The request is invalid or references an unknown id.
     BadRequest(String),
@@ -36,6 +37,7 @@ impl ProviderError {
 }
 
 #[async_trait]
+/// Adapter contract implemented by each output provider backend.
 pub(crate) trait OutputProvider: Send + Sync {
     /// List providers exposed by this implementation.
     fn list_providers(&self, state: &AppState) -> Vec<crate::models::ProviderInfo>;
@@ -112,6 +114,7 @@ pub(crate) trait OutputProvider: Send + Sync {
     }
 }
 
+/// Provider multiplexer that routes operations by provider/output id.
 pub(crate) struct OutputRegistry {
     providers: Vec<Box<dyn OutputProvider>>,
 }

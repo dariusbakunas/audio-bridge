@@ -19,6 +19,7 @@ const MAX_DISCOVERED_FAILURES: usize = 5;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 const RETRY_MAX_DELAY: Duration = Duration::from_secs(60);
 
+/// Start device-list SSE watchers for all statically configured bridges.
 pub(crate) fn spawn_bridge_device_streams_for_config(state: web::Data<AppState>) {
     let bridges = state
         .providers
@@ -33,6 +34,7 @@ pub(crate) fn spawn_bridge_device_streams_for_config(state: web::Data<AppState>)
     }
 }
 
+/// Start a device-list SSE watcher for one discovered bridge.
 pub(crate) fn spawn_bridge_device_stream_for_discovered(
     state: web::Data<AppState>,
     bridge_id: String,
@@ -40,6 +42,7 @@ pub(crate) fn spawn_bridge_device_stream_for_discovered(
     spawn_bridge_device_stream(state, bridge_id);
 }
 
+/// Start playback-status SSE watchers for all statically configured bridges.
 pub(crate) fn spawn_bridge_status_streams_for_config(state: web::Data<AppState>) {
     let bridges = state
         .providers
@@ -54,6 +57,7 @@ pub(crate) fn spawn_bridge_status_streams_for_config(state: web::Data<AppState>)
     }
 }
 
+/// Start a playback-status SSE watcher for one discovered bridge.
 pub(crate) fn spawn_bridge_status_stream_for_discovered(
     state: web::Data<AppState>,
     bridge_id: String,
@@ -61,6 +65,7 @@ pub(crate) fn spawn_bridge_status_stream_for_discovered(
     spawn_bridge_status_stream(state, bridge_id);
 }
 
+/// Spawn and maintain the per-bridge device stream reconnect loop.
 fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
     if let Ok(mut active) = state.providers.bridge.device_streams.lock() {
         if !active.insert(bridge_id.clone()) {
@@ -150,6 +155,7 @@ fn spawn_bridge_device_stream(state: web::Data<AppState>, bridge_id: String) {
     });
 }
 
+/// Spawn and maintain the per-bridge status stream reconnect loop.
 fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
     if let Ok(mut active) = state.providers.bridge.status_streams.lock() {
         if !active.insert(bridge_id.clone()) {
@@ -255,6 +261,12 @@ fn spawn_bridge_status_stream(state: web::Data<AppState>, bridge_id: String) {
     });
 }
 
+/// Apply a bridge status snapshot into server playback/session state.
+///
+/// Handles:
+/// - session-scoped EOF auto-advance for bridge outputs
+/// - bridge online transitions and output refresh signaling
+/// - global queue/status reducer updates for active bridge playback
 fn apply_remote_status(
     state: &web::Data<AppState>,
     bridge_id: &str,
@@ -431,6 +443,7 @@ fn apply_remote_status(
     *last_duration_ms = remote.duration_ms;
 }
 
+/// Resolve which session currently owns any output on this bridge id.
 fn session_for_bridge(bridge_id: &str) -> Option<String> {
     let (_, bridge_locks) = crate::session_registry::lock_snapshot();
     bridge_locks
@@ -440,6 +453,7 @@ fn session_for_bridge(bridge_id: &str) -> Option<String> {
         })
 }
 
+/// Resolve bridge HTTP address from configured or discovered bridge state.
 fn resolve_bridge_addr(state: &AppState, bridge_id: &str) -> Option<SocketAddr> {
     if let Ok(bridges) = state.providers.bridge.bridges.lock() {
         if let Some(bridge) = bridges.bridges.iter().find(|b| b.id == bridge_id) {
@@ -454,6 +468,7 @@ fn resolve_bridge_addr(state: &AppState, bridge_id: &str) -> Option<SocketAddr> 
     None
 }
 
+/// Return whether this bridge id is present in static config.
 fn is_configured_bridge(state: &AppState, bridge_id: &str) -> bool {
     state
         .providers

@@ -53,12 +53,14 @@ impl StatusStore {
         Some((result, *s != prev))
     }
 
+    /// Emit `status_changed` event when `changed` is true.
     pub fn emit_if_changed(&self, changed: bool) {
         if changed {
             self.events.status_changed();
         }
     }
 
+    /// Set `has_previous` flag in shared status.
     pub fn set_has_previous(&self, value: bool) {
         let changed = self.update_status(|s| {
             s.has_previous = Some(value);
@@ -100,6 +102,7 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
+    /// Apply a pause toggle from UI/remote command.
     pub fn on_pause_toggle(&self) {
         let changed = self.update_status(|s| {
             s.paused = !s.paused;
@@ -136,6 +139,7 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
+    /// Mark seek operation as in-flight to suppress false EOF auto-advance.
     pub fn mark_seek_in_flight(&self) {
         let changed = self.update_status(|s| {
             s.seek_in_flight = true;
@@ -190,6 +194,7 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
+    /// Clear local now-playing fields after local playback item completes.
     pub fn on_local_playback_end(&self) {
         let changed = self.update_status(|s| {
             s.now_playing = None;
@@ -201,6 +206,7 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
+    /// Mark manual advance operation state.
     pub fn set_manual_advance_in_flight(&self, value: bool) {
         let changed = self.update_status(|s| {
             s.manual_advance_in_flight = value;
@@ -216,6 +222,7 @@ impl StatusStore {
         self.emit_if_changed(changed);
     }
 
+    /// Merge remote bridge status into shared status and produce auto-advance inputs.
     pub fn reduce_remote_and_inputs(
         &self,
         remote: &BridgeStatus,

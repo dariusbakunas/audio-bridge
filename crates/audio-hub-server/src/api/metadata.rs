@@ -129,6 +129,7 @@ pub struct MediaAssetPath {
 
 const DEFAULT_LANG: &str = "en-US";
 
+/// Convert DB text metadata rows into API payload models.
 fn map_text_metadata(entry: TextEntry) -> TextMetadata {
     TextMetadata {
         text: entry.text,
@@ -138,6 +139,7 @@ fn map_text_metadata(entry: TextEntry) -> TextMetadata {
     }
 }
 
+/// Convert DB media-asset rows into API payload models.
 fn map_media_asset_info(entry: MediaAssetRecord) -> MediaAssetInfo {
     MediaAssetInfo {
         id: entry.id,
@@ -148,6 +150,7 @@ fn map_media_asset_info(entry: MediaAssetRecord) -> MediaAssetInfo {
     }
 }
 
+/// Return current UNIX time in milliseconds for metadata write timestamps.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1273,7 +1276,9 @@ pub async fn media_asset(
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Path parameter for track/album cover-art endpoints.
 pub struct CoverPath {
+    /// Track or album id depending on endpoint.
     pub id: i64,
 }
 
@@ -1287,6 +1292,7 @@ pub struct CoverPath {
     )
 )]
 #[get("/tracks/{id}/cover")]
+/// Serve embedded/discovered cover art for a track id.
 pub async fn track_cover(
     state: web::Data<AppState>,
     path: web::Path<CoverPath>,
@@ -1318,6 +1324,7 @@ pub async fn track_cover(
     )
 )]
 #[get("/albums/{id}/cover")]
+/// Serve embedded/discovered cover art for an album id.
 pub async fn album_cover(
     state: web::Data<AppState>,
     path: web::Path<CoverPath>,
@@ -1339,6 +1346,7 @@ pub async fn album_cover(
     serve_cover_art(&state, &cover_rel, &req)
 }
 
+/// Resolve, validate, and serve a cover file under `.audio-hub/art`.
 fn serve_cover_art(state: &AppState, cover_rel: &str, req: &HttpRequest) -> HttpResponse {
     let root = state.library.read().unwrap().root().to_path_buf();
     let art_root = root.join(".audio-hub").join("art");

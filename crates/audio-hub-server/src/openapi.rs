@@ -170,4 +170,5 @@ use crate::models;
         (name = "audio-hub-server", description = "Audio server control API")
     )
 )]
+/// Generated OpenAPI document entrypoint for the hub HTTP API.
 pub struct ApiDoc;

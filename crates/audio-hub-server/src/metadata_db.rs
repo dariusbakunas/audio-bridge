@@ -15,121 +15,208 @@ use uuid::Uuid;
 const SCHEMA_VERSION: i32 = 10;
 
 #[derive(Clone)]
+/// SQLite-backed metadata database handle with pooled connections.
 pub struct MetadataDb {
     pool: Pool<SqliteConnectionManager>,
     media_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
+/// Internal track record used for upsert/update operations.
 pub struct TrackRecord {
+    /// Absolute or media-root-relative file path.
     pub path: String,
+    /// Filename for display.
     pub file_name: String,
+    /// Track title.
     pub title: Option<String>,
+    /// Track artist.
     pub artist: Option<String>,
+    /// Album artist.
     pub album_artist: Option<String>,
+    /// Album title.
     pub album: Option<String>,
+    /// Stable album UUID for grouping.
     pub album_uuid: Option<String>,
+    /// Track number.
     pub track_number: Option<u32>,
+    /// Disc number.
     pub disc_number: Option<u32>,
+    /// Release year.
     pub year: Option<i32>,
+    /// Duration in milliseconds.
     pub duration_ms: Option<u64>,
+    /// Sample rate in Hz.
     pub sample_rate: Option<u32>,
+    /// Bit depth.
     pub bit_depth: Option<u32>,
+    /// Format label.
     pub format: Option<String>,
+    /// File mtime (unix ms).
     pub mtime_ms: i64,
+    /// File size in bytes.
     pub size_bytes: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// Artist summary row returned by list endpoints.
 pub struct ArtistSummary {
+    /// Artist id.
     pub id: i64,
+    /// Stable artist UUID.
     pub uuid: Option<String>,
+    /// Display artist name.
     pub name: String,
+    /// Optional sort name.
     pub sort_name: Option<String>,
+    /// Optional MusicBrainz artist MBID.
     pub mbid: Option<String>,
+    /// Album count for this artist.
     pub album_count: i64,
+    /// Track count for this artist.
     pub track_count: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// Album summary row returned by list endpoints.
 pub struct AlbumSummary {
+    /// Album id.
     pub id: i64,
+    /// Stable album UUID.
     pub uuid: Option<String>,
+    /// Album title.
     pub title: String,
+    /// Album artist display name.
     pub artist: Option<String>,
+    /// Album artist id.
     pub artist_id: Option<i64>,
+    /// Display year.
     pub year: Option<i32>,
+    /// Original release year.
     pub original_year: Option<i32>,
+    /// Edition/reissue year.
     pub edition_year: Option<i32>,
+    /// Edition label.
     pub edition_label: Option<String>,
+    /// Optional MusicBrainz release MBID.
     pub mbid: Option<String>,
+    /// Number of tracks in album.
     pub track_count: i64,
+    /// Optional on-disk cover path.
     pub cover_art_path: Option<String>,
+    /// Optional served cover URL.
     pub cover_art_url: Option<String>,
+    /// True when album has at least one hi-res track.
     pub hi_res: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// Track summary row returned by list endpoints.
 pub struct TrackSummary {
+    /// Track id.
     pub id: i64,
+    /// Filename for display.
     pub file_name: String,
+    /// Track title.
     pub title: Option<String>,
+    /// Track artist.
     pub artist: Option<String>,
+    /// Album title.
     pub album: Option<String>,
+    /// Track number.
     pub track_number: Option<u32>,
+    /// Disc number.
     pub disc_number: Option<u32>,
+    /// Duration in milliseconds.
     pub duration_ms: Option<u64>,
+    /// Format label.
     pub format: Option<String>,
+    /// Sample rate in Hz.
     pub sample_rate: Option<u32>,
+    /// Bit depth.
     pub bit_depth: Option<u32>,
+    /// Optional MusicBrainz recording MBID.
     pub mbid: Option<String>,
+    /// Optional served cover URL.
     pub cover_art_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
+/// Candidate album path used for writing album marker sidecars.
 pub struct AlbumMarkerCandidate {
+    /// Album UUID.
     pub album_uuid: String,
+    /// Album title.
     pub title: Option<String>,
+    /// Album artist.
     pub artist: Option<String>,
+    /// Original release year.
     pub original_year: Option<i32>,
+    /// Edition/display year.
     pub year: Option<i32>,
+    /// Representative path for album folder.
     pub path: String,
 }
 
 #[derive(Debug, Clone)]
+/// Text metadata value persisted for artist/album profiles.
 pub struct TextEntry {
+    /// Language tag.
     pub lang: String,
+    /// Text payload.
     pub text: String,
+    /// Optional source label/url.
     pub source: Option<String>,
+    /// Locked flag for overwrite protection.
     pub locked: bool,
+    /// Last update time (unix ms).
     pub updated_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
+/// Media asset DB row for artist/album image records.
 pub struct MediaAssetRecord {
+    /// Media asset id.
     pub id: i64,
+    /// Owner entity type (`artist`/`album`).
     pub owner_type: String,
+    /// Owner entity id.
     pub owner_id: i64,
+    /// Asset kind (for example `image`).
     pub kind: String,
+    /// Local stored asset path.
     pub local_path: String,
+    /// Optional checksum.
     pub checksum: Option<String>,
+    /// Optional original source URL.
     pub source_url: Option<String>,
+    /// Last update time (unix ms).
     pub updated_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
+/// Track candidate for MusicBrainz enrichment jobs.
 pub struct MusicBrainzCandidate {
+    /// Track path.
     pub path: String,
+    /// Track title.
     pub title: String,
+    /// Track artist.
     pub artist: String,
+    /// Album title.
     pub album: Option<String>,
+    /// Album artist.
     pub album_artist: Option<String>,
+    /// No-match key used to suppress repeated lookups.
     pub no_match_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]
+/// Album candidate for cover art enrichment jobs.
 pub struct CoverArtCandidate {
+    /// Album id.
     pub album_id: i64,
+    /// MusicBrainz release MBID.
     pub mbid: String,
 }
 
@@ -170,15 +257,18 @@ fn map_media_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAssetRe
 }
 
 impl MetadataDb {
+    /// Open (or initialize) metadata DB under `<media_root>/.audio-hub/metadata.sqlite`.
     pub fn new(media_root: &Path) -> Result<Self> {
         let db_path = db_path_for(media_root);
         Self::new_at_path_with_media_root(&db_path, Some(media_root))
     }
 
+    /// Open (or initialize) metadata DB at an explicit path.
     pub fn new_at_path(db_path: &Path) -> Result<Self> {
         Self::new_at_path_with_media_root(db_path, None)
     }
 
+    /// Open DB at explicit path and optionally configure media root for path normalization.
     pub fn new_at_path_with_media_root(db_path: &Path, media_root: Option<&Path>) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)

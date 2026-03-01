@@ -107,6 +107,7 @@ impl SessionPlaybackError {
     }
 }
 
+/// Map controller-layer errors into stable reason strings for API responses/logs.
 fn controller_error_reason(err: &OutputControllerError) -> String {
     match err {
         OutputControllerError::NoActiveOutput => "no_active_output".to_string(),
@@ -136,6 +137,10 @@ impl SessionPlaybackManager {
         Self
     }
 
+    /// Resolve and validate the selected output for a session.
+    ///
+    /// This ensures the session exists, has an active output, and still owns
+    /// the corresponding output lock.
     fn bound_output_id(&self, session_id: &str) -> Result<String, SessionPlaybackError> {
         match crate::session_registry::require_bound_output(session_id) {
             Ok(output_id) => Ok(output_id),
@@ -162,6 +167,7 @@ impl SessionPlaybackManager {
         }
     }
 
+    /// Resolve an output id into a concrete bridge transport target.
     fn bridge_target(&self, state: &AppState, output_id: &str) -> Option<BridgeTarget> {
         let (bridge_id, device_id) = parse_output_id(output_id).ok()?;
         let http_addr = {
@@ -180,6 +186,7 @@ impl SessionPlaybackManager {
         })
     }
 
+    /// Resolve the cast worker sender for a cast output id.
     fn cast_worker(&self, state: &AppState, output_id: &str) -> Option<Sender<BridgeCommand>> {
         if !output_id.starts_with("cast:") {
             return None;
@@ -187,6 +194,7 @@ impl SessionPlaybackManager {
         CastProvider::ensure_worker_for_output(state, output_id).ok()
     }
 
+    /// Dispatch a file path to a bridge output after selecting the target device.
     async fn bridge_play_path(
         &self,
         state: &AppState,
@@ -257,6 +265,10 @@ impl SessionPlaybackManager {
         Ok(target.output_id)
     }
 
+    /// Play a library path on the session's selected output.
+    ///
+    /// Equivalent to [`Self::play_path_with_options`] with `seek_ms = None`
+    /// and `start_paused = false`.
     pub async fn play_path(
         &self,
         state: &AppState,
@@ -267,6 +279,8 @@ impl SessionPlaybackManager {
             .await
     }
 
+    /// Play a library path on the session's selected output with optional
+    /// seek offset and paused-start behavior.
     pub async fn play_path_with_options(
         &self,
         state: &AppState,
@@ -330,6 +344,7 @@ impl SessionPlaybackManager {
         }
     }
 
+    /// Read normalized playback status for the session's selected output.
     pub async fn status(
         &self,
         state: &AppState,
@@ -390,6 +405,7 @@ impl SessionPlaybackManager {
         }
     }
 
+    /// Build a session status payload from a bridge status snapshot.
     fn build_bridge_status_response(
         &self,
         state: &AppState,
@@ -480,6 +496,7 @@ impl SessionPlaybackManager {
         }
     }
 
+    /// Toggle pause/resume for the session's selected output.
     pub async fn pause_toggle(
         &self,
         state: &AppState,
@@ -533,6 +550,7 @@ impl SessionPlaybackManager {
             })
     }
 
+    /// Seek to an absolute playback position (milliseconds) for the selected output.
     pub async fn seek(
         &self,
         state: &AppState,
@@ -587,6 +605,7 @@ impl SessionPlaybackManager {
             })
     }
 
+    /// Stop playback for the session's selected output.
     pub async fn stop(
         &self,
         state: &AppState,
@@ -636,6 +655,7 @@ impl SessionPlaybackManager {
         })
     }
 
+    /// Read volume/mute state for the session's selected output.
     pub async fn volume(
         &self,
         state: &AppState,
@@ -654,6 +674,7 @@ impl SessionPlaybackManager {
             })
     }
 
+    /// Set output volume for the session's selected output.
     pub async fn set_volume(
         &self,
         state: &AppState,
@@ -673,6 +694,7 @@ impl SessionPlaybackManager {
             })
     }
 
+    /// Set output mute state for the session's selected output.
     pub async fn set_mute(
         &self,
         state: &AppState,
@@ -692,6 +714,7 @@ impl SessionPlaybackManager {
             })
     }
 
+    /// Build a local synthetic status payload when no remote status exists yet.
     fn synthetic_status(
         &self,
         state: &AppState,
@@ -760,6 +783,7 @@ impl SessionPlaybackManager {
         }
     }
 
+    /// Fill missing now-playing fields using session metadata DB fallbacks.
     fn apply_session_now_playing_fallback(
         &self,
         state: &AppState,
@@ -815,6 +839,7 @@ impl SessionPlaybackManager {
     }
 }
 
+/// Parse a display string into a canonical relative library path when possible.
 fn parse_now_playing_path(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -836,6 +861,7 @@ fn parse_now_playing_path(raw: &str) -> Option<String> {
     None
 }
 
+/// Parse a display string into a numeric track id when possible.
 fn parse_now_playing_track_id(raw: &str) -> Option<i64> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

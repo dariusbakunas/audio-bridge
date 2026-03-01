@@ -46,6 +46,7 @@ pub struct SessionSeekBody {
 const SESSION_STATUS_PING_INTERVAL: Duration = Duration::from_secs(15);
 const SESSION_STATUS_CAST_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Per-connection state for `/sessions/{id}/status/stream` SSE.
 struct SessionStatusStreamState {
     state: web::Data<AppState>,
     session_id: String,
@@ -56,6 +57,7 @@ struct SessionStatusStreamState {
     last_ping: Instant,
 }
 
+/// Per-connection state for `/sessions/{id}/queue/stream` SSE.
 struct SessionQueueStreamState {
     state: web::Data<AppState>,
     session_id: String,
@@ -66,11 +68,13 @@ struct SessionQueueStreamState {
     last_ping: Instant,
 }
 
+/// Internal signal source for SSE loop coordination.
 enum SessionStreamSignal {
     Tick,
     Event(Result<HubEvent, RecvError>),
 }
 
+/// Encode one SSE event payload chunk.
 fn session_sse_event(event: &str, data: &str) -> Bytes {
     let mut payload = String::new();
     payload.push_str("event: ");
@@ -85,6 +89,7 @@ fn session_sse_event(event: &str, data: &str) -> Bytes {
     Bytes::from(payload)
 }
 
+/// Enqueue a keepalive ping frame when stream is idle.
 fn push_session_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
     if pending.is_empty() && last_ping.elapsed() >= SESSION_STATUS_PING_INTERVAL {
         *last_ping = Instant::now();
@@ -92,6 +97,7 @@ fn push_session_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut In
     }
 }
 
+/// Wait for either timer tick or hub event bus message.
 async fn recv_session_signal(
     receiver: &mut broadcast::Receiver<HubEvent>,
     interval: &mut Interval,
@@ -102,6 +108,7 @@ async fn recv_session_signal(
     }
 }
 
+/// Build common SSE response headers for a byte stream.
 fn session_sse_response<S>(stream: S) -> HttpResponse
 where
     S: Stream<Item = Result<Bytes, Error>> + 'static,
@@ -113,12 +120,14 @@ where
         .streaming(stream)
 }
 
+/// Update session status cache with latest snapshot.
 fn cache_session_status(state: &AppState, session_id: &str, status: &StatusResponse) {
     if let Ok(mut cache) = state.output.session_status_cache.lock() {
         cache.insert(session_id.to_string(), status.clone());
     }
 }
 
+/// Read cached session status snapshot if present.
 fn cached_session_status(state: &AppState, session_id: &str) -> Option<StatusResponse> {
     state
         .output
@@ -128,6 +137,7 @@ fn cached_session_status(state: &AppState, session_id: &str) -> Option<StatusRes
         .and_then(|cache| cache.get(session_id).cloned())
 }
 
+/// Remove cached session status snapshot.
 fn clear_cached_session_status(state: &AppState, session_id: &str) {
     if let Ok(mut cache) = state.output.session_status_cache.lock() {
         cache.remove(session_id);
