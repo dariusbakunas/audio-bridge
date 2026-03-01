@@ -123,6 +123,34 @@ If you have a quiet little box on your network (RPi + USB DAC) and you want:
 
 …this project is for you.
 
+## Philosophy
+
+Audio Hub is designed as a digital transport with an instrument panel.
+
+It is not a streaming aggregator.  
+It is not a discovery engine.  
+It is not a metadata graph.
+
+It is a deterministic playback system for locally owned audio libraries and explicitly configured outputs.
+
+The system prioritizes:
+
+- Transparent signal paths
+- Deterministic routing
+- Sample rate awareness
+- Output control
+- Inspectable playback state
+
+When you press play, you know:
+
+- Where the file lives
+- What format it is
+- What sample rate is active
+- Which output is engaged
+- Whether resampling occurred
+
+Audio Hub is built for listeners who value ownership, clarity, and control.
+
 ## Supported formats
 
 Library scanning recognizes: **flac, wav, aiff/aif, mp3, m4a, aac, alac, ogg/oga, opus**.  
