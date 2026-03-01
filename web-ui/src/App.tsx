@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
 import {
-  apiUrl,
   fetchJson,
   postJson,
 } from "./api";
@@ -8,24 +7,16 @@ import {
   LogEvent,
   MetadataEvent,
   OutputInfo,
-  OutputSettings,
-  OutputSettingsResponse,
-  ProviderOutputs,
   SessionCreateResponse,
   SessionVolumeResponse,
   StatusResponse,
   QueueItem,
-  TrackResolveResponse,
   TrackListResponse,
   TrackSummary
 } from "./types";
 import AppModals from "./components/AppModals";
-import PlayerBar from "./components/PlayerBar";
+import AppChrome from "./components/AppChrome";
 import MainContent from "./components/MainContent";
-import ConnectionGate from "./components/ConnectionGate";
-import NotificationsPanel from "./components/NotificationsPanel";
-import SideNav from "./components/SideNav";
-import ViewHeader from "./components/ViewHeader";
 import {
   useLogsStream,
   useMetadataStream,
@@ -38,6 +29,8 @@ import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
 import { useAlbumsState } from "./hooks/useAlbumsState";
 import { useLocalPlayback } from "./hooks/useLocalPlayback";
+import { useNowPlayingCover } from "./hooks/useNowPlayingCover";
+import { useOutputSettings } from "./hooks/useOutputSettings";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
@@ -260,20 +253,12 @@ export default function App() {
     }
   });
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("metadata");
-  const [outputsSettings, setOutputsSettings] = useState<OutputSettings | null>(null);
-  const [outputsProviders, setOutputsProviders] = useState<ProviderOutputs[]>([]);
-  const [outputsLoading, setOutputsLoading] = useState<boolean>(false);
-  const [outputsError, setOutputsError] = useState<string | null>(null);
-  const [outputsLastRefresh, setOutputsLastRefresh] = useState<Record<string, string>>({});
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [albumSearch, setAlbumSearch] = useState<string>("");
   const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
   const [albumViewId, setAlbumViewId] = useState<number | null>(null);
-  const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
-  const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
-  const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -365,6 +350,21 @@ export default function App() {
   });
   const { trackMenuTrackId, trackMenuPosition, toggleTrackMenu, runTrackMenuAction } =
     useTrackMenu();
+  const {
+    outputsSettings,
+    outputsProviders,
+    outputsLoading,
+    outputsError,
+    outputsLastRefresh,
+    handleRefreshProvider,
+    handleToggleOutputSetting,
+    handleRenameOutputSetting,
+    handleToggleExclusiveSetting
+  } = useOutputSettings({
+    settingsOpen,
+    settingsSection,
+    serverConnected
+  });
   const activeOutput = useMemo(
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
@@ -390,6 +390,12 @@ export default function App() {
     markUpdatedAt: () => setUpdatedAt(new Date()),
     reportError: (message) => reportError(message)
   });
+  const {
+    nowPlayingCover,
+    nowPlayingCoverFailed,
+    nowPlayingAlbumId,
+    onCoverError
+  } = useNowPlayingCover(status?.now_playing_track_id ?? null);
   const queueNowPlayingTrackId = useMemo(() => {
     const item = queue.find((entry) => entry.kind === "track" && Boolean(entry.now_playing));
     return item?.kind === "track" ? item.id : null;
@@ -995,110 +1001,6 @@ export default function App() {
     }
   });
 
-  const fetchOutputSettings = useCallback(async () => {
-    setOutputsLoading(true);
-    try {
-      const data = await fetchJson<OutputSettingsResponse>("/outputs/settings");
-      setOutputsSettings(data.settings);
-      setOutputsProviders(data.providers);
-      setOutputsError(null);
-    } catch (error) {
-      setOutputsError(error instanceof Error ? error.message : "Failed to load outputs");
-    } finally {
-      setOutputsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!settingsOpen || settingsSection !== "outputs" || !serverConnected) return;
-    fetchOutputSettings();
-  }, [settingsOpen, settingsSection, serverConnected, fetchOutputSettings]);
-
-  const updateOutputSettings = useCallback(async (next: OutputSettings) => {
-    const data = await fetchJson<OutputSettings>("/outputs/settings", {
-      method: "POST",
-      body: JSON.stringify(next)
-    });
-    setOutputsSettings(data);
-  }, []);
-
-  const handleToggleOutputSetting = useCallback(async (outputId: string, enabled: boolean) => {
-    if (!outputsSettings) return;
-    const disabled = new Set(outputsSettings.disabled);
-    if (enabled) {
-      disabled.delete(outputId);
-    } else {
-      disabled.add(outputId);
-    }
-    const next: OutputSettings = {
-      ...outputsSettings,
-      disabled: Array.from(disabled)
-    };
-    setOutputsSettings(next);
-    try {
-      await updateOutputSettings(next);
-    } catch (error) {
-      setOutputsSettings(outputsSettings);
-      setOutputsError(error instanceof Error ? error.message : "Failed to update outputs");
-    }
-  }, [outputsSettings, updateOutputSettings]);
-
-  const handleRenameOutputSetting = useCallback(async (outputId: string, name: string) => {
-    if (!outputsSettings) return;
-    const renames = { ...outputsSettings.renames };
-    if (name) {
-      renames[outputId] = name;
-    } else {
-      delete renames[outputId];
-    }
-    const next: OutputSettings = {
-      ...outputsSettings,
-      renames
-    };
-    setOutputsSettings(next);
-    try {
-      await updateOutputSettings(next);
-    } catch (error) {
-      setOutputsSettings(outputsSettings);
-      setOutputsError(error instanceof Error ? error.message : "Failed to update outputs");
-    }
-  }, [outputsSettings, updateOutputSettings]);
-
-  const handleToggleExclusiveSetting = useCallback(async (outputId: string, enabled: boolean) => {
-    if (!outputsSettings) return;
-    const exclusive = new Set(outputsSettings.exclusive);
-    if (enabled) {
-      exclusive.add(outputId);
-    } else {
-      exclusive.delete(outputId);
-    }
-    const next: OutputSettings = {
-      ...outputsSettings,
-      exclusive: Array.from(exclusive)
-    };
-    setOutputsSettings(next);
-    try {
-      await updateOutputSettings(next);
-    } catch (error) {
-      setOutputsSettings(outputsSettings);
-      setOutputsError(error instanceof Error ? error.message : "Failed to update outputs");
-    }
-  }, [outputsSettings, updateOutputSettings]);
-
-  const handleRefreshProvider = useCallback(async (providerId: string) => {
-    try {
-      await postJson(`/providers/${encodeURIComponent(providerId)}/refresh`);
-      const now = new Date();
-      setOutputsLastRefresh((prev) => ({
-        ...prev,
-        [providerId]: now.toLocaleTimeString()
-      }));
-      fetchOutputSettings();
-    } catch (error) {
-      setOutputsError(error instanceof Error ? error.message : "Failed to refresh provider");
-    }
-  }, [fetchOutputSettings]);
-
   useStatusStream({
     enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputId),
     sourceKey: streamKey,
@@ -1127,31 +1029,6 @@ export default function App() {
       reportError(message, "warn");
     }
   });
-
-  useEffect(() => {
-    const nowPlayingTrackId = status?.now_playing_track_id ?? null;
-    if (!nowPlayingTrackId) {
-      setNowPlayingCover(null);
-      setNowPlayingCoverFailed(false);
-      setNowPlayingAlbumId(null);
-      return;
-    }
-    setNowPlayingCover(apiUrl(`/tracks/${nowPlayingTrackId}/cover`));
-    setNowPlayingCoverFailed(false);
-    let active = true;
-    fetchJson<TrackResolveResponse>(`/tracks/resolve?track_id=${nowPlayingTrackId}`)
-      .then((response) => {
-        if (!active) return;
-        setNowPlayingAlbumId(response?.album_id ?? null);
-      })
-      .catch(() => {
-        if (!active) return;
-        setNowPlayingAlbumId(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [status?.now_playing_track_id]);
 
   useQueueStream({
     enabled: serverConnected && Boolean(sessionId),
@@ -1320,208 +1197,184 @@ export default function App() {
     ? queue.some((item) => item.kind === "track" && Boolean(item.played))
     : Boolean(status?.has_previous);
   return (
-    <div className={`app ${settingsOpen ? "settings-mode" : ""} ${showGate ? "has-gate" : ""}`}>
-      {showGate ? (
-        <ConnectionGate
-          status={serverConnecting ? "connecting" : "disconnected"}
-          message={serverError}
+    <AppChrome
+      settingsOpen={settingsOpen}
+      showGate={showGate}
+      navCollapsed={navCollapsed}
+      onToggleNavCollapsed={() => setNavCollapsed((prev) => !prev)}
+      navigateTo={navigateTo}
+      serverConnecting={serverConnecting}
+      serverError={serverError}
+      apiBaseOverride={apiBaseOverride}
+      apiBaseDefault={apiBaseDefault}
+      onApiBaseChange={handleApiBaseChange}
+      onApiBaseReset={handleApiBaseReset}
+      canGoBack={canGoBack}
+      canGoForward={canGoForward}
+      onGoBack={goBack}
+      onGoForward={goForward}
+      viewTitle={viewTitle}
+      albumViewId={albumViewId}
+      albumSearch={albumSearch}
+      onAlbumSearchChange={setAlbumSearch}
+      albumViewMode={albumViewMode}
+      onAlbumViewModeChange={setAlbumViewMode}
+      sessionId={sessionId}
+      sessions={sessions}
+      serverConnected={serverConnected}
+      onSessionChange={handleSessionChange}
+      onCreateSession={handleCreateSession}
+      onDeleteSession={() => {
+        void handleDeleteSession();
+      }}
+      deleteSessionDisabled={deleteSessionDisabled}
+      notificationsOpen={notificationsOpen}
+      unreadCount={unreadCount}
+      notifications={notifications}
+      onToggleNotifications={toggleNotifications}
+      onClearNotifications={clearNotifications}
+      playerVisible={!showGate}
+      playerStatus={status}
+      playerUpdatedAt={updatedAt}
+      nowPlayingCover={nowPlayingCover}
+      nowPlayingCoverFailed={nowPlayingCoverFailed}
+      isLocalSession={Boolean(isLocalSession)}
+      hasNowPlaying={hasNowPlaying}
+      canTogglePlayback={canTogglePlayback}
+      canGoPrevious={canGoPrevious}
+      isPaused={isPaused}
+      playButtonTitle={playButtonTitle}
+      queueHasNext={queueHasNext}
+      queueOpen={queueOpen}
+      sessionVolume={sessionVolume}
+      volumeBusy={volumeBusy}
+      activeOutput={activeOutput}
+      activeAlbumId={activeAlbumId}
+      uiBuildId={uiBuildId}
+      formatMs={formatMs}
+      albumPlaceholder={albumPlaceholder}
+      onCoverError={onCoverError}
+      onAlbumNavigate={(albumId) =>
+        navigateTo({
+          view: "album",
+          albumId
+        })
+      }
+      onPrimaryAction={handlePrimaryAction}
+      onPrevious={handlePrevious}
+      onNext={handleNext}
+      onSignalOpen={() => setSignalOpen(true)}
+      onQueueOpen={() => setQueueOpen((value) => !value)}
+      onVolumeChange={handleSetVolume}
+      onVolumeToggleMute={handleToggleMute}
+      onSelectOutput={() => {
+        if (!isLocalSession) {
+          setOutputsOpen(true);
+        }
+      }}
+      mainContent={
+        <MainContent
+          settingsOpen={settingsOpen}
+          albumViewId={albumViewId}
+          filteredAlbums={filteredAlbums}
+          albumsLoading={albumsLoading}
+          albumsError={albumsError}
+          placeholder={albumPlaceholder}
+          sessionId={sessionId}
+          activeOutputId={activeOutputId}
+          isLocalSession={Boolean(isLocalSession)}
+          activeAlbumId={activeAlbumId}
+          isPlaying={isPlaying}
+          isPaused={isPaused}
+          albumViewMode={albumViewMode}
+          onSelectAlbum={(id) =>
+            navigateTo({
+              view: "album",
+              albumId: id
+            })
+          }
+          onPlayAlbumById={handlePlayAlbumById}
+          onPlayAlbumTrack={handlePlayAlbumTrack}
+          onPause={handlePause}
+          selectedAlbum={selectedAlbum}
+          albumTracks={albumTracks}
+          albumTracksLoading={albumTracksLoading}
+          albumTracksError={albumTracksError}
+          formatMs={formatMs}
+          effectiveNowPlayingTrackId={effectiveNowPlayingTrackId}
+          trackMenuTrackId={trackMenuTrackId}
+          trackMenuPosition={trackMenuPosition}
+          onToggleMenu={toggleTrackMenu}
+          onMenuPlay={(trackId) =>
+            runTrackMenuAction((id) => {
+              handlePlay(id);
+            }, trackId)
+          }
+          onMenuQueue={(trackId) =>
+            runTrackMenuAction((id) => {
+              handleQueue(id);
+            }, trackId)
+          }
+          onMenuPlayNext={(trackId) =>
+            runTrackMenuAction((id) => {
+              handlePlayNext(id);
+            }, trackId)
+          }
+          onMenuRescan={(trackId) =>
+            runTrackMenuAction((id) => {
+              handleRescanTrack(id);
+            }, trackId)
+          }
+          onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
+          onEditTrackMetadata={(trackId) =>
+            runTrackMenuAction(openTrackEditorForAlbum, trackId)
+          }
+          onAnalyzeTrack={(track) => {
+            runTrackMenuAction(() => {
+              setAnalysisTarget({
+                trackId: track.id,
+                title: track.title ?? track.file_name,
+                artist: track.artist ?? null
+              });
+            }, track.id);
+          }}
+          onEditAlbumMetadata={openAlbumEditor}
+          onEditCatalogMetadata={() => setCatalogOpen(true)}
+          onReadAlbumNotes={() => setAlbumNotesOpen(true)}
+          albumProfile={albumProfile}
+          settingsSection={settingsSection}
+          onSettingsSectionChange={(section) =>
+            navigateTo({
+              view: "settings",
+              settingsSection: section
+            })
+          }
           apiBase={apiBaseOverride}
           apiBaseDefault={apiBaseDefault}
           onApiBaseChange={handleApiBaseChange}
           onApiBaseReset={handleApiBaseReset}
           onReconnect={() => window.location.reload()}
+          outputsSettings={outputsSettings}
+          outputsProviders={outputsProviders}
+          outputsLoading={outputsLoading}
+          outputsError={outputsError}
+          outputsLastRefresh={outputsLastRefresh}
+          onRefreshProvider={handleRefreshProvider}
+          onToggleOutput={handleToggleOutputSetting}
+          onRenameOutput={handleRenameOutputSetting}
+          onToggleExclusive={handleToggleExclusiveSetting}
+          metadataEvents={metadataEvents}
+          logEvents={logEvents}
+          logsError={logsError}
+          rescanBusy={rescanBusy}
+          onClearMetadata={() => setMetadataEvents([])}
+          onRescanLibrary={handleRescanLibrary}
+          onClearLogs={handleClearLogs}
+          describeMetadataEvent={describeMetadataEvent}
+          metadataDetailLines={metadataDetailLines}
         />
-      ) : null}
-      <div className={`layout ${navCollapsed ? "nav-collapsed" : ""}`}>
-        <SideNav
-          navCollapsed={navCollapsed}
-          settingsOpen={settingsOpen}
-          onToggleCollapsed={() => setNavCollapsed((prev) => !prev)}
-          navigateTo={navigateTo}
-        />
-
-        <main className={`main ${showGate ? "disabled" : ""}`}>
-          <ViewHeader
-            canGoBack={canGoBack}
-            canGoForward={canGoForward}
-            onGoBack={goBack}
-            onGoForward={goForward}
-            viewTitle={viewTitle}
-            showLibraryTools={!settingsOpen && albumViewId === null}
-            albumSearch={albumSearch}
-            onAlbumSearchChange={setAlbumSearch}
-            albumViewMode={albumViewMode}
-            onAlbumViewModeChange={setAlbumViewMode}
-            sessionId={sessionId}
-            sessions={sessions}
-            serverConnected={serverConnected}
-            onSessionChange={handleSessionChange}
-            onCreateSession={handleCreateSession}
-            onDeleteSession={() => {
-              void handleDeleteSession();
-            }}
-            deleteSessionDisabled={deleteSessionDisabled}
-            notificationsOpen={notificationsOpen}
-            unreadCount={unreadCount}
-            onToggleNotifications={toggleNotifications}
-          />
-
-          <MainContent
-            settingsOpen={settingsOpen}
-            albumViewId={albumViewId}
-            filteredAlbums={filteredAlbums}
-            albumsLoading={albumsLoading}
-            albumsError={albumsError}
-            placeholder={albumPlaceholder}
-            sessionId={sessionId}
-            activeOutputId={activeOutputId}
-            isLocalSession={Boolean(isLocalSession)}
-            activeAlbumId={activeAlbumId}
-            isPlaying={isPlaying}
-            isPaused={isPaused}
-            albumViewMode={albumViewMode}
-            onSelectAlbum={(id) =>
-              navigateTo({
-                view: "album",
-                albumId: id
-              })
-            }
-            onPlayAlbumById={handlePlayAlbumById}
-            onPlayAlbumTrack={handlePlayAlbumTrack}
-            onPause={handlePause}
-            selectedAlbum={selectedAlbum}
-            albumTracks={albumTracks}
-            albumTracksLoading={albumTracksLoading}
-            albumTracksError={albumTracksError}
-            formatMs={formatMs}
-            effectiveNowPlayingTrackId={effectiveNowPlayingTrackId}
-            trackMenuTrackId={trackMenuTrackId}
-            trackMenuPosition={trackMenuPosition}
-            onToggleMenu={toggleTrackMenu}
-            onMenuPlay={(trackId) =>
-              runTrackMenuAction((id) => {
-                handlePlay(id);
-              }, trackId)
-            }
-            onMenuQueue={(trackId) =>
-              runTrackMenuAction((id) => {
-                handleQueue(id);
-              }, trackId)
-            }
-            onMenuPlayNext={(trackId) =>
-              runTrackMenuAction((id) => {
-                handlePlayNext(id);
-              }, trackId)
-            }
-            onMenuRescan={(trackId) =>
-              runTrackMenuAction((id) => {
-                handleRescanTrack(id);
-              }, trackId)
-            }
-            onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
-            onEditTrackMetadata={(trackId) =>
-              runTrackMenuAction(openTrackEditorForAlbum, trackId)
-            }
-            onAnalyzeTrack={(track) => {
-              runTrackMenuAction(() => {
-                setAnalysisTarget({
-                  trackId: track.id,
-                  title: track.title ?? track.file_name,
-                  artist: track.artist ?? null
-                });
-              }, track.id);
-            }}
-            onEditAlbumMetadata={openAlbumEditor}
-            onEditCatalogMetadata={() => setCatalogOpen(true)}
-            onReadAlbumNotes={() => setAlbumNotesOpen(true)}
-            albumProfile={albumProfile}
-            settingsSection={settingsSection}
-            onSettingsSectionChange={(section) =>
-              navigateTo({
-                view: "settings",
-                settingsSection: section
-              })
-            }
-            apiBase={apiBaseOverride}
-            apiBaseDefault={apiBaseDefault}
-            onApiBaseChange={handleApiBaseChange}
-            onApiBaseReset={handleApiBaseReset}
-            onReconnect={() => window.location.reload()}
-            outputsSettings={outputsSettings}
-            outputsProviders={outputsProviders}
-            outputsLoading={outputsLoading}
-            outputsError={outputsError}
-            outputsLastRefresh={outputsLastRefresh}
-            onRefreshProvider={handleRefreshProvider}
-            onToggleOutput={handleToggleOutputSetting}
-            onRenameOutput={handleRenameOutputSetting}
-            onToggleExclusive={handleToggleExclusiveSetting}
-            metadataEvents={metadataEvents}
-            logEvents={logEvents}
-            logsError={logsError}
-            rescanBusy={rescanBusy}
-            onClearMetadata={() => setMetadataEvents([])}
-            onRescanLibrary={handleRescanLibrary}
-            onClearLogs={handleClearLogs}
-            describeMetadataEvent={describeMetadataEvent}
-            metadataDetailLines={metadataDetailLines}
-          />
-        </main>
-      </div>
-
-      <NotificationsPanel
-        open={notificationsOpen}
-        showGate={showGate}
-        notifications={notifications}
-        onClose={toggleNotifications}
-        onClear={clearNotifications}
-      />
-
-      {!showGate ? (
-        <PlayerBar
-          status={status}
-          updatedAt={updatedAt}
-          nowPlayingCover={nowPlayingCover}
-          nowPlayingCoverFailed={nowPlayingCoverFailed}
-          showSignalAction={!isLocalSession}
-          showSignalPath={hasNowPlaying}
-          canTogglePlayback={canTogglePlayback}
-          canGoPrevious={canGoPrevious}
-          hasNowPlaying={hasNowPlaying}
-          isPaused={isPaused}
-          playButtonTitle={playButtonTitle}
-          queueHasItems={queueHasNext}
-          queueOpen={queueOpen}
-          volume={sessionVolume}
-          volumeBusy={volumeBusy}
-          showOutputAction={!isLocalSession}
-          activeOutput={activeOutput}
-          activeAlbumId={activeAlbumId}
-          uiBuildId={uiBuildId}
-          formatMs={formatMs}
-          placeholderCover={albumPlaceholder(status?.album, status?.artist)}
-          onCoverError={() => setNowPlayingCoverFailed(true)}
-          onAlbumNavigate={(albumId) =>
-            navigateTo({
-              view: "album",
-              albumId
-            })
-          }
-          onPrimaryAction={handlePrimaryAction}
-          onPrevious={handlePrevious}
-          onNext={handleNext}
-          onSignalOpen={() => setSignalOpen(true)}
-          onQueueOpen={() => setQueueOpen((value) => !value)}
-          onVolumeChange={handleSetVolume}
-          onVolumeToggleMute={handleToggleMute}
-          onSelectOutput={() => {
-            if (!isLocalSession) {
-              setOutputsOpen(true);
-            }
-          }}
-        />
-      ) : null}
-
+      }
+    >
       <AppModals
         showGate={showGate}
         isLocalSession={Boolean(isLocalSession)}
@@ -1615,7 +1468,6 @@ export default function App() {
         onQueueClear={handleQueueClear}
         audioRef={audioRef}
       />
-
-    </div>
+    </AppChrome>
   );
 }
