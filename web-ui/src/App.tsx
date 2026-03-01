@@ -19,11 +19,9 @@ import {
   TrackListResponse,
   TrackSummary
 } from "./types";
-import AlbumDetailView from "./components/AlbumDetailView";
-import AlbumsView from "./components/AlbumsView";
 import AppModals from "./components/AppModals";
 import PlayerBar from "./components/PlayerBar";
-import SettingsView from "./components/SettingsView";
+import MainContent from "./components/MainContent";
 import ConnectionGate from "./components/ConnectionGate";
 import NotificationsPanel from "./components/NotificationsPanel";
 import SideNav from "./components/SideNav";
@@ -1368,96 +1366,77 @@ export default function App() {
             onToggleNotifications={toggleNotifications}
           />
 
-          {!settingsOpen && albumViewId === null ? (
-            <section className="grid">
-              <AlbumsView
-                albums={filteredAlbums}
-                loading={albumsLoading}
-                error={albumsError}
-                placeholder={albumPlaceholder}
-                canPlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
-                activeAlbumId={activeAlbumId}
-                isPlaying={isPlaying}
-                isPaused={isPaused}
-                viewMode={albumViewMode}
-                onSelectAlbum={(id) =>
-                  navigateTo({
-                    view: "album",
-                    albumId: id
-                  })
-                }
-                onPlayAlbum={handlePlayAlbumById}
-                onPause={handlePause}
-              />
-            </section>
-          ) : null}
-
-          {albumViewId !== null && !settingsOpen ? (
-            <AlbumDetailView
-              album={selectedAlbum}
-              tracks={albumTracks}
-              loading={albumTracksLoading}
-              error={albumTracksError}
-              placeholder={albumPlaceholder}
-              canPlay={Boolean(sessionId && (activeOutputId || isLocalSession)) && albumTracks.length > 0}
-              activeAlbumId={activeAlbumId}
-              isPlaying={isPlaying}
-              isPaused={isPaused}
-              onPause={handlePause}
-              formatMs={formatMs}
-              nowPlayingTrackId={effectiveNowPlayingTrackId}
-              onPlayAlbum={() => {
-                if (!selectedAlbum) return;
-                handlePlayAlbumById(selectedAlbum.id);
-              }}
-              onPlayTrack={handlePlayAlbumTrack}
-              trackMenuTrackId={trackMenuTrackId}
-              trackMenuPosition={trackMenuPosition}
-              onToggleMenu={toggleTrackMenu}
-              onMenuPlay={(trackId) =>
-                runTrackMenuAction((id) => {
-                  handlePlay(id);
-                }, trackId)
-              }
-              onMenuQueue={(trackId) =>
-                runTrackMenuAction((id) => {
-                  handleQueue(id);
-                }, trackId)
-              }
-              onMenuPlayNext={(trackId) =>
-                runTrackMenuAction((id) => {
-                  handlePlayNext(id);
-                }, trackId)
-              }
-              onMenuRescan={(trackId) =>
-                runTrackMenuAction((id) => {
-                  handleRescanTrack(id);
-                }, trackId)
-              }
-              onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
-              onEditTrackMetadata={(trackId) =>
-                runTrackMenuAction(openTrackEditorForAlbum, trackId)
-              }
-              onAnalyzeTrack={(track) => {
-                runTrackMenuAction(() => {
-                  setAnalysisTarget({
-                    trackId: track.id,
-                    title: track.title ?? track.file_name,
-                    artist: track.artist ?? null
-                  });
-                }, track.id);
-              }}
-              onEditAlbumMetadata={openAlbumEditor}
-              onEditCatalogMetadata={() => setCatalogOpen(true)}
-              onReadAlbumNotes={() => setAlbumNotesOpen(true)}
-              albumProfile={albumProfile}
-            />
-          ) : null}
-
-          <SettingsView
-            active={settingsOpen}
-            section={settingsSection}
-            onSectionChange={(section) =>
+          <MainContent
+            settingsOpen={settingsOpen}
+            albumViewId={albumViewId}
+            filteredAlbums={filteredAlbums}
+            albumsLoading={albumsLoading}
+            albumsError={albumsError}
+            placeholder={albumPlaceholder}
+            sessionId={sessionId}
+            activeOutputId={activeOutputId}
+            isLocalSession={Boolean(isLocalSession)}
+            activeAlbumId={activeAlbumId}
+            isPlaying={isPlaying}
+            isPaused={isPaused}
+            albumViewMode={albumViewMode}
+            onSelectAlbum={(id) =>
+              navigateTo({
+                view: "album",
+                albumId: id
+              })
+            }
+            onPlayAlbumById={handlePlayAlbumById}
+            onPlayAlbumTrack={handlePlayAlbumTrack}
+            onPause={handlePause}
+            selectedAlbum={selectedAlbum}
+            albumTracks={albumTracks}
+            albumTracksLoading={albumTracksLoading}
+            albumTracksError={albumTracksError}
+            formatMs={formatMs}
+            effectiveNowPlayingTrackId={effectiveNowPlayingTrackId}
+            trackMenuTrackId={trackMenuTrackId}
+            trackMenuPosition={trackMenuPosition}
+            onToggleMenu={toggleTrackMenu}
+            onMenuPlay={(trackId) =>
+              runTrackMenuAction((id) => {
+                handlePlay(id);
+              }, trackId)
+            }
+            onMenuQueue={(trackId) =>
+              runTrackMenuAction((id) => {
+                handleQueue(id);
+              }, trackId)
+            }
+            onMenuPlayNext={(trackId) =>
+              runTrackMenuAction((id) => {
+                handlePlayNext(id);
+              }, trackId)
+            }
+            onMenuRescan={(trackId) =>
+              runTrackMenuAction((id) => {
+                handleRescanTrack(id);
+              }, trackId)
+            }
+            onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
+            onEditTrackMetadata={(trackId) =>
+              runTrackMenuAction(openTrackEditorForAlbum, trackId)
+            }
+            onAnalyzeTrack={(track) => {
+              runTrackMenuAction(() => {
+                setAnalysisTarget({
+                  trackId: track.id,
+                  title: track.title ?? track.file_name,
+                  artist: track.artist ?? null
+                });
+              }, track.id);
+            }}
+            onEditAlbumMetadata={openAlbumEditor}
+            onEditCatalogMetadata={() => setCatalogOpen(true)}
+            onReadAlbumNotes={() => setAlbumNotesOpen(true)}
+            albumProfile={albumProfile}
+            settingsSection={settingsSection}
+            onSettingsSectionChange={(section) =>
               navigateTo({
                 view: "settings",
                 settingsSection: section
