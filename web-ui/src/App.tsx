@@ -1,19 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
 import {
-  Bell,
-  ChevronLeft,
-  ChevronRight,
-  Grid3x3,
-  Library,
-  List,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Radio,
-  Search,
-  Settings,
-  Trash2
-} from "lucide-react";
-import {
   apiUrl,
   fetchJson,
   postJson,
@@ -38,8 +24,8 @@ import AlbumMetadataDialog from "./components/AlbumMetadataDialog";
 import AlbumsView from "./components/AlbumsView";
 import CatalogMetadataDialog from "./components/CatalogMetadataDialog";
 import AlbumNotesModal from "./components/AlbumNotesModal";
+import CreateSessionModal from "./components/CreateSessionModal";
 import MusicBrainzMatchModal from "./components/MusicBrainzMatchModal";
-import Modal from "./components/Modal";
 import TrackMetadataModal from "./components/TrackMetadataModal";
 import TrackAnalysisModal from "./components/TrackAnalysisModal";
 import OutputsModal from "./components/OutputsModal";
@@ -48,6 +34,9 @@ import QueueModal from "./components/QueueModal";
 import SettingsView from "./components/SettingsView";
 import SignalModal from "./components/SignalModal";
 import ConnectionGate from "./components/ConnectionGate";
+import NotificationsPanel from "./components/NotificationsPanel";
+import SideNav from "./components/SideNav";
+import ViewHeader from "./components/ViewHeader";
 import {
   useLogsStream,
   useMetadataStream,
@@ -1333,6 +1322,11 @@ export default function App() {
   const queueHasNext = Boolean(sessionId && (activeOutputId || isLocalSession)) && queue.some((item) =>
     item.kind === "track" ? !item.now_playing : true
   );
+  const deleteSessionDisabled =
+    !serverConnected ||
+    !sessionId ||
+    sessions.find((item) => item.id === sessionId)?.mode === "local" ||
+    isDefaultSessionName(sessions.find((item) => item.id === sessionId)?.name);
   const canGoPrevious = isLocalSession
     ? queue.some((item) => item.kind === "track" && Boolean(item.played))
     : Boolean(status?.has_previous);
@@ -1350,185 +1344,38 @@ export default function App() {
         />
       ) : null}
       <div className={`layout ${navCollapsed ? "nav-collapsed" : ""}`}>
-        <aside className="side-nav">
-          <div className="nav-brand">
-            <div className="nav-brand-text">
-              <div className="nav-title">Audio Hub</div>
-              <div className="nav-subtitle">Lossless control with a live signal view.</div>
-            </div>
-            <button
-              className="icon-btn nav-collapse"
-              onClick={() => setNavCollapsed((prev) => !prev)}
-              aria-label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              type="button"
-            >
-              {navCollapsed ? (
-                <PanelLeftOpen className="icon" aria-hidden="true" />
-              ) : (
-                <PanelLeftClose className="icon" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          <div className="nav-section">
-            <div className="nav-label">Library</div>
-            <button
-              className={`nav-button ${!settingsOpen ? "active" : ""}`}
-              onClick={() =>
-                navigateTo({
-                  view: "albums"
-                })
-              }
-            >
-              <Library className="nav-icon" aria-hidden="true" />
-              <span>Albums</span>
-            </button>
-          </div>
-          <div className="nav-section">
-            <div className="nav-label">System</div>
-            <button
-              className={`nav-button ${settingsOpen ? "active" : ""}`}
-              onClick={() =>
-                navigateTo({
-                  view: "settings",
-                  settingsSection: "metadata"
-                })
-              }
-            >
-              <Settings className="nav-icon" aria-hidden="true" />
-              <span>Settings</span>
-            </button>
-          </div>
-        </aside>
+        <SideNav
+          navCollapsed={navCollapsed}
+          settingsOpen={settingsOpen}
+          onToggleCollapsed={() => setNavCollapsed((prev) => !prev)}
+          navigateTo={navigateTo}
+        />
 
         <main className={`main ${showGate ? "disabled" : ""}`}>
-          <header className="view-header">
-            <div className="view-header-row">
-              <div className="view-nav">
-                <button
-                  className="icon-btn"
-                  onClick={goBack}
-                  disabled={!canGoBack}
-                  aria-label="Back"
-                  title="Back"
-                  type="button"
-                >
-                  <ChevronLeft className="icon" aria-hidden="true" />
-                </button>
-                {canGoForward ? (
-                  <button
-                    className="icon-btn"
-                    onClick={goForward}
-                    aria-label="Forward"
-                    title="Forward"
-                    type="button"
-                  >
-                    <ChevronRight className="icon" aria-hidden="true" />
-                  </button>
-                ) : null}
-              </div>
-              {viewTitle ? <h1>{viewTitle}</h1> : <span />}
-              <div className="view-header-actions">
-                {!settingsOpen && albumViewId === null ? (
-                  <div className="header-tools">
-                    <div className="header-search">
-                      <Search className="icon" aria-hidden="true" />
-                      <input
-                        className="header-search-input"
-                        type="search"
-                        placeholder="Search albums, artists..."
-                        value={albumSearch}
-                        onChange={(event) => setAlbumSearch(event.target.value)}
-                        aria-label="Search albums"
-                      />
-                    </div>
-                    <div className="view-toggle" role="tablist" aria-label="Album view">
-                      <button
-                        type="button"
-                        className={`view-toggle-btn ${albumViewMode === "grid" ? "active" : ""}`}
-                        onClick={() => setAlbumViewMode("grid")}
-                        aria-pressed={albumViewMode === "grid"}
-                        title="Grid view"
-                      >
-                        <Grid3x3 className="icon" aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        className={`view-toggle-btn ${albumViewMode === "list" ? "active" : ""}`}
-                        onClick={() => setAlbumViewMode("list")}
-                        aria-pressed={albumViewMode === "list"}
-                        title="List view"
-                      >
-                        <List className="icon" aria-hidden="true" />
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-                <div className="header-session">
-                  <select
-                    className="header-session-select"
-                    value={sessionId ?? ""}
-                    onChange={(event) => handleSessionChange(event.target.value)}
-                    aria-label="Playback session"
-                    title="Playback session"
-                    disabled={!serverConnected || sessions.length === 0}
-                  >
-                    {sessions.length === 0 ? (
-                      <option value="">No session</option>
-                    ) : null}
-                    {sessions.map((session) => (
-                      <option key={session.id} value={session.id}>
-                        {session.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="icon-btn"
-                    type="button"
-                    onClick={handleCreateSession}
-                    title="Create new session"
-                    aria-label="Create new session"
-                    disabled={!serverConnected}
-                  >
-                    <Radio className="icon" aria-hidden="true" />
-                  </button>
-                  <button
-                    className="icon-btn"
-                    type="button"
-                    onClick={() => {
-                      void handleDeleteSession();
-                    }}
-                    title="Delete selected session"
-                    aria-label="Delete selected session"
-                    disabled={
-                      !serverConnected ||
-                      !sessionId ||
-                      sessions.find((item) => item.id === sessionId)?.mode === "local" ||
-                      isDefaultSessionName(
-                        sessions.find((item) => item.id === sessionId)?.name
-                      )
-                    }
-                  >
-                    <Trash2 className="icon" aria-hidden="true" />
-                  </button>
-                </div>
-                <button
-                  className={`icon-btn notification-btn ${notificationsOpen ? "active" : ""}`}
-                  onClick={toggleNotifications}
-                  aria-label="Notifications"
-                  title="Notifications"
-                  type="button"
-                >
-                  <Bell className="icon" aria-hidden="true" />
-                  {unreadCount > 0 ? (
-                    <span className="notification-badge">
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
-                  ) : null}
-                </button>
-              </div>
-            </div>
-          </header>
+          <ViewHeader
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
+            onGoBack={goBack}
+            onGoForward={goForward}
+            viewTitle={viewTitle}
+            showLibraryTools={!settingsOpen && albumViewId === null}
+            albumSearch={albumSearch}
+            onAlbumSearchChange={setAlbumSearch}
+            albumViewMode={albumViewMode}
+            onAlbumViewModeChange={setAlbumViewMode}
+            sessionId={sessionId}
+            sessions={sessions}
+            serverConnected={serverConnected}
+            onSessionChange={handleSessionChange}
+            onCreateSession={handleCreateSession}
+            onDeleteSession={() => {
+              void handleDeleteSession();
+            }}
+            deleteSessionDisabled={deleteSessionDisabled}
+            notificationsOpen={notificationsOpen}
+            unreadCount={unreadCount}
+            onToggleNotifications={toggleNotifications}
+          />
 
           {!settingsOpen && albumViewId === null ? (
             <section className="grid">
@@ -1652,42 +1499,13 @@ export default function App() {
         </main>
       </div>
 
-      {notificationsOpen && !showGate ? (
-        <div
-          className="side-panel-backdrop notifications-backdrop"
-          onClick={toggleNotifications}
-        >
-          <aside
-            className="side-panel notification-panel"
-            aria-label="Notifications"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="card-header">
-              <span>Notifications</span>
-              <div className="card-actions">
-                <span className="pill">{notifications.length} items</span>
-                <button className="btn ghost small" onClick={clearNotifications}>
-                  Clear
-                </button>
-                <button className="btn ghost small" onClick={toggleNotifications}>
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="notification-list">
-              {notifications.length === 0 ? (
-                <div className="muted small">No notifications yet.</div>
-              ) : null}
-              {notifications.map((entry) => (
-                <div key={entry.id} className={`notification-item level-${entry.level}`}>
-                  <div className="notification-message">{entry.message}</div>
-                  <div className="notification-time">{entry.createdAt.toLocaleTimeString()}</div>
-                </div>
-              ))}
-            </div>
-          </aside>
-        </div>
-      ) : null}
+      <NotificationsPanel
+        open={notificationsOpen}
+        showGate={showGate}
+        notifications={notifications}
+        onClose={toggleNotifications}
+        onClear={clearNotifications}
+      />
 
       {!showGate ? (
         <PlayerBar
@@ -1735,67 +1553,22 @@ export default function App() {
       ) : null}
 
       {!showGate ? (
-        <Modal
-        open={createSessionOpen}
-        title="Create session"
-        onClose={() => {
-          if (!createSessionBusy) {
-            setCreateSessionOpen(false);
-          }
-        }}
-        >
-          <div className="modal-body">
-            <label className="mb-match-field">
-              <span>Session name</span>
-              <input
-                className="mb-match-input"
-                type="text"
-                value={newSessionName}
-                onChange={(event) => setNewSessionName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    if (!createSessionBusy) {
-                      void submitCreateSession();
-                    }
-                  }
-                }}
-                autoFocus
-                maxLength={80}
-                placeholder="My session"
-              />
-            </label>
-            <label className="modal-checkbox">
-              <input
-                type="checkbox"
-                checked={newSessionNeverExpires}
-                onChange={(event) => setNewSessionNeverExpires(event.target.checked)}
-                disabled={createSessionBusy}
-              />
-              Never expires
-            </label>
-            <div className="modal-actions">
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => setCreateSessionOpen(false)}
-                disabled={createSessionBusy}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => {
-                  void submitCreateSession();
-                }}
-                disabled={createSessionBusy || newSessionName.trim().length === 0}
-              >
-                {createSessionBusy ? "Creating..." : "Create"}
-              </button>
-            </div>
-          </div>
-        </Modal>
+        <CreateSessionModal
+          open={createSessionOpen}
+          busy={createSessionBusy}
+          name={newSessionName}
+          neverExpires={newSessionNeverExpires}
+          onNameChange={setNewSessionName}
+          onNeverExpiresChange={setNewSessionNeverExpires}
+          onClose={() => {
+            if (!createSessionBusy) {
+              setCreateSessionOpen(false);
+            }
+          }}
+          onSubmit={() => {
+            void submitCreateSession();
+          }}
+        />
       ) : null}
 
       {!showGate && !isLocalSession ? (
