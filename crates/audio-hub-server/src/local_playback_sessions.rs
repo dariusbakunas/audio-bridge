@@ -9,13 +9,20 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
+/// Public snapshot of a registered local playback session.
 #[derive(Clone, Debug)]
 pub struct LocalPlaybackSession {
+    /// Stable local session id (`local:<kind>:<uuid>`).
     pub session_id: String,
+    /// Client kind (`ios`, `browser`, ...).
     pub kind: String,
+    /// Human-readable client name.
     pub name: String,
+    /// Client app version.
     pub app_version: String,
+    /// Creation timestamp.
     pub created_at: Instant,
+    /// Last-seen timestamp.
     pub last_seen: Instant,
 }
 
@@ -76,6 +83,7 @@ pub fn register_session(
     session_id
 }
 
+/// Returns `true` when a local playback session id is registered.
 pub fn has_session(session_id: &str) -> bool {
     store()
         .lock()
@@ -83,6 +91,9 @@ pub fn has_session(session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Refresh `last_seen` for a local playback session.
+///
+/// Returns `true` when the session exists.
 pub fn touch_session(session_id: &str) -> bool {
     let mut store = match store().lock() {
         Ok(guard) => guard,
@@ -95,6 +106,7 @@ pub fn touch_session(session_id: &str) -> bool {
     true
 }
 
+/// List all currently registered local playback sessions.
 pub fn list_sessions() -> Vec<LocalPlaybackSession> {
     store()
         .lock()
