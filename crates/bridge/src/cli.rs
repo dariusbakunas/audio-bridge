@@ -16,6 +16,7 @@ const VERSION: &str = concat!(
 #[derive(Parser, Debug)]
 #[command(name = "bridge", version = VERSION)]
 pub struct Args {
+    /// Selected bridge command.
     #[command(subcommand)]
     pub cmd: Command,
 

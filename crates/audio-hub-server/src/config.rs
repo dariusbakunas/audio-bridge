@@ -58,7 +58,7 @@ pub struct MusicBrainzConfig {
     pub enabled: Option<bool>,
     /// User-Agent string required by MusicBrainz (include contact info).
     pub user_agent: Option<String>,
-    /// Optional base URL override (defaults to https://musicbrainz.org/ws/2).
+    /// Optional base URL override (defaults to <https://musicbrainz.org/ws/2>).
     pub base_url: Option<String>,
     /// Minimum delay between requests in milliseconds (default: 1000).
     pub rate_limit_ms: Option<u64>,

@@ -6,28 +6,49 @@ use audio_bridge_types::{BridgeStatus as BridgeStatusSnapshot, PlaybackEndReason
 /// Shared playback status state updated by the player pipeline.
 #[derive(Debug, Default)]
 pub struct PlayerStatusState {
+    /// Human-readable track identifier/path currently playing.
     pub now_playing: Option<String>,
+    /// Selected output device name.
     pub device: Option<String>,
+    /// Effective output sample rate in Hz.
     pub sample_rate: Option<u32>,
+    /// Effective output channel count.
     pub channels: Option<u16>,
+    /// Total track duration in milliseconds when known.
     pub duration_ms: Option<u64>,
+    /// Source codec name (for example, FLAC/MP3).
     pub source_codec: Option<String>,
+    /// Source bit depth when available.
     pub source_bit_depth: Option<u16>,
+    /// Container format name.
     pub container: Option<String>,
+    /// Output sample format used by the device stream.
     pub output_sample_format: Option<String>,
+    /// Whether resampling is currently active.
     pub resampling: Option<bool>,
+    /// Source sample rate before resampling.
     pub resample_from_hz: Option<u32>,
+    /// Target sample rate after resampling.
     pub resample_to_hz: Option<u32>,
+    /// Counter updated by playback callback for elapsed progress.
     pub played_frames: Option<Arc<AtomicU64>>,
+    /// Pause state shared with playback callback.
     pub paused_flag: Option<Arc<AtomicBool>>,
+    /// Total frames emitted as silence due to underruns.
     pub underrun_frames: Option<Arc<AtomicU64>>,
+    /// Number of underrun incidents observed by callback.
     pub underrun_events: Option<Arc<AtomicU64>>,
+    /// Configured output callback buffer size in frames.
     pub buffer_size_frames: Option<u32>,
+    /// Current queued frames waiting for playback.
     pub buffered_frames: Option<Arc<AtomicU64>>,
+    /// Max queue capacity in frames.
     pub buffer_capacity_frames: Option<Arc<AtomicU64>>,
+    /// Terminal playback reason from the current run.
     pub end_reason: Option<PlaybackEndReason>,
 }
 
+/// Snapshot type returned to bridge HTTP/API layers.
 pub type StatusSnapshot = BridgeStatusSnapshot;
 
 impl PlayerStatusState {

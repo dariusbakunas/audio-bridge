@@ -165,9 +165,13 @@ pub fn list_devices(host: &cpal::Host) -> Result<()> {
 #[derive(Clone, Debug)]
 /// Lightweight output device metadata for UI/device selection.
 pub struct DeviceInfo {
+    /// Stable device identifier.
     pub id: String,
+    /// Human-readable device name/description.
     pub name: String,
+    /// Minimum supported sample rate in Hz.
     pub min_rate: u32,
+    /// Maximum supported sample rate in Hz.
     pub max_rate: u32,
 }
 

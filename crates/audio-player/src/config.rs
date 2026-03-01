@@ -10,6 +10,7 @@ pub struct PlaybackConfig {
 }
 
 impl Default for PlaybackConfig {
+    /// Defaults tuned for low-risk playback across common devices.
     fn default() -> Self {
         Self {
             chunk_frames: 1024,

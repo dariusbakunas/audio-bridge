@@ -31,6 +31,7 @@ pub struct PlaybackConfig {
 
     /// When set, the callback increments these when it has to output silence.
     pub underrun_frames: Option<Arc<AtomicU64>>,
+    /// When set, the callback increments this per underrun occurrence.
     pub underrun_events: Option<Arc<AtomicU64>>,
 
     /// When set, the callback updates this with the current buffered frames.

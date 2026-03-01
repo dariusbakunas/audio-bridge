@@ -24,6 +24,7 @@ pub struct PlaybackSessionOptions {
     pub played_frames: Option<Arc<AtomicU64>>,
     /// Optional counters updated on underrun.
     pub underrun_frames: Option<Arc<AtomicU64>>,
+    /// Optional counter incremented per underrun incident.
     pub underrun_events: Option<Arc<AtomicU64>>,
     /// Optional gauge of current buffered frames.
     pub buffered_frames: Option<Arc<AtomicU64>>,

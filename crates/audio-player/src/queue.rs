@@ -42,11 +42,20 @@ struct SharedInner {
 /// Strategy for popping interleaved frames from the queue.
 pub enum PopStrategy {
     /// Block until exactly `frames` are available, or return `None` if closed before enough data.
-    BlockingExact { frames: usize },
+    BlockingExact {
+        /// Number of frames to wait for before returning.
+        frames: usize,
+    },
     /// Block until at least one frame is available, then return up to `max_frames`.
-    BlockingUpTo { max_frames: usize },
+    BlockingUpTo {
+        /// Maximum number of frames to return in one pop.
+        max_frames: usize,
+    },
     /// Return immediately with up to `max_frames`, or `None` if currently empty.
-    NonBlocking { max_frames: usize },
+    NonBlocking {
+        /// Maximum number of frames to return without waiting.
+        max_frames: usize,
+    },
 }
 
 /// Compute a conservative queue capacity in **samples** for a `(rate, channels, seconds)` target.

@@ -25,6 +25,7 @@ pub(crate) struct HttpRangeConfig {
 }
 
 impl Default for HttpRangeConfig {
+    /// Build a conservative default tuned for stable WAN/LAN streaming.
     fn default() -> Self {
         Self {
             block_size: 512 * 1024,
@@ -78,6 +79,7 @@ impl HttpRangeSource {
             .unwrap_or(false)
     }
 
+    /// Mark the source as failed so upstream status can surface stream errors.
     fn mark_error(&self) {
         if let Some(flag) = &self.error_flag {
             flag.store(true, Ordering::Relaxed);
@@ -329,6 +331,7 @@ impl HttpRangeSource {
     }
 }
 
+/// Build the HTTP client used for range requests.
 fn build_agent(tls_insecure: bool) -> ureq::Agent {
     let mut tls_builder = ureq::tls::TlsConfig::builder()
         .provider(ureq::tls::TlsProvider::Rustls)
@@ -344,6 +347,7 @@ fn build_agent(tls_insecure: bool) -> ureq::Agent {
 }
 
 impl Read for HttpRangeSource {
+    /// Read audio bytes at the current cursor, refilling from HTTP ranges as needed.
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if self.is_canceled() {
             return Ok(0);
@@ -391,6 +395,7 @@ impl Read for HttpRangeSource {
 }
 
 impl Seek for HttpRangeSource {
+    /// Move the read cursor to an absolute or relative byte position.
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let target = match pos {
             SeekFrom::Start(x) => x,
@@ -406,10 +411,12 @@ impl Seek for HttpRangeSource {
 }
 
 impl MediaSource for HttpRangeSource {
+    /// HTTP range sources support random-access reads.
     fn is_seekable(&self) -> bool {
         true
     }
 
+    /// Return known content length when discovered from response headers.
     fn byte_len(&self) -> Option<u64> {
         self.len
     }

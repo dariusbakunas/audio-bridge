@@ -15,12 +15,14 @@ mod macos {
     use objc2_core_audio::kAudioObjectPropertyScopeGlobal;
     use std::ptr::NonNull;
 
+    /// RAII guard that keeps a CoreAudio device in hog (exclusive) mode.
     pub struct ExclusiveGuard {
         device_id: AudioDeviceID,
         owned: bool,
     }
 
     impl Drop for ExclusiveGuard {
+        /// Release hog mode when this process still owns it.
         fn drop(&mut self) {
             if !self.owned {
                 return;
@@ -32,6 +34,7 @@ mod macos {
         }
     }
 
+    /// Try to acquire exclusive access and set the device sample rate.
     pub fn maybe_acquire(
         device: &cpal::Device,
         sample_rate: u32,
@@ -96,6 +99,7 @@ mod macos {
         })
     }
 
+    /// Read the device nominal sample rate from CoreAudio.
     pub fn current_nominal_rate(device: &cpal::Device) -> Option<u32> {
         let name = device.name().ok()?;
         let device_id = get_device_id_from_name(&name, false)?;
@@ -130,9 +134,11 @@ mod macos {
 pub use macos::{ExclusiveGuard, current_nominal_rate, maybe_acquire};
 
 #[cfg(not(target_os = "macos"))]
+/// No-op exclusive guard on non-macOS targets.
 pub struct ExclusiveGuard;
 
 #[cfg(not(target_os = "macos"))]
+/// Non-macOS builds do not support CoreAudio hog mode.
 pub fn maybe_acquire(
     _device: &cpal::Device,
     _sample_rate: u32,
@@ -142,6 +148,7 @@ pub fn maybe_acquire(
 }
 
 #[cfg(not(target_os = "macos"))]
+/// Non-macOS builds do not expose CoreAudio nominal-rate reads.
 pub fn current_nominal_rate(_device: &cpal::Device) -> Option<u32> {
     None
 }

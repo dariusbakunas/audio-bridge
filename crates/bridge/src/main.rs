@@ -15,6 +15,7 @@ const VERSION: &str = concat!(
     ")"
 );
 
+/// Parse CLI args, configure logging, and run the selected bridge command.
 fn main() -> Result<()> {
     let args = cli::Args::parse();
     tracing_subscriber::fmt()
