@@ -20,9 +20,6 @@ import {
   safeMediaUrl,
 } from "./api";
 import {
-  AlbumListResponse,
-  AlbumProfileResponse,
-  AlbumSummary,
   LogEvent,
   MetadataEvent,
   OutputInfo,
@@ -62,6 +59,7 @@ import {
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
+import { useAlbumsState } from "./hooks/useAlbumsState";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
@@ -333,24 +331,12 @@ export default function App() {
   const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
   const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
-  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
-  const [albumsLoading, setAlbumsLoading] = useState<boolean>(false);
-  const [albumsError, setAlbumsError] = useState<string | null>(null);
   const [albumSearch, setAlbumSearch] = useState<string>("");
   const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
   const [albumViewId, setAlbumViewId] = useState<number | null>(null);
-  const [albumTracks, setAlbumTracks] = useState<TrackSummary[]>([]);
-  const [albumTracksLoading, setAlbumTracksLoading] = useState<boolean>(false);
-  const [albumTracksError, setAlbumTracksError] = useState<string | null>(null);
-  const [albumProfile, setAlbumProfile] = useState<AlbumProfileResponse | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState<boolean>(false);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
-  const albumsReloadTimerRef = useRef<number | null>(null);
-  const albumsReloadQueuedRef = useRef(false);
-  const albumsLoadingRef = useRef(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -379,10 +365,6 @@ export default function App() {
     clearNotifications,
     toggleNotifications
   } = useToasts();
-  const handleServerHealthy = useCallback(() => {
-    setAlbumsError(null);
-    setAlbumTracksError(null);
-  }, []);
   const {
     serverConnected,
     serverConnecting,
@@ -393,7 +375,7 @@ export default function App() {
     handleApiBaseReset,
     connectionError,
     markServerConnected
-  } = useHubConnection({ onHealthy: handleServerHealthy });
+  } = useHubConnection();
   const {
     sessionId,
     setSessionId,
@@ -413,6 +395,33 @@ export default function App() {
     getClientId: getOrCreateWebSessionClientId,
     sessionStorageKey: WEB_SESSION_ID_KEY,
     onError: reportError
+  });
+  const streamKey = useMemo(
+    () => `${apiBaseOverride}:${serverConnected ? "up" : "down"}:${sessionId ?? "none"}`,
+    [apiBaseOverride, serverConnected, sessionId]
+  );
+  const {
+    albums,
+    albumsLoading,
+    albumsError,
+    setAlbumsError,
+    albumTracks,
+    albumTracksLoading,
+    albumTracksError,
+    setAlbumTracksError,
+    albumProfile,
+    setAlbumProfile,
+    catalogLoading,
+    catalogError,
+    loadAlbums,
+    loadAlbumTracks,
+    loadCatalogProfiles
+  } = useAlbumsState({
+    serverConnected,
+    streamKey,
+    albumViewId,
+    connectionError,
+    markServerConnected
   });
   const { navigateTo, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
     setSettingsOpen,
@@ -533,6 +542,12 @@ export default function App() {
       // ignore storage failures
     }
   }, [navCollapsed]);
+
+  useEffect(() => {
+    if (!serverConnected) return;
+    setAlbumsError(null);
+    setAlbumTracksError(null);
+  }, [serverConnected, setAlbumTracksError, setAlbumsError]);
 
   useEffect(() => {
     activeSessionIdRef.current = sessionId;
@@ -734,11 +749,6 @@ export default function App() {
     volumeRequestSeqRef.current += 1;
     refreshSessionVolume(sessionId, true);
   }, [activeOutputId, canControlVolume, refreshSessionVolume, sessionId]);
-
-  const streamKey = useMemo(
-    () => `${apiBaseOverride}:${serverConnected ? "up" : "down"}:${sessionId ?? "none"}`,
-    [apiBaseOverride, serverConnected, sessionId]
-  );
 
   useOutputsStream({
     enabled: serverConnected,
@@ -1450,120 +1460,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [outputsOpen]);
 
-  // Library list view removed; no directory loading needed.
-
-  const loadAlbums = useCallback(async () => {
-    if (!albumsLoadingRef.current) {
-      setAlbumsLoading(true);
-    }
-    albumsLoadingRef.current = true;
-    try {
-      const response = await fetchJson<AlbumListResponse>("/albums?limit=200");
-      setAlbums(response.items ?? []);
-      setAlbumsError(null);
-      markServerConnected();
-    } catch (err) {
-      const message = (err as Error).message;
-      setAlbumsError(message);
-    } finally {
-      albumsLoadingRef.current = false;
-      setAlbumsLoading(false);
-      if (albumsReloadQueuedRef.current) {
-        albumsReloadQueuedRef.current = false;
-        if (albumsReloadTimerRef.current === null) {
-          albumsReloadTimerRef.current = window.setTimeout(() => {
-            albumsReloadTimerRef.current = null;
-            loadAlbums();
-          }, 250);
-        }
-      }
-    }
-  }, []);
-
-  const requestAlbumsReload = useCallback(() => {
-    if (albumsLoadingRef.current) {
-      albumsReloadQueuedRef.current = true;
-      return;
-    }
-    if (albumsReloadTimerRef.current !== null) return;
-    albumsReloadTimerRef.current = window.setTimeout(() => {
-      albumsReloadTimerRef.current = null;
-      loadAlbums();
-    }, 250);
-  }, [loadAlbums]);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    loadAlbums();
-  }, [requestAlbumsReload, loadAlbums, serverConnected]);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    let mounted = true;
-    const stream = new EventSource(apiUrl("/albums/stream"));
-    stream.addEventListener("albums", () => {
-      if (!mounted) return;
-      requestAlbumsReload();
-    });
-    stream.onerror = () => {
-      if (!mounted) return;
-      const message = connectionError("Live albums disconnected", "/albums/stream");
-      setAlbumsError(message);
-    };
-    return () => {
-      mounted = false;
-      stream.close();
-    };
-  }, [connectionError, requestAlbumsReload, serverConnected, streamKey]);
-
-  const loadAlbumTracks = useCallback(async (albumId: number | null) => {
-    if (albumId === null) return;
-    setAlbumTracksLoading(true);
-    try {
-      const response = await fetchJson<TrackListResponse>(
-        `/tracks?album_id=${albumId}&limit=500`
-      );
-      setAlbumTracks(response.items ?? []);
-      setAlbumTracksError(null);
-      markServerConnected();
-    } catch (err) {
-      const message = (err as Error).message;
-      setAlbumTracksError(message);
-    } finally {
-      setAlbumTracksLoading(false);
-    }
-  }, [markServerConnected]);
-
-  const loadCatalogProfiles = useCallback(async (albumId: number | null) => {
-    if (albumId === null) {
-      setAlbumProfile(null);
-      setCatalogError(null);
-      return;
-    }
-    setCatalogError(null);
-    setCatalogLoading(true);
-    try {
-      const albumPromise = fetchJson<AlbumProfileResponse>(
-        `/albums/profile?album_id=${albumId}&lang=en-US`
-      );
-      const [albumResult] = await Promise.allSettled([albumPromise]);
-      if (albumResult.status === "fulfilled") {
-        setAlbumProfile(albumResult.value);
-      } else {
-        setCatalogError(albumResult.reason instanceof Error ? albumResult.reason.message : String(albumResult.reason));
-      }
-    } catch (err) {
-      setCatalogError((err as Error).message);
-    } finally {
-      setCatalogLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    loadAlbumTracks(albumViewId);
-  }, [albumViewId, loadAlbumTracks, serverConnected]);
-
   useEffect(() => {
     setAlbumNotesOpen(false);
   }, [albumViewId]);
@@ -1578,10 +1474,6 @@ export default function App() {
     }
   }, [albumViewId]);
 
-  useEffect(() => {
-    if (!serverConnected) return;
-    loadCatalogProfiles(albumViewId);
-  }, [albumViewId, loadCatalogProfiles, serverConnected]);
 
   const handlePlayMedia = useCallback(async () => {
     if (hasNowPlaying) {
@@ -2295,7 +2187,7 @@ export default function App() {
           if (album) {
             setAlbumProfile(album);
           } else {
-            loadCatalogProfiles(albumViewId, selectedAlbum?.artist_id ?? null);
+            loadCatalogProfiles(albumViewId);
           }
         }}
         />
