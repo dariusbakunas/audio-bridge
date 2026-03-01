@@ -57,6 +57,7 @@ impl LocalProvider {
 
 #[async_trait]
 impl OutputProvider for LocalProvider {
+    /// List local provider descriptor when feature is enabled.
     fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
         if !Self::is_enabled(state) {
             return Vec::new();
@@ -153,14 +154,17 @@ impl OutputProvider for LocalProvider {
             .collect()
     }
 
+    /// Return whether output id belongs to local provider namespace.
     fn can_handle_output_id(&self, output_id: &str) -> bool {
         output_id.starts_with("local:")
     }
 
+    /// Return whether provider id matches enabled local provider id.
     fn can_handle_provider_id(&self, state: &AppState, provider_id: &str) -> bool {
         Self::is_enabled(state) && provider_id == Self::provider_id(state)
     }
 
+    /// Inject placeholder active output when discovery list does not include it.
     fn inject_active_output_if_missing(
         &self,
         state: &AppState,

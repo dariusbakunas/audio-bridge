@@ -180,6 +180,7 @@ impl BridgeProvider {
 
 #[async_trait]
 impl OutputProvider for BridgeProvider {
+    /// List bridge provider descriptors for configured/discovered bridges.
     fn list_providers(&self, state: &AppState) -> Vec<ProviderInfo> {
         let bridges_state = state.providers.bridge.bridges.lock().unwrap();
         let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
@@ -246,10 +247,12 @@ impl OutputProvider for BridgeProvider {
         Self::list_outputs_internal(state).await
     }
 
+    /// Return whether output id belongs to bridge namespace.
     fn can_handle_output_id(&self, output_id: &str) -> bool {
         parse_output_id(output_id).is_ok()
     }
 
+    /// Return whether provider id matches known bridge provider ids.
     fn can_handle_provider_id(&self, state: &AppState, provider_id: &str) -> bool {
         let bridges_state = state.providers.bridge.bridges.lock().unwrap();
         let discovered = state.providers.bridge.discovered_bridges.lock().unwrap();
@@ -260,6 +263,7 @@ impl OutputProvider for BridgeProvider {
             .unwrap_or(false)
     }
 
+    /// Inject placeholder active output when device listing does not include it.
     fn inject_active_output_if_missing(
         &self,
         state: &AppState,

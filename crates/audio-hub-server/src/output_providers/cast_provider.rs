@@ -183,6 +183,7 @@ impl CastProvider {
 
 #[async_trait]
 impl OutputProvider for CastProvider {
+    /// List Cast provider descriptor.
     fn list_providers(&self, _state: &AppState) -> Vec<ProviderInfo> {
         vec![ProviderInfo {
             id: Self::provider_id().to_string(),
@@ -221,14 +222,17 @@ impl OutputProvider for CastProvider {
             .unwrap_or_default()
     }
 
+    /// Return whether output id belongs to cast namespace.
     fn can_handle_output_id(&self, output_id: &str) -> bool {
         output_id.starts_with("cast:")
     }
 
+    /// Return whether provider id matches cast provider id.
     fn can_handle_provider_id(&self, _state: &AppState, provider_id: &str) -> bool {
         provider_id == Self::provider_id()
     }
 
+    /// Cast provider currently does not inject synthetic active outputs.
     fn inject_active_output_if_missing(
         &self,
         _state: &AppState,

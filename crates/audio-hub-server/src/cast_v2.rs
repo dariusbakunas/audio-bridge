@@ -36,24 +36,32 @@ const SENDER_ID: &str = "sender-0";
 const RECEIVER_ID: &str = "receiver-0";
 
 #[derive(Debug, Clone)]
+/// Minimal connection descriptor for a discovered Cast device.
 pub struct CastDeviceDescriptor {
+    /// Stable Cast device id.
     pub id: String,
+    /// Human-readable Cast device name.
     pub name: String,
+    /// Hostname or IP address for Cast TLS socket.
     pub host: String,
+    /// Cast TLS control port.
     pub port: u16,
 }
 
+/// Active receiver/media session identifiers for a Cast app transport.
 struct CastSession {
     transport_id: String,
     session_id: String,
     media_session_id: Option<i64>,
 }
 
+/// TLS socket wrapper for Cast V2 protobuf messages.
 struct CastConnection {
     stream: StreamOwned<ClientConnection, TcpStream>,
 }
 
 impl CastConnection {
+    /// Establish TLS connection to Cast device with permissive verifier.
     fn connect(addr: SocketAddr, server_name: ServerName<'static>) -> std::io::Result<Self> {
         let root_store = rustls::RootCertStore::empty();
         let mut config = ClientConfig::builder()
@@ -72,6 +80,7 @@ impl CastConnection {
         })
     }
 
+    /// Send JSON payload as Cast V2 string message.
     fn send_json(
         &mut self,
         destination_id: &str,
@@ -99,6 +108,7 @@ impl CastConnection {
         Ok(())
     }
 
+    /// Read one Cast message; returns `Ok(None)` on socket timeout.
     fn read_message(&mut self) -> std::io::Result<Option<proto::CastMessage>> {
         let mut len_buf = [0u8; 4];
         match self.stream.read_exact(&mut len_buf) {
@@ -115,6 +125,7 @@ impl CastConnection {
     }
 }
 
+/// Spawn Cast worker loop handling control commands and status polling.
 pub fn spawn_cast_worker(
     output_id: String,
     device: CastDeviceDescriptor,
@@ -366,6 +377,7 @@ pub fn spawn_cast_worker(
     });
 }
 
+/// Ensure Default Media Receiver session is launched and status requested.
 fn ensure_session(
     conn: &mut CastConnection,
     session: &mut Option<CastSession>,
@@ -395,6 +407,7 @@ fn ensure_session(
     tracing::info!(cast_id = %device.id, "cast: launching DMR");
 }
 
+/// Handle one inbound Cast message and mutate session/status state.
 fn handle_message(
     conn: &mut CastConnection,
     msg: proto::CastMessage,
@@ -531,6 +544,7 @@ fn handle_message(
     }
 }
 
+/// Dispatch Cast `PLAY`/`PAUSE` command according to current paused state.
 fn send_cast_pause_toggle(
     conn: &mut CastConnection,
     transport_id: &str,
@@ -565,6 +579,7 @@ fn send_cast_pause_toggle(
     );
 }
 
+/// Resolve current paused state from cached cast status or shared status store.
 fn cast_current_paused(
     output_id: &str,
     cast_statuses: &Arc<Mutex<std::collections::HashMap<String, BridgeStatus>>>,
@@ -584,6 +599,7 @@ fn cast_current_paused(
         })
 }
 
+/// Return whether this cast device is currently selected as active output.
 fn is_active_cast_output(
     bridge_state: &Arc<Mutex<crate::state::BridgeState>>,
     device_id: &str,
@@ -595,6 +611,7 @@ fn is_active_cast_output(
     guard.active_output_id.as_deref() == Some(expected.as_str())
 }
 
+/// Apply parsed media status to shared status stores and auto-advance logic.
 fn apply_media_status(
     device: &CastDeviceDescriptor,
     info: MediaStatus,
@@ -737,6 +754,7 @@ fn apply_media_status(
     status.set_has_previous(has_previous);
 }
 
+/// Parse receiver status payload into `(transport_id, session_id)`.
 fn parse_receiver_status(payload: &Value) -> Option<(String, String)> {
     let apps = payload.get("status")?.get("applications")?.as_array()?;
     for app in apps {
@@ -752,6 +770,7 @@ fn parse_receiver_status(payload: &Value) -> Option<(String, String)> {
 }
 
 #[derive(Default)]
+/// Parsed subset of Cast media status fields.
 struct MediaStatus {
     media_session_id: Option<i64>,
     player_state: Option<String>,
@@ -760,6 +779,7 @@ struct MediaStatus {
     idle_reason: Option<String>,
 }
 
+/// Parse Cast `MEDIA_STATUS` payload into normalized media status.
 fn parse_media_status(payload: &Value) -> Option<MediaStatus> {
     let statuses = payload.get("status")?.as_array()?;
     let status = statuses.first()?;
@@ -786,6 +806,7 @@ fn parse_media_status(payload: &Value) -> Option<MediaStatus> {
     })
 }
 
+/// Derive paused flag from Cast player state and local clear semantics.
 fn cast_paused_state(player_state: Option<&str>, should_clear: bool, prior_paused: bool) -> bool {
     match player_state {
         Some("PAUSED") => true,
@@ -801,6 +822,7 @@ fn cast_paused_state(player_state: Option<&str>, should_clear: bool, prior_pause
     }
 }
 
+/// Build Cast `LOAD` payload for track URL + metadata.
 fn load_payload(
     url: &str,
     content_type: &str,
@@ -844,6 +866,7 @@ fn load_payload(
     payload
 }
 
+/// Metadata fields injected into Cast load payload.
 struct TrackMetadata {
     path: String,
     title: Option<String>,
@@ -851,6 +874,7 @@ struct TrackMetadata {
     album: Option<String>,
 }
 
+/// Resolve optional title/artist/album metadata for a playback path.
 fn track_metadata(path: &PathBuf, metadata: Option<&MetadataDb>) -> TrackMetadata {
     let path_str = path.to_string_lossy().to_string();
     let record = metadata.and_then(|db| db.track_record_by_path(&path_str).ok().flatten());
@@ -862,6 +886,7 @@ fn track_metadata(path: &PathBuf, metadata: Option<&MetadataDb>) -> TrackMetadat
     }
 }
 
+/// Map extension hint to media content-type for Cast receiver.
 fn content_type_for_ext(ext_hint: &str) -> &'static str {
     match ext_hint.to_ascii_lowercase().as_str() {
         "flac" => "audio/flac",
@@ -875,12 +900,14 @@ fn content_type_for_ext(ext_hint: &str) -> &'static str {
     }
 }
 
+/// Incrementing request-id generator for Cast protocol messages.
 fn next_request_id(value: &mut i64) -> i64 {
     let current = *value;
     *value = value.saturating_add(1);
     current
 }
 
+/// Resolve `(host, port)` into first socket address.
 fn resolve_device_addr(host: &str, port: u16) -> std::io::Result<SocketAddr> {
     let mut addrs = format!("{host}:{port}").to_socket_addrs()?;
     addrs
@@ -888,6 +915,7 @@ fn resolve_device_addr(host: &str, port: u16) -> std::io::Result<SocketAddr> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address"))
 }
 
+/// Build rustls server-name from host (IP or DNS name).
 fn server_name_for(host: &str) -> ServerName<'static> {
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         ServerName::IpAddress(ip.into())
@@ -897,6 +925,7 @@ fn server_name_for(host: &str) -> ServerName<'static> {
     }
 }
 
+/// Return whether I/O error corresponds to non-fatal socket timeout.
 fn is_timeout(err: &std::io::Error) -> bool {
     matches!(
         err.kind(),
@@ -905,9 +934,11 @@ fn is_timeout(err: &std::io::Error) -> bool {
 }
 
 #[derive(Debug)]
+/// Insecure certificate verifier used for local Cast TLS endpoints.
 struct NoCertificateVerification;
 
 impl ServerCertVerifier for NoCertificateVerification {
+    /// Accept any server certificate.
     fn verify_server_cert(
         &self,
         _end_entity: &CertificateDer<'_>,
@@ -919,6 +950,7 @@ impl ServerCertVerifier for NoCertificateVerification {
         Ok(ServerCertVerified::assertion())
     }
 
+    /// Accept any TLS 1.2 handshake signature.
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
@@ -928,6 +960,7 @@ impl ServerCertVerifier for NoCertificateVerification {
         Ok(HandshakeSignatureValid::assertion())
     }
 
+    /// Accept any TLS 1.3 handshake signature.
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
@@ -937,6 +970,7 @@ impl ServerCertVerifier for NoCertificateVerification {
         Ok(HandshakeSignatureValid::assertion())
     }
 
+    /// Advertise broad set of signature schemes.
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         vec![
             SignatureScheme::ECDSA_NISTP256_SHA256,

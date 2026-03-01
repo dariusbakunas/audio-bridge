@@ -315,6 +315,7 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Resolve metadata track id for a canonical file path.
     fn track_id_for_path(&self, path: &PathBuf) -> Option<i64> {
         self.metadata
             .as_ref()
@@ -435,6 +436,7 @@ impl BridgeTransportClient {
     }
 }
 
+/// Build hub `/stream/track/{id}` URL from public base URL.
 fn build_stream_url_for_id(track_id: i64, public_base_url: &str) -> String {
     format!(
         "{}/stream/track/{track_id}",

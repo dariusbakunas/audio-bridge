@@ -101,6 +101,7 @@ pub async fn stream_track_id(
     stream_file(&state, req, path).await
 }
 
+/// Resolve and canonicalize filesystem path for a metadata track id.
 fn path_for_track_id(state: &web::Data<AppState>, track_id: i64) -> Result<PathBuf, HttpResponse> {
     let raw = match state.metadata.db.track_path_for_id(track_id) {
         Ok(Some(path)) => path,

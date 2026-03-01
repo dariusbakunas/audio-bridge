@@ -45,6 +45,7 @@ pub(crate) fn spawn_local_player(
     LocalPlayerHandle { cmd_tx }
 }
 
+/// Main command loop for local playback worker.
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
     status: StatusStore,
@@ -119,6 +120,7 @@ fn player_thread_main(
     }
 }
 
+/// Cancel currently running local playback session and join its thread.
 fn cancel_session(session: &mut Option<SessionHandle>) {
     if let Some(sess) = session.take() {
         sess.cancel.store(true, Ordering::Relaxed);
@@ -175,6 +177,7 @@ fn start_new_session(
     });
 }
 
+/// Decode and play one local file on selected output device.
 fn play_one_file(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,

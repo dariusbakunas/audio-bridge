@@ -61,11 +61,13 @@ struct SessionStore {
     bridge_locks: HashMap<String, String>,
 }
 
+/// Return global in-memory session registry store.
 fn store() -> &'static Mutex<SessionStore> {
     static STORE: OnceLock<Mutex<SessionStore>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(SessionStore::default()))
 }
 
+/// Normalize session mode into registry key segment.
 fn mode_key(mode: &SessionMode) -> &'static str {
     match mode {
         SessionMode::Remote => "remote",
@@ -73,10 +75,12 @@ fn mode_key(mode: &SessionMode) -> &'static str {
     }
 }
 
+/// Normalize session display name for identity comparisons.
 fn session_name_key(name: &str) -> String {
     name.trim().to_ascii_lowercase()
 }
 
+/// Build stable identity key for create-or-refresh semantics.
 fn session_identity_key(mode: &SessionMode, name: &str, client_id: &str) -> (String, String) {
     let identity = match mode {
         SessionMode::Remote => session_name_key(name),
@@ -700,6 +704,7 @@ pub fn purge_expired() -> Vec<String> {
     expired_ids
 }
 
+/// Parse bridge id from output id format `bridge:<bridge_id>:<device_id>`.
 fn parse_bridge_id(output_id: &str) -> Option<String> {
     let mut parts = output_id.splitn(3, ':');
     let kind = parts.next().unwrap_or("");

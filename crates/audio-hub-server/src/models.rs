@@ -576,6 +576,7 @@ pub struct QueueClearRequest {
     pub clear_queue: bool,
 }
 
+/// Default `clear_queue` behavior for queue clear requests.
 fn default_queue_clear() -> bool {
     true
 }
