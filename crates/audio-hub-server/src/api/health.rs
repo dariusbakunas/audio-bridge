@@ -4,6 +4,7 @@ use utoipa::ToSchema;
 
 #[derive(Serialize, ToSchema)]
 pub struct HealthResponse {
+    /// Service status marker (`ok`).
     pub status: &'static str,
 }
 

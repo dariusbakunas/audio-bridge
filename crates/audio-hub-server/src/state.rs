@@ -24,17 +24,20 @@ use crate::playback_manager::PlaybackManager;
 use crate::session_playback_manager::SessionPlaybackManager;
 
 #[derive(Clone)]
+/// Condition-variable based wake signal for metadata background workers.
 pub struct MetadataWake {
     inner: Arc<(Mutex<u64>, Condvar)>,
 }
 
 impl MetadataWake {
+    /// Create a new wake primitive with sequence counter initialized to `0`.
     pub fn new() -> Self {
         Self {
             inner: Arc::new((Mutex::new(0), Condvar::new())),
         }
     }
 
+    /// Notify all waiters and advance wake sequence.
     pub fn notify(&self) {
         let (lock, cvar) = &*self.inner;
         let mut seq = lock.lock().expect("metadata wake lock");
@@ -42,6 +45,7 @@ impl MetadataWake {
         cvar.notify_all();
     }
 
+    /// Block until sequence changes from `last_seen`, then update `last_seen`.
     pub fn wait(&self, last_seen: &mut u64) {
         let (lock, cvar) = &*self.inner;
         let mut seq = lock.lock().expect("metadata wake lock");
@@ -162,6 +166,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Construct the shared application state from initialized runtime components.
     pub fn new(
         library: LibraryIndex,
         metadata_db: MetadataDb,
@@ -205,6 +210,7 @@ impl AppState {
         }
     }
 
+    /// Build a short-lived metadata service facade using current library root.
     pub fn metadata_service(&self) -> MetadataService {
         let root = self.library.read().unwrap().root().to_path_buf();
         MetadataService::new(
@@ -228,10 +234,15 @@ pub struct DiscoveredBridge {
 /// Discovered Chromecast entry from mDNS.
 #[derive(Clone, Debug)]
 pub struct DiscoveredCast {
+    /// Stable cast output id.
     pub id: String,
+    /// Display name reported by discovery.
     pub name: String,
+    /// Hostname or IP, if known.
     pub host: Option<String>,
+    /// Cast control port.
     pub port: u16,
+    /// Last-seen timestamp used for expiry.
     pub last_seen: std::time::Instant,
 }
 
@@ -331,13 +342,18 @@ pub struct LocalProviderState {
 /// Shared state for Chromecast output provider discovery.
 #[derive(Debug)]
 pub struct CastProviderState {
+    /// Discovered cast devices keyed by output id.
     pub discovered: Arc<Mutex<std::collections::HashMap<String, DiscoveredCast>>>,
+    /// Active cast workers keyed by output id.
     pub workers: Arc<Mutex<HashMap<String, Sender<BridgeCommand>>>>,
+    /// Last known status per cast output id.
     pub status_by_output: Arc<Mutex<HashMap<String, BridgeStatus>>>,
+    /// Timestamp of last status update per cast output id.
     pub status_updated_at: Arc<Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl CastProviderState {
+    /// Create an empty cast provider state container.
     pub fn new() -> Self {
         Self {
             discovered: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -351,12 +367,16 @@ impl CastProviderState {
 /// Output settings applied to provider listings.
 #[derive(Debug, Clone, Default)]
 pub struct OutputSettingsState {
+    /// Hidden output ids.
     pub disabled: HashSet<String>,
+    /// Output id -> display name overrides.
     pub renames: HashMap<String, String>,
+    /// Output ids that should request exclusive access.
     pub exclusive: HashSet<String>,
 }
 
 impl OutputSettingsState {
+    /// Build settings state from optional config section.
     pub fn from_config(cfg: Option<&crate::config::OutputSettingsConfig>) -> Self {
         let mut out = Self::default();
         if let Some(cfg) = cfg {
@@ -374,6 +394,7 @@ impl OutputSettingsState {
         out
     }
 
+    /// Build settings state from API model payload.
     pub fn from_api(settings: &crate::models::OutputSettings) -> Self {
         let mut out = Self::default();
         out.disabled.extend(settings.disabled.iter().cloned());
@@ -383,6 +404,7 @@ impl OutputSettingsState {
         out
     }
 
+    /// Convert settings state into API response model.
     pub fn to_api(&self) -> crate::models::OutputSettings {
         crate::models::OutputSettings {
             disabled: self.disabled.iter().cloned().collect(),
@@ -391,6 +413,7 @@ impl OutputSettingsState {
         }
     }
 
+    /// Convert settings state into config file model.
     pub fn to_config(&self) -> crate::config::OutputSettingsConfig {
         crate::config::OutputSettingsConfig {
             disabled: if self.disabled.is_empty() {
@@ -411,6 +434,7 @@ impl OutputSettingsState {
         }
     }
 
+    /// Returns `true` if the output should run in exclusive mode.
     pub fn is_exclusive(&self, output_id: &str) -> bool {
         self.exclusive.contains(output_id)
     }

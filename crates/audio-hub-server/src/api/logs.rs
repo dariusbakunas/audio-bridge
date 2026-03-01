@@ -8,6 +8,7 @@ use crate::state::AppState;
 
 #[derive(Serialize, ToSchema)]
 pub struct LogsClearResponse {
+    /// Unix timestamp (ms) when the clear operation completed.
     pub cleared_at_ms: i64,
 }
 

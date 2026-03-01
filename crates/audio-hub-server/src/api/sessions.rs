@@ -29,7 +29,9 @@ use crate::state::AppState;
 const PROTECTED_SESSION_NAMES: [&str; 2] = ["default", "local"];
 
 #[derive(serde::Deserialize)]
+/// Optional viewer context for filtering session visibility.
 pub struct SessionViewerQuery {
+    /// Viewer client id; required to see local sessions owned by that client.
     #[serde(default)]
     pub client_id: Option<String>,
 }

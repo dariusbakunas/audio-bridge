@@ -346,7 +346,9 @@ pub async fn rescan_library(state: web::Data<AppState>) -> impl Responder {
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+/// Request payload for rescanning a single track by id.
 pub struct RescanTrackRequest {
+    /// Track id from the metadata DB.
     pub track_id: i64,
 }
 

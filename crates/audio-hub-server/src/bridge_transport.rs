@@ -32,6 +32,7 @@ pub struct HttpDeviceInfo {
     pub max_rate: u32,
 }
 
+/// HTTP payload type returned by bridge `/status`.
 pub type HttpStatusResponse = BridgeStatus;
 
 /// HTTP response payload for the bridge device stream.
@@ -78,7 +79,9 @@ struct HttpMuteRequest {
 /// JSON payload for bridge volume snapshot.
 #[derive(Debug, serde::Deserialize, Clone, Copy)]
 pub struct HttpVolumeResponse {
+    /// Volume percent (0..100).
     pub value: u8,
+    /// Current mute state.
     pub muted: bool,
 }
 

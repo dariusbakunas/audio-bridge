@@ -98,6 +98,7 @@ impl PlaybackManager {
         Ok(())
     }
 
+    /// Recompute `has_previous` based on queue history and current item.
     pub fn update_has_previous(&self) {
         let current = self
             .status

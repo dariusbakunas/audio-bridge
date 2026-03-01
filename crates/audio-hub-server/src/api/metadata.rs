@@ -29,72 +29,101 @@ use crate::track_analysis::{AnalysisOptions, analyze_track};
 use base64::{Engine as _, engine::general_purpose};
 
 #[derive(Deserialize, ToSchema)]
+/// Common list query parameters (search + pagination).
 pub struct ListQuery {
+    /// Optional case-insensitive search filter.
     #[serde(default)]
     pub search: Option<String>,
+    /// Max returned items.
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Row offset for pagination.
     #[serde(default)]
     pub offset: Option<i64>,
 }
 
 #[derive(Deserialize, ToSchema)]
+/// Album listing query parameters.
 pub struct AlbumListQuery {
+    /// Optional artist id filter.
     #[serde(default)]
     pub artist_id: Option<i64>,
+    /// Optional case-insensitive search filter.
     #[serde(default)]
     pub search: Option<String>,
+    /// Max returned items.
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Row offset for pagination.
     #[serde(default)]
     pub offset: Option<i64>,
 }
 
 #[derive(Deserialize, ToSchema)]
+/// Track listing query parameters.
 pub struct TrackListQuery {
+    /// Optional album id filter.
     #[serde(default)]
     pub album_id: Option<i64>,
+    /// Optional artist id filter.
     #[serde(default)]
     pub artist_id: Option<i64>,
+    /// Optional case-insensitive search filter.
     #[serde(default)]
     pub search: Option<String>,
+    /// Max returned items.
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Row offset for pagination.
     #[serde(default)]
     pub offset: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Query for resolving track-to-album mapping by track id.
 pub struct TrackResolveQuery {
+    /// Track id from metadata DB.
     pub track_id: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Query for reading editable track metadata fields.
 pub struct TrackMetadataQuery {
+    /// Track id from metadata DB.
     pub track_id: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Query for reading album metadata fields.
 pub struct AlbumMetadataQuery {
+    /// Album id from metadata DB.
     pub album_id: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Query for reading artist profile metadata.
 pub struct ArtistProfileQuery {
+    /// Artist id from metadata DB.
     pub artist_id: i64,
+    /// Preferred language tag (defaults to `en-US`).
     #[serde(default)]
     pub lang: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Query for reading album profile metadata.
 pub struct AlbumProfileQuery {
+    /// Album id from metadata DB.
     pub album_id: i64,
+    /// Preferred language tag (defaults to `en-US`).
     #[serde(default)]
     pub lang: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, IntoParams, ToSchema)]
+/// Path parameter for fetching a stored media asset.
 pub struct MediaAssetPath {
+    /// Internal media asset id.
     pub id: i64,
 }
 
