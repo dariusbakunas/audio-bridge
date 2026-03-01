@@ -17,7 +17,6 @@ import {
   apiUrl,
   fetchJson,
   postJson,
-  safeMediaUrl,
 } from "./api";
 import {
   LogEvent,
@@ -60,6 +59,7 @@ import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
 import { useAlbumsState } from "./hooks/useAlbumsState";
+import { useLocalPlayback } from "./hooks/useLocalPlayback";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
@@ -108,53 +108,12 @@ type AlbumEditTarget = {
   };
 };
 
-type LocalPlaybackCommand = {
-  url: string;
-  track_id: number;
-};
-
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
 const WEB_DEFAULT_SESSION_NAME = "Default";
-const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
-
-type LocalPlaybackSnapshot = {
-  track_id: number;
-  paused: boolean;
-  elapsed_ms: number | null;
-  duration_ms: number | null;
-  title: string | null;
-  artist: string | null;
-  album: string | null;
-  saved_at_ms: number;
-};
-
-function localPlaybackSnapshotKey(sessionId: string): string {
-  return `${LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX}${sessionId}`;
-}
-
-function loadLocalPlaybackSnapshot(sessionId: string): LocalPlaybackSnapshot | null {
-  try {
-    const raw = localStorage.getItem(localPlaybackSnapshotKey(sessionId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as LocalPlaybackSnapshot;
-    if (!parsed?.track_id) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalPlaybackSnapshot(sessionId: string, snapshot: LocalPlaybackSnapshot): void {
-  try {
-    localStorage.setItem(localPlaybackSnapshotKey(sessionId), JSON.stringify(snapshot));
-  } catch {
-    // ignore storage failures
-  }
-}
 
 function isDefaultSessionName(name: string | null | undefined): boolean {
   return (name ?? "").trim().toLowerCase() === WEB_DEFAULT_SESSION_NAME.toLowerCase();
@@ -343,8 +302,6 @@ export default function App() {
   const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const localTrackIdRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
   const volumeRequestSeqRef = useRef(0);
@@ -439,6 +396,22 @@ export default function App() {
     [sessions, sessionId]
   );
   const isLocalSession = currentSession?.mode === "local";
+  const {
+    audioRef,
+    applyLocalPlayback,
+    requestLocalCommand,
+    toggleLocalPause,
+    resumeLocalFromStatus
+  } = useLocalPlayback({
+    isLocalSession: Boolean(isLocalSession),
+    sessionId,
+    activeOutputId,
+    queue,
+    status,
+    setStatus,
+    markUpdatedAt: () => setUpdatedAt(new Date()),
+    reportError: (message) => reportError(message)
+  });
   const queueNowPlayingTrackId = useMemo(() => {
     const item = queue.find((entry) => entry.kind === "track" && Boolean(entry.now_playing));
     return item?.kind === "track" ? item.id : null;
@@ -796,18 +769,11 @@ export default function App() {
 
   const handlePause = useCallback(async () => {
     if (isLocalSession) {
-      const audio = audioRef.current;
-      if (!audio || !localTrackIdRef.current) return;
-      if (audio.paused) {
-        await audio.play().catch(() => {});
-      } else {
-        audio.pause();
-      }
-      updateLocalStatusFromAudio();
+      await toggleLocalPause();
       return;
     }
     await handlePauseRemote();
-  }, [handlePauseRemote, isLocalSession]);
+  }, [handlePauseRemote, isLocalSession, toggleLocalPause]);
 
   const handleSetVolume = useCallback(
     async (value: number) => {
@@ -879,7 +845,7 @@ export default function App() {
         reportError((err as Error).message);
       }
     },
-    [handlePlayRemote, isLocalSession, reportError, sessionId]
+    [applyLocalPlayback, handlePlayRemote, isLocalSession, reportError, requestLocalCommand, sessionId]
   );
 
   const handleNext = useCallback(async () => {
@@ -893,7 +859,7 @@ export default function App() {
     } catch (err) {
       reportError((err as Error).message);
     }
-  }, [handleNextRemote, isLocalSession, reportError]);
+  }, [applyLocalPlayback, handleNextRemote, isLocalSession, reportError, requestLocalCommand]);
 
   const handlePrevious = useCallback(async () => {
     try {
@@ -906,7 +872,7 @@ export default function App() {
     } catch (err) {
       reportError((err as Error).message);
     }
-  }, [handlePreviousRemote, isLocalSession, reportError]);
+  }, [applyLocalPlayback, handlePreviousRemote, isLocalSession, reportError, requestLocalCommand]);
 
   const handleQueuePlayFrom = useCallback(
     async (trackId: number) => {
@@ -915,14 +881,13 @@ export default function App() {
           await handleQueuePlayFromRemote(trackId);
           return;
         }
-        const endpoint = `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`;
-        const command = await postJson<LocalPlaybackCommand>(endpoint, { track_id: trackId });
+        const command = await requestLocalCommand("/queue/play_from", { track_id: trackId });
         await applyLocalPlayback(command);
       } catch (err) {
         reportError((err as Error).message);
       }
     },
-    [handleQueuePlayFromRemote, isLocalSession, reportError, sessionId]
+    [applyLocalPlayback, handleQueuePlayFromRemote, isLocalSession, reportError, requestLocalCommand, sessionId]
   );
 
   const handlePlayAlbumTrack = useCallback(
@@ -945,9 +910,11 @@ export default function App() {
       }
     },
     [
+      applyLocalPlayback,
       handlePlayAlbumTrackRemote,
       isLocalSession,
       reportError,
+      requestLocalCommand,
       sessionId
     ]
   );
@@ -979,9 +946,11 @@ export default function App() {
       }
     },
     [
+      applyLocalPlayback,
       handlePlayAlbumByIdRemote,
       isLocalSession,
       reportError,
+      requestLocalCommand,
       sessionId
     ]
   );
@@ -1181,153 +1150,6 @@ export default function App() {
     }
   });
 
-  const updateLocalStatusFromAudio = useCallback(
-    (base?: Partial<StatusResponse>) => {
-      if (!isLocalSession) return;
-      const audio = audioRef.current;
-      if (!audio) return;
-      const hasTrack = Boolean(localTrackIdRef.current);
-      setStatus((prev) => {
-        const next: StatusResponse = {
-          ...(prev ?? {}),
-          ...base,
-          now_playing_track_id: hasTrack ? localTrackIdRef.current : null,
-          paused: hasTrack ? audio.paused : true,
-          elapsed_ms:
-            hasTrack && Number.isFinite(audio.currentTime)
-              ? Math.floor(audio.currentTime * 1000)
-              : null,
-          duration_ms:
-            hasTrack && Number.isFinite(audio.duration) ? Math.floor(audio.duration * 1000) : null
-        };
-        if (!hasTrack) {
-          next.title = null;
-          next.artist = null;
-          next.album = null;
-          next.output_sample_rate = null;
-          next.channels = null;
-        }
-        return next;
-      });
-      setUpdatedAt(new Date());
-    },
-    [isLocalSession]
-  );
-
-  const applyLocalPlayback = useCallback(
-    async (payload: LocalPlaybackCommand | null) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      if (!payload?.url || !payload.track_id) {
-        audio.pause();
-        audio.removeAttribute("src");
-        audio.load();
-        localTrackIdRef.current = null;
-        updateLocalStatusFromAudio();
-        return;
-      }
-      const safeUrl = safeMediaUrl(payload.url);
-      if (!safeUrl) {
-        reportError("Rejected local playback URL.");
-        return;
-      }
-      const queueTrack = queue.find(
-        (item) => item.kind === "track" && item.id === payload.track_id
-      );
-      localTrackIdRef.current = payload.track_id;
-      audio.src = safeUrl;
-      audio.load();
-      await audio.play().catch(() => {});
-      updateLocalStatusFromAudio({
-        title:
-          queueTrack?.kind === "track"
-            ? (queueTrack.title ?? queueTrack.file_name)
-            : null,
-        artist: queueTrack?.kind === "track" ? (queueTrack.artist ?? null) : null,
-        album: queueTrack?.kind === "track" ? (queueTrack.album ?? null) : null
-      });
-    },
-    [queue, reportError, updateLocalStatusFromAudio]
-  );
-
-  const requestLocalCommand = useCallback(
-    async (
-      endpoint: string,
-      body?: Record<string, string | number | boolean | null | undefined>
-    ): Promise<LocalPlaybackCommand | null> => {
-      if (!sessionId) return null;
-      const response = await postJson<LocalPlaybackCommand | null>(
-        `/sessions/${encodeURIComponent(sessionId)}${endpoint}`,
-        body as any
-      );
-      if (!response || !response.url || !response.track_id) {
-        return null;
-      }
-      return response;
-    },
-    [sessionId]
-  );
-
-  useEffect(() => {
-    if (!isLocalSession) return;
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onTimeUpdate = () => updateLocalStatusFromAudio();
-    const onPause = () => updateLocalStatusFromAudio();
-    const onPlay = () => updateLocalStatusFromAudio();
-    const onDurationChange = () => updateLocalStatusFromAudio();
-    const onEnded = () => {
-      requestLocalCommand("/queue/next")
-        .then((payload) => applyLocalPlayback(payload))
-        .catch((err) => reportError((err as Error).message));
-    };
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("durationchange", onDurationChange);
-    audio.addEventListener("ended", onEnded);
-    return () => {
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("durationchange", onDurationChange);
-      audio.removeEventListener("ended", onEnded);
-    };
-  }, [applyLocalPlayback, isLocalSession, reportError, requestLocalCommand, updateLocalStatusFromAudio]);
-  useEffect(() => {
-    if (!sessionId || (!activeOutputId && !isLocalSession)) {
-      setStatus(null);
-    }
-  }, [sessionId, activeOutputId, isLocalSession]);
-
-  useEffect(() => {
-    if (!isLocalSession || !sessionId) return;
-    const currentTrackId = localTrackIdRef.current;
-    if (!currentTrackId) {
-      return;
-    }
-    saveLocalPlaybackSnapshot(sessionId, {
-      track_id: currentTrackId,
-      paused: Boolean(status?.paused ?? true),
-      elapsed_ms: status?.elapsed_ms ?? null,
-      duration_ms: status?.duration_ms ?? null,
-      title: status?.title ?? null,
-      artist: status?.artist ?? null,
-      album: status?.album ?? null,
-      saved_at_ms: Date.now()
-    });
-  }, [
-    isLocalSession,
-    sessionId,
-    status?.album,
-    status?.artist,
-    status?.duration_ms,
-    status?.elapsed_ms,
-    status?.paused,
-    status?.title
-  ]);
-
-
   useEffect(() => {
     const nowPlayingTrackId = status?.now_playing_track_id ?? null;
     if (!nowPlayingTrackId) {
@@ -1352,83 +1174,6 @@ export default function App() {
       active = false;
     };
   }, [status?.now_playing_track_id]);
-
-  useEffect(() => {
-    if (!isLocalSession) return;
-    const nowPlayingTrackId = status?.now_playing_track_id ?? null;
-    if (!nowPlayingTrackId) return;
-    const queueTrack = queue.find(
-      (item) => item.kind === "track" && item.id === nowPlayingTrackId
-    );
-    if (!queueTrack || queueTrack.kind !== "track") return;
-
-    const nextTitle = queueTrack.title ?? queueTrack.file_name;
-    const nextArtist = queueTrack.artist ?? null;
-    const nextAlbum = queueTrack.album ?? null;
-    if (
-      status?.title === nextTitle &&
-      (status?.artist ?? null) === nextArtist &&
-      (status?.album ?? null) === nextAlbum
-    ) {
-      return;
-    }
-    setStatus((prev) =>
-      prev
-        ? {
-            ...prev,
-            title: nextTitle,
-            artist: nextArtist,
-            album: nextAlbum
-          }
-        : prev
-    );
-  }, [isLocalSession, queue, status?.album, status?.artist, status?.now_playing_track_id, status?.title]);
-
-  useEffect(() => {
-    if (!isLocalSession || !sessionId) return;
-    const currentQueueItem = queue.find(
-      (item) => item.kind === "track" && item.now_playing
-    );
-    if (!currentQueueItem || currentQueueItem.kind !== "track") {
-      return;
-    }
-    if (status?.now_playing_track_id === currentQueueItem.id) {
-      return;
-    }
-
-    const snapshot = loadLocalPlaybackSnapshot(sessionId);
-    const title = currentQueueItem.title ?? currentQueueItem.file_name;
-    const artist = currentQueueItem.artist ?? null;
-    const album = currentQueueItem.album ?? null;
-    const elapsedMs =
-      snapshot?.track_id === currentQueueItem.id ? (snapshot.elapsed_ms ?? null) : null;
-    const durationMs =
-      snapshot?.track_id === currentQueueItem.id
-        ? (snapshot.duration_ms ?? currentQueueItem.duration_ms ?? null)
-        : (currentQueueItem.duration_ms ?? null);
-
-    localTrackIdRef.current = currentQueueItem.id;
-    setStatus((prev) => ({
-      ...(prev ?? {}),
-      now_playing_track_id: currentQueueItem.id,
-      paused: true,
-      elapsed_ms: elapsedMs,
-      duration_ms: durationMs,
-      title,
-      artist,
-      album
-    }));
-    setUpdatedAt(new Date());
-  }, [isLocalSession, queue, sessionId, status?.now_playing_track_id]);
-
-  useEffect(() => {
-    if (!isLocalSession) return;
-    const hasLocalNowPlaying = queue.some((item) => item.kind === "track" && item.now_playing);
-    if (hasLocalNowPlaying) return;
-    if (!status?.now_playing_track_id) return;
-    setStatus(null);
-    localTrackIdRef.current = null;
-  }, [isLocalSession, queue, status?.now_playing_track_id]);
 
   useQueueStream({
     enabled: serverConnected && Boolean(sessionId),
@@ -1562,44 +1307,18 @@ export default function App() {
   async function handlePrimaryAction() {
     if (hasNowPlaying) {
       if (isLocalSession && status.paused && sessionId) {
-        const audio = audioRef.current;
-        const hasSource = Boolean(audio?.src);
-        if (!hasSource) {
-          try {
-            const currentQueueTrack = queue.find(
-              (item) => item.kind === "track" && item.now_playing && item.id
-            ) as { id?: number } | undefined;
-            const replayId = currentQueueTrack?.id ?? effectiveNowPlayingTrackId;
-            if (!replayId) {
-              throw new Error("Track ID is required to resume local playback.");
-            }
-            const payload = await postJson<LocalPlaybackCommand>(
-              `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`,
-              { track_id: replayId }
-            );
-            await applyLocalPlayback(payload);
-            const seekMs = status.elapsed_ms ?? null;
-            if (audioRef.current && seekMs && seekMs > 0) {
-              const resumeAt = seekMs / 1000;
-              const player = audioRef.current;
-              const applySeek = () => {
-                player.currentTime = resumeAt;
-              };
-              if (Number.isFinite(player.duration) && player.duration > 0) {
-                applySeek();
-              } else {
-                const onLoaded = () => {
-                  player.removeEventListener("loadedmetadata", onLoaded);
-                  applySeek();
-                };
-                player.addEventListener("loadedmetadata", onLoaded);
-              }
-            }
-            return;
-          } catch (err) {
-            reportError((err as Error).message);
+        try {
+          const currentQueueTrack = queue.find(
+            (item) => item.kind === "track" && item.now_playing && item.id
+          ) as { id?: number } | undefined;
+          const replayId = currentQueueTrack?.id ?? effectiveNowPlayingTrackId;
+          const resumed = await resumeLocalFromStatus(replayId ?? null, status.elapsed_ms ?? null);
+          if (resumed) {
             return;
           }
+        } catch (err) {
+          reportError((err as Error).message);
+          return;
         }
       }
       await handlePause();
