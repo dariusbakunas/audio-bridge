@@ -2,6 +2,7 @@
 name = "audio-hub-server"
 version = "0.14.1"
 edition = "2024"
+license = "GPL-3.0-only"
 build = "build.rs"
 repository = "https://github.com/dariusbakunas/audio-bridge.git"
 

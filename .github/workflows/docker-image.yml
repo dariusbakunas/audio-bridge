@@ -41,6 +41,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/audio-hub-server
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-only
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -101,6 +103,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/audio-hub-server
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-only
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}

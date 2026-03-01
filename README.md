@@ -495,4 +495,5 @@ This is a direct, local-network stream to a dedicated receiver. Audio is decoded
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
+Licensed under the GNU General Public License v3.0 only (GPL-3.0-only).  
+See `LICENSE` for the full text.
