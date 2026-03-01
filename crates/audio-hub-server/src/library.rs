@@ -47,6 +47,7 @@ impl LibraryIndex {
         None
     }
 
+    /// Update metadata fields for an existing track entry in the index.
     pub fn update_track_meta(&mut self, path: &Path, meta: &TrackMeta) -> bool {
         let dir = match path.parent() {
             Some(dir) => dir,
@@ -87,6 +88,7 @@ impl LibraryIndex {
         false
     }
 
+    /// Insert or replace one track entry while preserving directory/track sort order.
     pub fn upsert_track_entry(
         &mut self,
         path: &Path,
@@ -138,6 +140,7 @@ impl LibraryIndex {
         true
     }
 
+    /// Remove one track entry from the index.
     pub fn remove_track(&mut self, path: &Path) -> bool {
         let dir = match path.parent() {
             Some(dir) => dir,
@@ -203,6 +206,7 @@ where
     })
 }
 
+/// Recursively scan one directory and populate index maps.
 fn scan_dir<F, D>(
     root: &Path,
     dir: &Path,
@@ -308,6 +312,7 @@ where
     Ok(())
 }
 
+/// Return whether extension is supported for audio metadata scanning.
 fn is_supported_extension(ext: &str) -> bool {
     matches!(
         ext,
@@ -316,30 +321,48 @@ fn is_supported_extension(ext: &str) -> bool {
 }
 
 #[derive(Clone, Debug, Default)]
+/// Probed metadata fields for one audio track.
 pub struct TrackMeta {
+    /// Duration in milliseconds.
     pub duration_ms: Option<u64>,
+    /// Sample rate in Hz.
     pub sample_rate: Option<u32>,
+    /// Source bit depth when known.
     pub bit_depth: Option<u32>,
+    /// Album title.
     pub album: Option<String>,
+    /// Track artist.
     pub artist: Option<String>,
+    /// Album artist.
     pub album_artist: Option<String>,
+    /// Compilation flag from tags.
     pub compilation: bool,
+    /// Track title.
     pub title: Option<String>,
+    /// Track number.
     pub track_number: Option<u32>,
+    /// Disc number.
     pub disc_number: Option<u32>,
+    /// Release year.
     pub year: Option<i32>,
+    /// Container/format hint (upper-case).
     pub format: Option<String>,
+    /// Embedded front cover art when available.
     pub cover_art: Option<CoverArt>,
 }
 
 #[derive(Clone, Debug)]
+/// Embedded cover-art blob extracted from metadata tags.
 pub struct CoverArt {
+    /// MIME type for image data.
     pub mime_type: String,
+    /// Raw image bytes.
     pub data: Vec<u8>,
 }
 
 const MAX_COVER_ART_BYTES: usize = 5_000_000;
 
+/// Probe metadata for one track file and return best-effort [`TrackMeta`].
 fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
     let mut meta = TrackMeta::default();
     if ext_hint.is_empty() {
@@ -439,6 +462,7 @@ fn probe_track_meta(path: &Path, ext_hint: &str) -> TrackMeta {
     meta
 }
 
+/// Probe and validate one supported track file.
 pub fn probe_track(path: &Path) -> Result<TrackMeta> {
     let ext = path
         .extension()
@@ -451,18 +475,21 @@ pub fn probe_track(path: &Path) -> Result<TrackMeta> {
     Ok(probe_track_meta(path, &ext))
 }
 
+/// Parse integer tag forms like `3` or `3/12`.
 fn parse_u32_tag(raw: &str) -> Option<u32> {
     raw.split('/')
         .next()
         .and_then(|s| s.trim().parse::<u32>().ok())
 }
 
+/// Parse year-like tag values (first `-` separated component).
 fn parse_i32_tag(raw: &str) -> Option<i32> {
     raw.split('-')
         .next()
         .and_then(|s| s.trim().parse::<i32>().ok())
 }
 
+/// Parse boolean-ish tag values (`1`, `true`, `yes`, `y`).
 fn parse_bool_tag(raw: &str) -> bool {
     matches!(
         raw.trim().to_ascii_lowercase().as_str(),
@@ -470,6 +497,7 @@ fn parse_bool_tag(raw: &str) -> bool {
     )
 }
 
+/// Select preferred cover art from metadata visuals.
 fn select_cover_art(rev: &symphonia::core::meta::MetadataRevision) -> Option<CoverArt> {
     let mut best = rev
         .visuals()

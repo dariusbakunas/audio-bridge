@@ -16,6 +16,7 @@ use crate::metadata_db::{AlbumSummary, MetadataDb, TrackRecord};
 use crate::state::MetadataWake;
 
 #[derive(Clone)]
+/// High-level metadata orchestration service over DB + filesystem.
 pub struct MetadataService {
     db: MetadataDb,
     cover_art: CoverArtResolver,
@@ -28,6 +29,7 @@ const ALBUM_MARKER_DIR: &str = ".audio-hub";
 const ALBUM_MARKER_FILE: &str = "album.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// On-disk album folder marker used to keep stable album UUID grouping.
 struct AlbumFolderMarker {
     album_uuid: String,
     title: Option<String>,
@@ -37,6 +39,7 @@ struct AlbumFolderMarker {
 }
 
 impl MetadataService {
+    /// Create a metadata service bound to a library root and event buses.
     pub fn new(
         db: MetadataDb,
         root: PathBuf,
@@ -52,6 +55,7 @@ impl MetadataService {
         }
     }
 
+    /// Build a DB track record from probed metadata + filesystem metadata.
     pub fn build_track_record(
         path: &Path,
         file_name: &str,
@@ -85,6 +89,7 @@ impl MetadataService {
         }
     }
 
+    /// Upsert one track record and resolve/update its cover art metadata.
     pub fn upsert_track_record(
         &self,
         path: &Path,
@@ -100,6 +105,7 @@ impl MetadataService {
         Ok(())
     }
 
+    /// Rescan a single track file and update DB + in-memory index.
     pub fn rescan_track(
         &self,
         library: &RwLock<LibraryIndex>,
@@ -179,30 +185,35 @@ impl MetadataService {
         Ok(())
     }
 
+    /// Fetch one track record by path.
     pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>, String> {
         self.db
             .track_record_by_path(path)
             .map_err(|err| err.to_string())
     }
 
+    /// Fetch one track record by id.
     pub fn track_record_by_id(&self, track_id: i64) -> Result<Option<TrackRecord>, String> {
         self.db
             .track_record_by_id(track_id)
             .map_err(|err| err.to_string())
     }
 
+    /// Fetch album summary by id.
     pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>, String> {
         self.db
             .album_summary_by_id(album_id)
             .map_err(|err| err.to_string())
     }
 
+    /// List all track paths currently assigned to an album.
     pub fn list_track_paths_by_album_id(&self, album_id: i64) -> Result<Vec<String>, String> {
         self.db
             .list_track_paths_by_album_id(album_id)
             .map_err(|err| err.to_string())
     }
 
+    /// Update album-level metadata fields and return resulting album id.
     pub fn update_album_metadata(
         &self,
         album_id: i64,
@@ -215,30 +226,35 @@ impl MetadataService {
             .map_err(|err| format!("{err:#}"))
     }
 
+    /// Resolve album id for one track path.
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>, String> {
         self.db
             .album_id_for_track_path(path)
             .map_err(|err| err.to_string())
     }
 
+    /// Resolve cover-art path for one track path.
     pub fn cover_path_for_track(&self, path: &str) -> Result<Option<String>, String> {
         self.db
             .cover_path_for_track(path)
             .map_err(|err| err.to_string())
     }
 
+    /// Resolve cover-art path for one track id.
     pub fn cover_path_for_track_id(&self, track_id: i64) -> Result<Option<String>, String> {
         self.db
             .cover_path_for_track_id(track_id)
             .map_err(|err| err.to_string())
     }
 
+    /// Resolve cover-art path for one album id.
     pub fn cover_path_for_album_id(&self, album_id: i64) -> Result<Option<String>, String> {
         self.db
             .cover_path_for_album_id(album_id)
             .map_err(|err| err.to_string())
     }
 
+    /// Full library rescan plus stale-track pruning and marker backfill.
     pub fn rescan_library(&self, emit_events: bool) -> Result<LibraryIndex> {
         let (index, seen_paths) = self.scan_library_with_paths(emit_events)?;
         let existing = self.db.list_all_track_paths()?;
@@ -252,6 +268,7 @@ impl MetadataService {
         Ok(index)
     }
 
+    /// Internal scan returning both index and seen path set.
     fn scan_library_with_paths(
         &self,
         emit_events: bool,
@@ -321,6 +338,7 @@ impl MetadataService {
         Ok((index, seen))
     }
 
+    /// Remove one track path from DB and in-memory index.
     pub fn remove_track_by_path(
         &self,
         library: &RwLock<LibraryIndex>,
@@ -355,11 +373,13 @@ impl MetadataService {
         Ok(deleted)
     }
 
+    /// Scan library and return fresh index (without stale-track pruning).
     pub fn scan_library(&self, emit_events: bool) -> Result<LibraryIndex> {
         let (index, _) = self.scan_library_with_paths(emit_events)?;
         Ok(index)
     }
 
+    /// Create album marker files for albums that have UUIDs but missing markers.
     pub fn ensure_album_markers(&self) {
         let candidates = match self.db.album_marker_candidates() {
             Ok(list) => list,
@@ -390,6 +410,7 @@ impl MetadataService {
         }
     }
 
+    /// Resolve and validate a track path under the library root.
     pub fn resolve_track_path(root: &Path, raw_path: &str) -> Result<PathBuf, HttpResponse> {
         let raw_path = PathBuf::from(raw_path);
         let candidate = if raw_path.is_absolute() {
@@ -410,6 +431,7 @@ impl MetadataService {
         Ok(full_path)
     }
 
+    /// Resolve stable album UUID for a track using marker, DB, or generated UUID.
     fn album_uuid_for_track(&self, path: &Path, meta: &TrackMeta) -> Option<String> {
         let Some(album_title) = meta
             .album
@@ -447,6 +469,7 @@ impl MetadataService {
     }
 }
 
+/// Normalize album names containing disc suffixes and infer disc number.
 fn normalize_album_and_disc(
     path: &Path,
     meta: &TrackMeta,
@@ -483,16 +506,19 @@ fn normalize_album_and_disc(
     (album, disc_number, source)
 }
 
+/// Compute marker file path under an album directory.
 fn album_marker_path(dir: &Path) -> PathBuf {
     dir.join(ALBUM_MARKER_DIR).join(ALBUM_MARKER_FILE)
 }
 
+/// Read album marker file when present and valid.
 fn read_album_marker(dir: &Path) -> Option<AlbumFolderMarker> {
     let path = album_marker_path(dir);
     let data = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&data).ok()
 }
 
+/// Write album marker file once (no-op if marker already exists).
 fn write_album_marker(dir: &Path, marker: &AlbumFolderMarker) -> Result<(), String> {
     let marker_dir = dir.join(ALBUM_MARKER_DIR);
     std::fs::create_dir_all(&marker_dir).map_err(|err| err.to_string())?;
@@ -504,6 +530,7 @@ fn write_album_marker(dir: &Path, marker: &AlbumFolderMarker) -> Result<(), Stri
     std::fs::write(path, data).map_err(|err| err.to_string())
 }
 
+/// Extract `(normalized_album_title, disc_number)` from common suffix formats.
 fn extract_disc_suffix(raw: &str) -> Option<(String, u32)> {
     let trimmed = raw.trim();
     if let Some((left, right)) = split_suffix_with_delim(trimmed, " - ") {
@@ -527,6 +554,7 @@ fn extract_disc_suffix(raw: &str) -> Option<(String, u32)> {
     None
 }
 
+/// Split trailing wrapped suffix like `Album (Disc 2)` or `Album [CD1]`.
 fn split_wrapped_suffix(raw: &str) -> Option<(&str, &str)> {
     let bytes = raw.as_bytes();
     if bytes.is_empty() {
@@ -554,6 +582,7 @@ fn split_wrapped_suffix(raw: &str) -> Option<(&str, &str)> {
     }
 }
 
+/// Split trailing suffix by explicit delimiter.
 fn split_suffix_with_delim<'a>(raw: &'a str, delim: &'a str) -> Option<(&'a str, &'a str)> {
     let (left, right) = raw.rsplit_once(delim)?;
     let left = left.trim_end();
@@ -565,6 +594,7 @@ fn split_suffix_with_delim<'a>(raw: &'a str, delim: &'a str) -> Option<(&'a str,
     }
 }
 
+/// Split trailing suffix by final whitespace token.
 fn split_suffix_with_space(raw: &str) -> Option<(&str, &str)> {
     let (left, right) = raw.rsplit_once(' ')?;
     let left = left.trim_end();
@@ -576,6 +606,7 @@ fn split_suffix_with_space(raw: &str) -> Option<(&str, &str)> {
     }
 }
 
+/// Parse disc number from free-form tokens (`disc 2`, `cd1`, etc.).
 fn parse_disc_number(raw: &str) -> Option<u32> {
     let lower = raw.trim().to_ascii_lowercase();
     if lower.is_empty() {
@@ -608,6 +639,7 @@ fn parse_disc_number(raw: &str) -> Option<u32> {
     None
 }
 
+/// Infer disc number from parent folder naming conventions.
 fn disc_hint_from_path(path: &Path) -> Option<u32> {
     let name = path.parent()?.file_name()?.to_string_lossy().to_string();
     parse_disc_number(&name)

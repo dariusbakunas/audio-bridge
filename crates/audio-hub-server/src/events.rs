@@ -17,6 +17,7 @@ use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+/// Metadata/background-work events exposed to API/SSE clients.
 pub enum MetadataEvent {
     LibraryScanAlbumStart {
         album: String,
@@ -80,10 +81,15 @@ pub enum MetadataEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+/// Buffered server log event payload.
 pub struct LogEvent {
+    /// Log level string.
     pub level: String,
+    /// Tracing target/module.
     pub target: String,
+    /// Formatted message + selected fields.
     pub message: String,
+    /// Event timestamp (unix millis).
     pub timestamp_ms: i64,
 }
 
@@ -98,6 +104,7 @@ pub enum HubEvent {
 }
 
 #[derive(Clone)]
+/// Broadcast bus for high-level server events.
 pub struct EventBus {
     sender: broadcast::Sender<HubEvent>,
 }
@@ -140,6 +147,7 @@ impl EventBus {
     }
 }
 
+/// In-memory rolling log bus plus broadcast fanout for UI log streaming.
 pub struct LogBus {
     sender: broadcast::Sender<LogEvent>,
     buffer: Arc<Mutex<VecDeque<LogEvent>>>,
@@ -147,6 +155,7 @@ pub struct LogBus {
 }
 
 impl LogBus {
+    /// Create log bus with fixed in-memory ring capacity.
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity.max(16));
         Self {
@@ -156,10 +165,12 @@ impl LogBus {
         }
     }
 
+    /// Subscribe to live log stream.
     pub fn subscribe(&self) -> broadcast::Receiver<LogEvent> {
         self.sender.subscribe()
     }
 
+    /// Snapshot buffered log history.
     pub fn snapshot(&self) -> Vec<LogEvent> {
         self.buffer
             .lock()
@@ -167,6 +178,7 @@ impl LogBus {
             .unwrap_or_default()
     }
 
+    /// Publish one log event to buffer and subscribers.
     pub fn publish(&self, event: LogEvent) {
         if let Ok(mut buffer) = self.buffer.lock() {
             buffer.push_back(event.clone());
@@ -177,6 +189,7 @@ impl LogBus {
         let _ = self.sender.send(event);
     }
 
+    /// Clear in-memory buffered log history.
     pub fn clear(&self) {
         if let Ok(mut buffer) = self.buffer.lock() {
             buffer.clear();
@@ -184,11 +197,13 @@ impl LogBus {
     }
 }
 
+/// Tracing layer that forwards events into [`LogBus`].
 pub struct LogLayer {
     log_bus: Arc<LogBus>,
 }
 
 impl LogLayer {
+    /// Create tracing layer backed by a shared log bus.
     pub fn new(log_bus: Arc<LogBus>) -> Self {
         Self { log_bus }
     }
@@ -198,6 +213,7 @@ impl<S> Layer<S> for LogLayer
 where
     S: Subscriber,
 {
+    /// Convert tracing event into [`LogEvent`] and publish it.
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         let mut visitor = LogVisitor::default();
         event.record(&mut visitor);
@@ -220,12 +236,14 @@ where
 }
 
 #[derive(Default)]
+/// Visitor collecting primary message and key/value fields from tracing events.
 struct LogVisitor {
     message: Option<String>,
     fields: Vec<String>,
 }
 
 impl Visit for LogVisitor {
+    /// Record string fields from tracing events.
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "message" {
             self.message = Some(value.to_string());
@@ -234,6 +252,7 @@ impl Visit for LogVisitor {
         }
     }
 
+    /// Record debug-formatted fields from tracing events.
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let formatted = format!("{value:?}");
         if field.name() == "message" {

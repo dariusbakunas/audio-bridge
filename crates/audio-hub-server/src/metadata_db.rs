@@ -220,6 +220,7 @@ pub struct CoverArtCandidate {
     pub mbid: String,
 }
 
+/// Map one SQL artist row into [`ArtistSummary`].
 fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
     Ok(ArtistSummary {
         id: row.get(0)?,
@@ -232,6 +233,7 @@ fn map_artist_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistSummary> {
     })
 }
 
+/// Map one SQL row into [`TextEntry`].
 fn map_text_entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TextEntry> {
     let locked: i64 = row.get(3)?;
     Ok(TextEntry {
@@ -243,6 +245,7 @@ fn map_text_entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TextEntry> {
     })
 }
 
+/// Map one SQL row into [`MediaAssetRecord`].
 fn map_media_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaAssetRecord> {
     Ok(MediaAssetRecord {
         id: row.get(0)?,
@@ -297,6 +300,7 @@ impl MetadataDb {
         Ok(db)
     }
 
+    /// Convert caller path into DB-stored path representation.
     fn path_to_db(&self, path: &str) -> String {
         let Some(root) = self.media_root.as_ref() else {
             return path.to_string();
@@ -310,6 +314,7 @@ impl MetadataDb {
             .unwrap_or_else(|| path.to_string())
     }
 
+    /// Convert DB-stored path into caller-facing path representation.
     fn path_from_db(&self, path: String) -> String {
         let Some(root) = self.media_root.as_ref() else {
             return path;
@@ -321,6 +326,7 @@ impl MetadataDb {
         root.join(path_obj).to_string_lossy().to_string()
     }
 
+    /// Migrate legacy absolute track paths into media-root-relative form.
     fn migrate_track_paths_to_relative(&self) -> Result<()> {
         let Some(root) = self.media_root.as_ref() else {
             return Ok(());
@@ -380,6 +386,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Insert or update one track row and related artist/album rows.
     pub fn upsert_track(&self, record: &TrackRecord) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
@@ -559,10 +566,12 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Apply MusicBrainz metadata without overriding existing MB fields.
     pub fn apply_musicbrainz(&self, record: &TrackRecord, mb: &MusicBrainzMatch) -> Result<()> {
         self.apply_musicbrainz_with_override(record, mb, false)
     }
 
+    /// Apply MusicBrainz metadata with optional overwrite behavior.
     pub fn apply_musicbrainz_with_override(
         &self,
         record: &TrackRecord,
@@ -690,6 +699,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Apply album-scoped MusicBrainz metadata updates.
     pub fn apply_album_musicbrainz(
         &self,
         album_id: i64,
@@ -761,6 +771,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Fetch full track record by path.
     pub fn track_record_by_path(&self, path: &str) -> Result<Option<TrackRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -802,6 +813,7 @@ impl MetadataDb {
         .context("fetch track record")
     }
 
+    /// Fetch full track record by id.
     pub fn track_record_by_id(&self, track_id: i64) -> Result<Option<TrackRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.query_row(
@@ -842,6 +854,7 @@ impl MetadataDb {
         .context("fetch track record")
     }
 
+    /// Resolve track id by path.
     pub fn track_id_for_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -854,6 +867,7 @@ impl MetadataDb {
         .context("fetch track id for path")
     }
 
+    /// Resolve track path by track id.
     pub fn track_path_for_id(&self, track_id: i64) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let path: Option<String> = conn
@@ -867,6 +881,7 @@ impl MetadataDb {
         Ok(path.map(|value| self.path_from_db(value)))
     }
 
+    /// Resolve album id containing a given track path.
     pub fn album_id_for_track_path(&self, path: &str) -> Result<Option<i64>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -879,6 +894,7 @@ impl MetadataDb {
         .context("fetch album id for track")
     }
 
+    /// List representative album-path candidates for marker file generation.
     pub fn album_marker_candidates(&self) -> Result<Vec<AlbumMarkerCandidate>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
@@ -905,6 +921,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Lookup album UUID by normalized title and optional artist.
     pub fn album_uuid_for_title_artist(
         &self,
         title: &str,
@@ -925,6 +942,7 @@ impl MetadataDb {
         .context("lookup album uuid by title/artist")
     }
 
+    /// List tracks still missing at least one MusicBrainz binding.
     pub fn list_musicbrainz_candidates(&self, limit: i64) -> Result<Vec<MusicBrainzCandidate>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
@@ -960,6 +978,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Lookup album cover path by title/optional artist.
     pub fn album_cover_path(&self, album: &str, artist: Option<&str>) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let artist_id = if let Some(artist) = artist {
@@ -982,6 +1001,7 @@ impl MetadataDb {
         Ok(cover.filter(|value| !value.trim().is_empty()))
     }
 
+    /// Set album cover path only when existing cover field is empty.
     pub fn set_album_cover_if_empty(
         &self,
         album: &str,
@@ -1007,6 +1027,7 @@ impl MetadataDb {
         Ok(updated > 0)
     }
 
+    /// Lookup cover path for one track path.
     pub fn cover_path_for_track(&self, path: &str) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -1026,6 +1047,7 @@ impl MetadataDb {
         Ok(cover.filter(|value| !value.trim().is_empty()))
     }
 
+    /// Lookup cover path for one track id.
     pub fn cover_path_for_track_id(&self, track_id: i64) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let cover: Option<String> = conn
@@ -1044,6 +1066,7 @@ impl MetadataDb {
         Ok(cover.filter(|value| !value.trim().is_empty()))
     }
 
+    /// Lookup cover path for one album id.
     pub fn cover_path_for_album_id(&self, album_id: i64) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let cover: Option<String> = conn
@@ -1057,6 +1080,7 @@ impl MetadataDb {
         Ok(cover.filter(|value| !value.trim().is_empty()))
     }
 
+    /// Set album cover for album id only when currently empty.
     pub fn set_album_cover_by_id_if_empty(&self, album_id: i64, cover_path: &str) -> Result<bool> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
@@ -1068,6 +1092,7 @@ impl MetadataDb {
         Ok(updated > 0)
     }
 
+    /// List albums eligible for cover-art fetch attempts.
     pub fn list_cover_art_candidates(&self, limit: i64) -> Result<Vec<CoverArtCandidate>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
@@ -1091,6 +1116,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Increment cover-art failure count and persist last error text.
     pub fn increment_cover_art_fail(&self, album_id: i64, error: &str) -> Result<i64> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.execute(
@@ -1106,6 +1132,7 @@ impl MetadataDb {
         Ok(count)
     }
 
+    /// Advance album to next fallback release MBID candidate.
     pub fn advance_cover_candidate(&self, album_id: i64) -> Result<Option<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let raw: Option<String> = conn
@@ -1137,6 +1164,7 @@ impl MetadataDb {
         Ok(Some(next))
     }
 
+    /// Persist no-match key for a track to suppress repeated MB lookups.
     pub fn set_musicbrainz_no_match(&self, path: &str, key: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -1148,6 +1176,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Clear stored no-match suppression key for a track.
     pub fn clear_musicbrainz_no_match(&self, path: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -1159,6 +1188,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// List artist summaries with optional search and paging.
     pub fn list_artists(
         &self,
         search: Option<&str>,
@@ -1207,6 +1237,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// List album summaries with optional artist/search filters and paging.
     pub fn list_albums(
         &self,
         artist_id: Option<i64>,
@@ -1267,6 +1298,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Fetch one album summary by id.
     pub fn album_summary_by_id(&self, album_id: i64) -> Result<Option<AlbumSummary>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.query_row(
@@ -1313,6 +1345,7 @@ impl MetadataDb {
         .context("select album summary by id")
     }
 
+    /// Return whether an artist row exists.
     pub fn artist_exists(&self, artist_id: i64) -> Result<bool> {
         let conn = self.pool.get().context("open metadata db")?;
         let value: Option<i64> = conn
@@ -1326,6 +1359,7 @@ impl MetadataDb {
         Ok(value.is_some())
     }
 
+    /// Return whether an album row exists.
     pub fn album_exists(&self, album_id: i64) -> Result<bool> {
         let conn = self.pool.get().context("open metadata db")?;
         let value: Option<i64> = conn
@@ -1339,6 +1373,7 @@ impl MetadataDb {
         Ok(value.is_some())
     }
 
+    /// Fetch album edition fields tuple `(original_year, edition_year, edition_label)`.
     pub fn album_edition_fields(
         &self,
         album_id: i64,
@@ -1352,6 +1387,7 @@ impl MetadataDb {
         .context("select album edition fields")
     }
 
+    /// Update album edition fields.
     pub fn update_album_edition_fields(
         &self,
         album_id: i64,
@@ -1374,6 +1410,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Fetch artist biography entry for `(artist_id, lang)`.
     pub fn artist_bio(&self, artist_id: i64, lang: &str) -> Result<Option<TextEntry>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.query_row(
@@ -1389,6 +1426,7 @@ impl MetadataDb {
         .context("select artist bio")
     }
 
+    /// Fetch album notes entry for `(album_id, lang)`.
     pub fn album_notes(&self, album_id: i64, lang: &str) -> Result<Option<TextEntry>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.query_row(
@@ -1404,6 +1442,7 @@ impl MetadataDb {
         .context("select album notes")
     }
 
+    /// Insert or update one artist biography entry.
     pub fn upsert_artist_bio(
         &self,
         artist_id: i64,
@@ -1431,6 +1470,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Insert or update one album notes entry.
     pub fn upsert_album_notes(
         &self,
         album_id: i64,
@@ -1458,6 +1498,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Delete artist biography for `(artist_id, lang)`.
     pub fn delete_artist_bio(&self, artist_id: i64, lang: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.execute(
@@ -1468,6 +1509,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Delete album notes for `(album_id, lang)`.
     pub fn delete_album_notes(&self, album_id: i64, lang: &str) -> Result<()> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.execute(
@@ -1478,6 +1520,7 @@ impl MetadataDb {
         Ok(())
     }
 
+    /// Fetch media asset by owner tuple `(type, id, kind)`.
     pub fn media_asset_for(
         &self,
         owner_type: &str,
@@ -1498,6 +1541,7 @@ impl MetadataDb {
         .context("select media asset")
     }
 
+    /// Fetch media asset by asset id.
     pub fn media_asset_by_id(&self, asset_id: i64) -> Result<Option<MediaAssetRecord>> {
         let conn = self.pool.get().context("open metadata db")?;
         conn.query_row(
@@ -1513,6 +1557,7 @@ impl MetadataDb {
         .context("select media asset by id")
     }
 
+    /// Replace existing media asset for owner tuple and return inserted asset id.
     pub fn upsert_media_asset(
         &self,
         owner_type: &str,
@@ -1551,6 +1596,7 @@ impl MetadataDb {
         Ok(id)
     }
 
+    /// Delete media asset for owner tuple and return previous row when present.
     pub fn delete_media_asset(
         &self,
         owner_type: &str,
@@ -1580,6 +1626,7 @@ impl MetadataDb {
         Ok(existing)
     }
 
+    /// List tracks with optional album/artist/search filters and paging.
     pub fn list_tracks(
         &self,
         album_id: Option<i64>,
@@ -1635,6 +1682,7 @@ impl MetadataDb {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// List track paths belonging to an album id.
     pub fn list_track_paths_by_album_id(&self, album_id: i64) -> Result<Vec<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare(
@@ -1647,6 +1695,7 @@ impl MetadataDb {
             .collect())
     }
 
+    /// List all track paths currently in DB.
     pub fn list_all_track_paths(&self) -> Result<Vec<String>> {
         let conn = self.pool.get().context("open metadata db")?;
         let mut stmt = conn.prepare("SELECT path FROM tracks")?;
@@ -1657,6 +1706,7 @@ impl MetadataDb {
             .collect())
     }
 
+    /// Update album metadata, merging rows when title+artist collide.
     pub fn update_album_metadata(
         &self,
         album_id: i64,
@@ -1730,6 +1780,7 @@ impl MetadataDb {
         }
     }
 
+    /// Delete one track by path.
     pub fn delete_track_by_path(&self, path: &str) -> Result<bool> {
         let conn = self.pool.get().context("open metadata db")?;
         let db_path = self.path_to_db(path);
@@ -1739,6 +1790,7 @@ impl MetadataDb {
         Ok(deleted > 0)
     }
 
+    /// Mark/clear orphaned albums according to current track references.
     pub fn prune_orphaned_albums_and_artists(&self) -> Result<()> {
         let mut conn = self.pool.get().context("open metadata db")?;
         let tx = conn.transaction().context("begin metadata tx")?;
@@ -1771,16 +1823,19 @@ impl MetadataDb {
     }
 }
 
+/// Compute canonical DB path under media root.
 fn db_path_for(media_root: &Path) -> PathBuf {
     media_root.join(".audio-hub").join("metadata.sqlite")
 }
 
+/// Best-effort canonicalized media root for path normalization.
 fn normalize_media_root(media_root: &Path) -> PathBuf {
     media_root
         .canonicalize()
         .unwrap_or_else(|_| media_root.to_path_buf())
 }
 
+/// Convert absolute path into media-root-relative path when possible.
 fn relative_from_absolute(path: &Path, media_root: &Path) -> Option<PathBuf> {
     if let Ok(relative) = path.strip_prefix(media_root) {
         return Some(relative.to_path_buf());
@@ -1811,6 +1866,7 @@ fn relative_from_absolute(path: &Path, media_root: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Return true when optional string is missing or whitespace-only.
 fn is_blank(value: &Option<String>) -> bool {
     value
         .as_deref()
@@ -1818,6 +1874,7 @@ fn is_blank(value: &Option<String>) -> bool {
         .unwrap_or(true)
 }
 
+/// Fill missing UUID values for all rows in a table.
 fn backfill_uuids(conn: &Connection, table: &str) -> Result<()> {
     let mut stmt = conn.prepare(&format!("SELECT id FROM {table} WHERE uuid IS NULL"))?;
     let ids = stmt.query_map([], |row| row.get::<_, i64>(0))?;
@@ -1832,6 +1889,7 @@ fn backfill_uuids(conn: &Connection, table: &str) -> Result<()> {
     Ok(())
 }
 
+/// Ensure UUID unique indexes exist on artists/albums.
 fn ensure_uuid_indexes(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
@@ -1843,6 +1901,7 @@ fn ensure_uuid_indexes(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Ensure one row has a non-empty UUID value.
 fn ensure_row_uuid(conn: &Connection, table: &str, id: i64) -> Result<()> {
     let existing: Option<String> = conn
         .query_row(
@@ -1867,6 +1926,7 @@ fn ensure_row_uuid(conn: &Connection, table: &str, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Lookup artist id by exact artist name.
 fn find_artist_id(conn: &Connection, name: &str) -> Result<Option<i64>> {
     let id = conn
         .query_row(
@@ -1879,6 +1939,7 @@ fn find_artist_id(conn: &Connection, name: &str) -> Result<Option<i64>> {
     Ok(id)
 }
 
+/// Lookup album id by exact `(title, artist_id)` pair.
 fn find_album_id(conn: &Connection, title: &str, artist_id: Option<i64>) -> Result<Option<i64>> {
     let id = conn
         .query_row(
@@ -1891,6 +1952,7 @@ fn find_album_id(conn: &Connection, title: &str, artist_id: Option<i64>) -> Resu
     Ok(id)
 }
 
+/// Initialize/migrate metadata schema to current version.
 fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
@@ -2234,6 +2296,7 @@ mod tests {
     }
 }
 
+/// Insert-or-fetch artist id by name and ensure UUID presence.
 fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
     conn.execute(
         "INSERT OR IGNORE INTO artists (uuid, name, sort_name) VALUES (?1, ?2, ?3)",
@@ -2249,6 +2312,7 @@ fn upsert_artist(conn: &Connection, name: &str) -> Result<i64> {
     Ok(id)
 }
 
+/// Insert-or-fetch album id by `(title, artist_id)` and ensure UUID presence.
 fn upsert_album(
     conn: &Connection,
     title: &str,
@@ -2269,6 +2333,7 @@ fn upsert_album(
     Ok(id)
 }
 
+/// Insert or update album row keyed by explicit album UUID.
 fn upsert_album_with_uuid(
     conn: &Connection,
     uuid: &str,

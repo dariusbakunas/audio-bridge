@@ -32,6 +32,7 @@ const CAA_RATE_LIMIT_MS: u64 = 1000;
 const MAX_COVER_BYTES: usize = 5_000_000;
 
 #[derive(Clone)]
+/// Resolves and persists album cover art from embedded tags/folder art/Cover Art Archive.
 pub struct CoverArtResolver {
     db: MetadataDb,
     store: CoverArtStore,
@@ -39,6 +40,7 @@ pub struct CoverArtResolver {
 }
 
 impl CoverArtResolver {
+    /// Build cover-art resolver with filesystem cache rooted at library path.
     pub fn new(db: MetadataDb, root: PathBuf) -> Self {
         Self {
             db,
@@ -47,6 +49,7 @@ impl CoverArtResolver {
         }
     }
 
+    /// Ensure album cover art exists for a scanned track's album.
     pub fn apply_for_track(
         &self,
         track_path: &Path,
@@ -84,6 +87,7 @@ impl CoverArtResolver {
     }
 }
 
+/// Read first matching folder cover file from a track directory.
 fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
     let Some(dir) = dir else {
         return Ok(None);
@@ -104,15 +108,18 @@ fn read_folder_cover(dir: Option<&Path>) -> Result<Option<CoverArt>> {
 }
 
 #[derive(Clone)]
+/// Strategy wrapper deciding where cover art is sourced from.
 struct CoverArtSource {
     strategy: CoverArtStrategy,
 }
 
 impl CoverArtSource {
+    /// Create cover source using explicit strategy.
     fn new(strategy: CoverArtStrategy) -> Self {
         Self { strategy }
     }
 
+    /// Resolve cover art for a track according to configured strategy.
     fn cover_for_track(&self, track_path: &Path, meta: &TrackMeta) -> Result<Option<CoverArt>> {
         match self.strategy {
             CoverArtStrategy::EmbeddedThenFolder => {
@@ -134,6 +141,7 @@ impl CoverArtSource {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Cover source ordering strategy.
 enum CoverArtStrategy {
     EmbeddedThenFolder,
     FolderThenEmbedded,
@@ -142,25 +150,30 @@ enum CoverArtStrategy {
 }
 
 impl Default for CoverArtSource {
+    /// Default to embedded-art first, then folder art fallback.
     fn default() -> Self {
         Self::new(CoverArtStrategy::EmbeddedThenFolder)
     }
 }
 
 #[derive(Clone)]
+/// Filesystem cache for normalized cover art blobs.
 struct CoverArtStore {
     root: PathBuf,
 }
 
 impl CoverArtStore {
+    /// Create cover-art cache store rooted at library root.
     fn new(root: PathBuf) -> Self {
         Self { root }
     }
 
+    /// Return absolute directory for cached cover art files.
     fn cache_dir(&self) -> PathBuf {
         self.root.join(COVER_CACHE_DIR)
     }
 
+    /// Find previously cached cover matching a slugified hint.
     fn find_cached_cover(&self, hint: &str) -> Option<String> {
         let slug = slugify(hint);
         let art_dir = self.cache_dir();
@@ -175,6 +188,7 @@ impl CoverArtStore {
         None
     }
 
+    /// Persist cover bytes in cache and return relative asset path.
     fn store_cover_art(&self, hint: &str, mime_type: &str, data: &[u8]) -> Result<String> {
         let art_dir = self.cache_dir();
         std::fs::create_dir_all(&art_dir)
@@ -193,6 +207,7 @@ impl CoverArtStore {
     }
 }
 
+/// Map MIME type to cache filename extension.
 fn extension_for_mime(mime: &str) -> Option<&'static str> {
     let lower = mime.to_ascii_lowercase();
     if lower.contains("jpeg") || lower.contains("jpg") {
@@ -206,6 +221,7 @@ fn extension_for_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
+/// Map filename extension to MIME type.
 fn mime_for_extension(ext: Option<&std::ffi::OsStr>) -> Option<&'static str> {
     let ext = ext?.to_string_lossy().to_ascii_lowercase();
     match ext.as_str() {
@@ -216,6 +232,7 @@ fn mime_for_extension(ext: Option<&std::ffi::OsStr>) -> Option<&'static str> {
     }
 }
 
+/// Slugify free-form text for deterministic cache naming.
 fn slugify(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut last_dash = false;
@@ -241,6 +258,7 @@ fn slugify(value: &str) -> String {
     }
 }
 
+/// Hash binary data for cache filename disambiguation.
 fn hash_bytes(data: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     data.hash(&mut hasher);
