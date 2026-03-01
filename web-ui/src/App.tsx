@@ -1,13 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, SetStateAction, useState } from "react";
+import { useCallback, useMemo, useRef, SetStateAction, useState } from "react";
 import {
-  fetchJson,
-  postJson
-} from "./api";
-import {
-  LogEvent,
-  MetadataEvent,
   OutputInfo,
-  SessionVolumeResponse,
   StatusResponse,
   QueueItem
 } from "./types";
@@ -15,26 +8,29 @@ import AppModals from "./components/AppModals";
 import AppChrome from "./components/AppChrome";
 import MainContent from "./components/MainContent";
 import {
-  useLogsStream,
-  useMetadataStream,
   useOutputsStream,
   useQueueStream,
   useStatusStream
 } from "./hooks/streams";
+import { useActivityEvents } from "./hooks/useActivityEvents";
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
 import { useAlbumMetadataTargets } from "./hooks/useAlbumMetadataTargets";
+import { useAlbumViewState } from "./hooks/useAlbumViewState";
 import { useAlbumsState } from "./hooks/useAlbumsState";
 import { useLocalPlayback } from "./hooks/useLocalPlayback";
 import { useMediaSessionControls } from "./hooks/useMediaSessionControls";
 import { useNowPlayingCover } from "./hooks/useNowPlayingCover";
 import { useOutputSettings } from "./hooks/useOutputSettings";
 import { usePlaybackCommands } from "./hooks/usePlaybackCommands";
+import { usePlaybackDerivedState } from "./hooks/usePlaybackDerivedState";
 import { useSessionUiActions } from "./hooks/useSessionUiActions";
+import { useSessionVolumeControl } from "./hooks/useSessionVolumeControl";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
+import { useUiShellEffects } from "./hooks/useUiShellEffects";
 import { SettingsSection, useViewNavigation } from "./hooks/useViewNavigation";
 import {
   albumPlaceholder,
@@ -42,23 +38,9 @@ import {
   formatHz,
   formatMs,
   formatRateRange,
-  metadataDetailLines,
-  normalizeMatch
+  metadataDetailLines
 } from "./utils/viewFormatters";
 
-interface MetadataEventEntry {
-  id: number;
-  time: Date;
-  event: MetadataEvent;
-}
-
-interface LogEventEntry {
-  id: number;
-  event: LogEvent;
-}
-
-const MAX_METADATA_EVENTS = 200;
-const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
@@ -86,8 +68,6 @@ function getOrCreateWebSessionClientId(): string {
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [sessionVolume, setSessionVolume] = useState<SessionVolumeResponse | null>(null);
-  const [volumeBusy, setVolumeBusy] = useState<boolean>(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
   const [queueOpen, setQueueOpen] = useState<boolean>(false);
@@ -109,27 +89,12 @@ export default function App() {
     }
   });
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("metadata");
-  const [metadataEvents, setMetadataEvents] = useState<MetadataEventEntry[]>([]);
-  const [logEvents, setLogEvents] = useState<LogEventEntry[]>([]);
-  const [logsError, setLogsError] = useState<string | null>(null);
   const [albumSearch, setAlbumSearch] = useState<string>("");
   const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
   const [albumViewId, setAlbumViewId] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const logIdRef = useRef(0);
-  const metadataIdRef = useRef(0);
   const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
-  const volumeRequestSeqRef = useRef(0);
-  const handleClearLogs = useCallback(async () => {
-    setLogEvents([]);
-    try {
-      await postJson<{ cleared_at_ms: number }>("/logs/clear");
-      setLogsError(null);
-    } catch (err) {
-      setLogsError((err as Error).message);
-    }
-  }, []);
   const {
     notifications,
     notificationsOpen,
@@ -149,6 +114,19 @@ export default function App() {
     connectionError,
     markServerConnected
   } = useHubConnection();
+  const {
+    metadataEvents,
+    setMetadataEvents,
+    logEvents,
+    logsError,
+    handleClearLogs
+  } = useActivityEvents({
+    settingsOpen,
+    serverConnected,
+    settingsSection,
+    connectionError,
+    reportError
+  });
   const {
     sessionId,
     setSessionId,
@@ -249,39 +227,33 @@ export default function App() {
     nowPlayingAlbumId,
     onCoverError
   } = useNowPlayingCover(status?.now_playing_track_id ?? null);
-  const queueNowPlayingTrackId = useMemo(() => {
-    const item = queue.find((entry) => entry.kind === "track" && Boolean(entry.now_playing));
-    return item?.kind === "track" ? item.id : null;
-  }, [queue]);
-  const replayTrackId = useMemo(() => {
-    const playedTracks = queue.filter(
-      (entry): entry is QueueItem & { kind: "track" } =>
-        entry.kind === "track" && Boolean(entry.played) && Number.isFinite(entry.id)
-    );
-    if (!playedTracks.length) return null;
-    return playedTracks[playedTracks.length - 1].id;
-  }, [queue]);
-  const hasPlayedHistory = Boolean(replayTrackId);
-  const staleEndedStatus =
-    !isLocalSession && hasPlayedHistory && queueNowPlayingTrackId === null;
-  const effectiveNowPlayingTrackId = staleEndedStatus
-    ? null
-    : queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null;
-  const hasNowPlaying = effectiveNowPlayingTrackId !== null;
-  const canReplayFromHistory = Boolean(
-    sessionId &&
-      (isLocalSession || activeOutputId) &&
-      !hasNowPlaying &&
-      replayTrackId
-  );
-  const canTogglePlayback = Boolean(
-    sessionId &&
-      (isLocalSession || activeOutputId) &&
-      (hasNowPlaying || canReplayFromHistory)
-  );
-  const canControlVolume = Boolean(serverConnected && sessionId && !isLocalSession && activeOutputId);
-  const isPlaying = Boolean(hasNowPlaying && !status?.paused);
-  const isPaused = Boolean(!hasNowPlaying || status?.paused);
+  const {
+    replayTrackId,
+    effectiveNowPlayingTrackId,
+    hasNowPlaying,
+    canReplayFromHistory,
+    canTogglePlayback,
+    canControlVolume,
+    isPlaying,
+    isPaused,
+    viewTitle,
+    playButtonTitle,
+    showGate,
+    queueHasNext,
+    deleteSessionDisabled,
+    canGoPrevious
+  } = usePlaybackDerivedState({
+    queue,
+    status,
+    isLocalSession: Boolean(isLocalSession),
+    sessionId,
+    activeOutputId,
+    serverConnected,
+    settingsOpen,
+    albumViewId,
+    sessions,
+    isDefaultSessionName
+  });
   const uiBuildId = useMemo(() => {
     if (__BUILD_MODE__ === "development") {
       return "dev";
@@ -289,22 +261,14 @@ export default function App() {
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
 
-  const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
-  const playButtonTitle = !sessionId
-    ? "Creating session..."
-    : !activeOutputId && !isLocalSession
-    ? (isLocalSession
-      ? "Local session is ready."
-      : "Select an output to control playback.")
-    : !hasNowPlaying
-      ? canReplayFromHistory
-        ? "Replay the last track."
-        : "Select an album track to play."
-      : undefined;
-  const selectedAlbum = useMemo(
-      () => albums.find((album) => album.id === albumViewId) ?? null,
-      [albums, albumViewId]
-  );
+  const { selectedAlbum, filteredAlbums, activeAlbumId } = useAlbumViewState({
+    albums,
+    albumViewId,
+    albumSearch,
+    statusAlbum: status?.album,
+    statusArtist: status?.artist,
+    nowPlayingAlbumId
+  });
   const {
     matchTarget,
     setMatchTarget,
@@ -325,93 +289,44 @@ export default function App() {
     albumTracks,
     selectedAlbum
   });
-  const filteredAlbums = useMemo(() => {
-    const query = albumSearch.trim().toLowerCase();
-    if (!query) return albums;
-    return albums.filter((album) => {
-      const title = album.title?.toLowerCase() ?? "";
-      const artist = album.artist?.toLowerCase() ?? "";
-      const year = album.year ? String(album.year) : "";
-      const originalYear = album.original_year ? String(album.original_year) : "";
-      const editionYear = album.edition_year ? String(album.edition_year) : "";
-      const editionLabel = album.edition_label?.toLowerCase() ?? "";
-      return (
-        title.includes(query) ||
-        artist.includes(query) ||
-        year.includes(query) ||
-        originalYear.includes(query) ||
-        editionYear.includes(query) ||
-        editionLabel.includes(query)
-      );
-    });
-  }, [albums, albumSearch]);
-  const heuristicAlbumId = useMemo(() => {
-    const albumKey = normalizeMatch(status?.album);
-    if (!albumKey) return null;
-    const artistKey = normalizeMatch(status?.artist);
-    const allowArtistMismatch = (albumArtist?: string | null) => {
-      if (!albumArtist) return true;
-      const key = normalizeMatch(albumArtist);
-      return key === "various artists" || key === "various" || key === "va";
-    };
-    const match = albums.find((album) => {
-      if (normalizeMatch(album.title) !== albumKey) return false;
-      if (!artistKey) return true;
-      if (!album.artist) return true;
-      if (normalizeMatch(album.artist) === artistKey) return true;
-      return allowArtistMismatch(album.artist);
-    });
-    return match?.id ?? null;
-  }, [albums, status?.album, status?.artist]);
-  const activeAlbumId = nowPlayingAlbumId ?? heuristicAlbumId;
+  const {
+    sessionVolume,
+    setSessionVolume,
+    volumeBusy,
+    handleSetVolume,
+    handleToggleMute
+  } = useSessionVolumeControl({
+    sessionId,
+    isLocalSession: Boolean(isLocalSession),
+    activeOutputId,
+    canControlVolume,
+    reportError
+  });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(NAV_COLLAPSED_KEY, navCollapsed ? "1" : "0");
-    } catch {
-      // ignore storage failures
-    }
-  }, [navCollapsed]);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    setAlbumsError(null);
-    setAlbumTracksError(null);
-  }, [serverConnected, setAlbumTracksError, setAlbumsError]);
-
-  useEffect(() => {
-    activeSessionIdRef.current = sessionId;
-    isLocalSessionRef.current = Boolean(isLocalSession);
-  }, [isLocalSession, sessionId]);
-
-  useEffect(() => {
-    if (!status?.now_playing_track_id && signalOpen) {
-      setSignalOpen(false);
-    }
-  }, [status?.now_playing_track_id, signalOpen]);
-
-  const refreshSessionVolume = useCallback(
-    async (id: string, silent = true) => {
-      try {
-        const volume = await fetchJson<SessionVolumeResponse>(
-          `/sessions/${encodeURIComponent(id)}/volume`
-        );
-        setSessionVolume(volume);
-      } catch (err) {
-        setSessionVolume(null);
-        if (!silent) {
-          reportError((err as Error).message);
-        }
-      }
-    },
-    [reportError]
-  );
+  useUiShellEffects({
+    navCollapsed,
+    navCollapsedKey: NAV_COLLAPSED_KEY,
+    serverConnected,
+    setAlbumsError,
+    setAlbumTracksError,
+    activeSessionIdRef,
+    sessionId,
+    isLocalSessionRef,
+    isLocalSession: Boolean(isLocalSession),
+    statusNowPlayingTrackId: status?.now_playing_track_id,
+    signalOpen,
+    setSignalOpen,
+    outputsOpen,
+    setOutputsOpen,
+    albumViewId,
+    setAlbumNotesOpen
+  });
 
   const resetSessionContext = useCallback(() => {
     setStatus(null);
     setSessionVolume(null);
     setQueue([]);
-  }, []);
+  }, [setSessionVolume]);
 
   const clearSessionSelection = useCallback(() => {
     setSessionId(null);
@@ -445,15 +360,6 @@ export default function App() {
     onNoSessionsRemaining: clearSessionSelection,
     isDefaultSessionName
   });
-
-  useEffect(() => {
-    if (!canControlVolume || !sessionId) {
-      setSessionVolume(null);
-      return;
-    }
-    volumeRequestSeqRef.current += 1;
-    refreshSessionVolume(sessionId, true);
-  }, [activeOutputId, canControlVolume, refreshSessionVolume, sessionId]);
 
   useOutputsStream({
     enabled: serverConnected,
@@ -499,62 +405,6 @@ export default function App() {
     handleQueuePlayFrom: handleQueuePlayFromRemote
   } = useQueueActions({ sessionId, setError: reportError });
 
-  const handleSetVolume = useCallback(
-    async (value: number) => {
-      if (!sessionId || isLocalSession || !activeOutputId) return;
-      const clamped = Math.max(0, Math.min(100, Math.round(value)));
-      setSessionVolume((prev) => ({
-        value: clamped,
-        muted: prev?.muted ?? false,
-        source: prev?.source ?? "bridge",
-        available: true
-      }));
-      const requestSeq = ++volumeRequestSeqRef.current;
-      try {
-        const payload = await postJson<SessionVolumeResponse>(
-          `/sessions/${encodeURIComponent(sessionId)}/volume`,
-          { value: clamped }
-        );
-        if (requestSeq === volumeRequestSeqRef.current) {
-          setSessionVolume(payload);
-        }
-      } catch (err) {
-        if (requestSeq !== volumeRequestSeqRef.current) {
-          return;
-        }
-        reportError((err as Error).message);
-        await refreshSessionVolume(sessionId, true);
-      }
-    },
-    [activeOutputId, isLocalSession, refreshSessionVolume, reportError, sessionId]
-  );
-
-  const handleToggleMute = useCallback(async () => {
-    if (!sessionId || isLocalSession || !activeOutputId || !sessionVolume) return;
-    const nextMuted = !Boolean(sessionVolume.muted);
-    setVolumeBusy(true);
-    setSessionVolume({ ...sessionVolume, muted: nextMuted });
-    try {
-      const payload = await postJson<SessionVolumeResponse>(
-        `/sessions/${encodeURIComponent(sessionId)}/mute`,
-        { muted: nextMuted }
-      );
-      setSessionVolume(payload);
-    } catch (err) {
-      reportError((err as Error).message);
-      await refreshSessionVolume(sessionId, true);
-    } finally {
-      setVolumeBusy(false);
-    }
-  }, [
-    activeOutputId,
-    isLocalSession,
-    refreshSessionVolume,
-    reportError,
-    sessionId,
-    sessionVolume
-  ]);
-
   const {
     handlePause,
     handlePlay,
@@ -599,47 +449,6 @@ export default function App() {
       sessionId
     ]
   );
-
-  useMetadataStream({
-    enabled: settingsOpen && serverConnected && settingsSection === "metadata",
-    onEvent: (event) => {
-      const entry: MetadataEventEntry = {
-        id: (metadataIdRef.current += 1),
-        time: new Date(),
-        event
-      };
-      setMetadataEvents((prev) => [entry, ...prev].slice(0, MAX_METADATA_EVENTS));
-    },
-    onError: () =>
-      reportError(connectionError("Live metadata updates disconnected", "/metadata/stream"), "warn")
-  });
-
-  useLogsStream({
-    enabled: settingsOpen && serverConnected && settingsSection === "logs",
-    onSnapshot: (items) => {
-      const entries = items
-          .map((entry) => ({
-            id: (logIdRef.current += 1),
-            event: entry
-          }))
-          .reverse()
-          .slice(0, MAX_LOG_EVENTS);
-      setLogEvents(entries);
-      setLogsError(null);
-    },
-    onEvent: (entry) => {
-      const row: LogEventEntry = {
-        id: (logIdRef.current += 1),
-        event: entry
-      };
-      setLogEvents((prev) => [row, ...prev].slice(0, MAX_LOG_EVENTS));
-    },
-    onError: () => {
-      const message = connectionError("Live logs disconnected", "/logs/stream");
-      setLogsError(message);
-      reportError(message, "warn");
-    }
-  });
 
   useStatusStream({
     enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputId),
@@ -689,30 +498,6 @@ export default function App() {
     }
   });
 
-  useEffect(() => {
-    if (!outputsOpen) return;
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOutputsOpen(false);
-      }
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [outputsOpen]);
-
-  useEffect(() => {
-    setAlbumNotesOpen(false);
-  }, [albumViewId]);
-
-  useEffect(() => {
-    if (albumViewId === null) return;
-    const main = document.querySelector<HTMLElement>(".main");
-    if (main) {
-      main.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }, [albumViewId]);
   const { handlePrimaryAction } = useMediaSessionControls({
     status,
     nowPlayingCover,
@@ -730,18 +515,6 @@ export default function App() {
     reportError
   });
 
-  const showGate = !serverConnected;
-  const queueHasNext = Boolean(sessionId && (activeOutputId || isLocalSession)) && queue.some((item) =>
-    item.kind === "track" ? !item.now_playing : true
-  );
-  const deleteSessionDisabled =
-    !serverConnected ||
-    !sessionId ||
-    sessions.find((item) => item.id === sessionId)?.mode === "local" ||
-    isDefaultSessionName(sessions.find((item) => item.id === sessionId)?.name);
-  const canGoPrevious = isLocalSession
-    ? queue.some((item) => item.kind === "track" && Boolean(item.played))
-    : Boolean(status?.has_previous);
   return (
     <AppChrome
       settingsOpen={settingsOpen}
