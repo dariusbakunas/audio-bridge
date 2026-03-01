@@ -16,12 +16,8 @@ import {
 import {
   apiUrl,
   fetchJson,
-  getDefaultApiBase,
-  getEffectiveApiBase,
-  getStoredApiBase,
   postJson,
   safeMediaUrl,
-  setStoredApiBase
 } from "./api";
 import {
   AlbumListResponse,
@@ -34,11 +30,7 @@ import {
   OutputSettingsResponse,
   ProviderOutputs,
   SessionCreateResponse,
-  SessionDetailResponse,
-  SessionLocksResponse,
   SessionVolumeResponse,
-  SessionsListResponse,
-  SessionSummary,
   StatusResponse,
   QueueItem,
   TrackResolveResponse,
@@ -69,6 +61,9 @@ import {
 } from "./hooks/streams";
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
+import { useHubConnection } from "./hooks/useHubConnection";
+import { useSessionsState } from "./hooks/useSessionsState";
+import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
 import { SettingsSection, useViewNavigation } from "./hooks/useViewNavigation";
 
@@ -122,15 +117,10 @@ type LocalPlaybackCommand = {
 
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
-const TRACK_MENU_GAP_PX = 4;
-const TRACK_MENU_MARGIN_PX = 8;
-const TRACK_MENU_MIN_WIDTH_PX = 220;
-const TRACK_MENU_ESTIMATED_HEIGHT_PX = 320;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
 const WEB_DEFAULT_SESSION_NAME = "Default";
-const WEB_DEFAULT_REMOTE_CLIENT_ID = "web-default-global";
 const LOCAL_PLAYBACK_SNAPSHOT_KEY_PREFIX = "audioHub.localPlaybackSnapshot:";
 
 type LocalPlaybackSnapshot = {
@@ -307,21 +297,6 @@ function getOrCreateWebSessionClientId(): string {
 
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
-  const [activeOutputId, setActiveOutputId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(WEB_SESSION_ID_KEY);
-    } catch {
-      return null;
-    }
-  });
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionOutputLocks, setSessionOutputLocks] = useState<
-    SessionLocksResponse["output_locks"]
-  >([]);
-  const [sessionBridgeLocks, setSessionBridgeLocks] = useState<
-    SessionLocksResponse["bridge_locks"]
-  >([]);
   const [createSessionOpen, setCreateSessionOpen] = useState<boolean>(false);
   const [newSessionName, setNewSessionName] = useState<string>("");
   const [newSessionNeverExpires, setNewSessionNeverExpires] = useState<boolean>(false);
@@ -331,12 +306,6 @@ export default function App() {
   const [volumeBusy, setVolumeBusy] = useState<boolean>(false);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
-  const [trackMenuTrackId, setTrackMenuTrackId] = useState<number | null>(null);
-  const [trackMenuPosition, setTrackMenuPosition] = useState<{
-    top: number;
-    right: number;
-    up: boolean;
-  } | null>(null);
   const [queueOpen, setQueueOpen] = useState<boolean>(false);
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
@@ -379,9 +348,6 @@ export default function App() {
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
-  const [serverConnected, setServerConnected] = useState<boolean>(false);
-  const [serverConnecting, setServerConnecting] = useState<boolean>(true);
-  const [serverError, setServerError] = useState<string | null>(null);
   const albumsReloadTimerRef = useRef<number | null>(null);
   const albumsReloadQueuedRef = useRef(false);
   const albumsLoadingRef = useRef(false);
@@ -393,58 +359,9 @@ export default function App() {
   const metadataIdRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const localTrackIdRef = useRef<number | null>(null);
-  const activeSessionIdRef = useRef<string | null>(sessionId);
+  const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
   const volumeRequestSeqRef = useRef(0);
-
-  const closeTrackMenu = useCallback(() => {
-    setTrackMenuTrackId(null);
-    setTrackMenuPosition(null);
-  }, []);
-  const toggleTrackMenu = useCallback(
-      (trackId: number, target: Element) => {
-        if (trackMenuTrackId === trackId) {
-          closeTrackMenu();
-          return;
-        }
-        const rect = target.getBoundingClientRect();
-        const playerBarTop =
-          document.querySelector(".player-bar")?.getBoundingClientRect().top ?? window.innerHeight;
-        const bottomLimit = Math.min(window.innerHeight, playerBarTop - TRACK_MENU_MARGIN_PX);
-        const minTop = TRACK_MENU_MARGIN_PX;
-        const spaceBelow = bottomLimit - rect.bottom;
-        const placeAbove = spaceBelow < TRACK_MENU_ESTIMATED_HEIGHT_PX;
-        const top = placeAbove
-          ? Math.max(
-              minTop + TRACK_MENU_ESTIMATED_HEIGHT_PX,
-              Math.min(rect.top - TRACK_MENU_GAP_PX, bottomLimit)
-            )
-          : Math.max(
-              minTop,
-              Math.min(rect.bottom + TRACK_MENU_GAP_PX, bottomLimit - TRACK_MENU_ESTIMATED_HEIGHT_PX)
-            );
-        const maxRight = Math.max(
-          TRACK_MENU_MARGIN_PX,
-          window.innerWidth - TRACK_MENU_MIN_WIDTH_PX - TRACK_MENU_MARGIN_PX
-        );
-        const unclampedRight = window.innerWidth - rect.right;
-        const right = Math.min(Math.max(unclampedRight, TRACK_MENU_MARGIN_PX), maxRight);
-        setTrackMenuPosition({
-          top,
-          right,
-          up: placeAbove
-        });
-        setTrackMenuTrackId(trackId);
-      },
-      [trackMenuTrackId, closeTrackMenu]
-  );
-  const runTrackMenuAction = useCallback(
-      (action: (trackId: number) => void | Promise<void>, trackId: number) => {
-        action(trackId);
-        closeTrackMenu();
-      },
-      [closeTrackMenu]
-  );
   const handleClearLogs = useCallback(async () => {
     setLogEvents([]);
     try {
@@ -454,6 +371,56 @@ export default function App() {
       setLogsError((err as Error).message);
     }
   }, []);
+  const {
+    notifications,
+    notificationsOpen,
+    unreadCount,
+    reportError,
+    clearNotifications,
+    toggleNotifications
+  } = useToasts();
+  const handleServerHealthy = useCallback(() => {
+    setAlbumsError(null);
+    setAlbumTracksError(null);
+  }, []);
+  const {
+    serverConnected,
+    serverConnecting,
+    serverError,
+    apiBaseOverride,
+    apiBaseDefault,
+    handleApiBaseChange,
+    handleApiBaseReset,
+    connectionError,
+    markServerConnected
+  } = useHubConnection({ onHealthy: handleServerHealthy });
+  const {
+    sessionId,
+    setSessionId,
+    sessions,
+    sessionOutputLocks,
+    sessionBridgeLocks,
+    activeOutputId,
+    setActiveOutputId,
+    refreshSessions,
+    refreshSessionLocks,
+    refreshSessionDetail,
+    selectSession
+  } = useSessionsState({
+    serverConnected,
+    apiBaseOverride,
+    appVersion: __APP_VERSION__,
+    getClientId: getOrCreateWebSessionClientId,
+    sessionStorageKey: WEB_SESSION_ID_KEY,
+    onError: reportError
+  });
+  const { navigateTo, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
+    setSettingsOpen,
+    setAlbumViewId,
+    setSettingsSection
+  });
+  const { trackMenuTrackId, trackMenuPosition, toggleTrackMenu, runTrackMenuAction } =
+    useTrackMenu();
   const activeOutput = useMemo(
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
@@ -502,19 +469,6 @@ export default function App() {
     }
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
-  const {
-    notifications,
-    notificationsOpen,
-    unreadCount,
-    reportError,
-    clearNotifications,
-    toggleNotifications
-  } = useToasts();
-  const { navigateTo, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
-    setSettingsOpen,
-    setAlbumViewId,
-    setSettingsSection
-  });
 
   const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
   const playButtonTitle = !sessionId
@@ -571,70 +525,6 @@ export default function App() {
     return match?.id ?? null;
   }, [albums, status?.album, status?.artist]);
   const activeAlbumId = nowPlayingAlbumId ?? heuristicAlbumId;
-
-  const [apiBaseOverride, setApiBaseOverride] = useState<string>(() => getStoredApiBase());
-  const apiBaseDefault = useMemo(() => getDefaultApiBase(), []);
-  const handleApiBaseChange = useCallback((value: string) => {
-    setApiBaseOverride(value);
-    setStoredApiBase(value);
-    setServerConnecting(true);
-  }, []);
-  const handleApiBaseReset = useCallback(() => {
-    setApiBaseOverride("");
-    setStoredApiBase("");
-    setServerConnecting(true);
-  }, []);
-  const connectionError = useCallback((label: string, path?: string) => {
-    const base = getEffectiveApiBase();
-    const target = base ? base : "current origin";
-    const tlsHint = base.startsWith("https://")
-      ? " If using HTTPS with a self-signed cert, trust it in Keychain or use mkcert."
-      : "";
-    const url = path ? apiUrl(path) : null;
-    const detail = url ? `${target} (${url})` : target;
-    return `${label} (${detail}).${tlsHint}`;
-  }, []);
-
-  const markServerConnected = useCallback(() => {
-    setServerConnected(true);
-    setServerConnecting(false);
-    setServerError(null);
-  }, []);
-
-  const markServerDisconnected = useCallback((message: string) => {
-    setServerConnected(false);
-    setServerConnecting(false);
-    setServerError(message);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let timer: number | null = null;
-
-    const checkHealth = async () => {
-      try {
-        await fetchJson<{ status: string }>("/health");
-        if (!active) return;
-        markServerConnected();
-        setAlbumsError(null);
-        setAlbumTracksError(null);
-      } catch (err) {
-        if (!active) return;
-        const message = connectionError("Hub server not reachable", "/health");
-        markServerDisconnected(message);
-      }
-    };
-
-    checkHealth();
-    timer = window.setInterval(checkHealth, 5000);
-
-    return () => {
-      active = false;
-      if (timer !== null) {
-        window.clearInterval(timer);
-      }
-    };
-  }, [apiBaseOverride, connectionError, markServerConnected, markServerDisconnected]);
 
   useEffect(() => {
     try {
@@ -721,49 +611,10 @@ export default function App() {
   const albumEditDefaults = albumEditTarget?.defaults ?? {};
 
   useEffect(() => {
-    if (!trackMenuTrackId) return;
-
-    function handleDocumentClick(event: MouseEvent) {
-      const target = event.target as Element | null;
-      if (target?.closest('[data-track-menu="true"]')) {
-        return;
-      }
-      closeTrackMenu();
-    }
-
-    document.addEventListener("click", handleDocumentClick);
-    return () => {
-      document.removeEventListener("click", handleDocumentClick);
-    };
-  }, [trackMenuTrackId, closeTrackMenu]);
-
-  useEffect(() => {
     if (!status?.now_playing_track_id && signalOpen) {
       setSignalOpen(false);
     }
   }, [status?.now_playing_track_id, signalOpen]);
-
-  const refreshSessions = useCallback(async () => {
-    const clientId = getOrCreateWebSessionClientId();
-    const response = await fetchJson<SessionsListResponse>(
-      `/sessions?client_id=${encodeURIComponent(clientId)}`
-    );
-    setSessions(response.sessions ?? []);
-  }, []);
-
-  const refreshSessionLocks = useCallback(async () => {
-    const response = await fetchJson<SessionLocksResponse>("/sessions/locks");
-    setSessionOutputLocks(response.output_locks ?? []);
-    setSessionBridgeLocks(response.bridge_locks ?? []);
-  }, []);
-
-  const refreshSessionDetail = useCallback(async (id: string) => {
-    const clientId = getOrCreateWebSessionClientId();
-    const detail = await fetchJson<SessionDetailResponse>(
-      `/sessions/${encodeURIComponent(id)}?client_id=${encodeURIComponent(clientId)}`
-    );
-    setActiveOutputId(detail.active_output_id ?? null);
-  }, []);
 
   const refreshSessionVolume = useCallback(
     async (id: string, silent = true) => {
@@ -782,71 +633,18 @@ export default function App() {
     [reportError]
   );
 
-  const ensureSession = useCallback(async () => {
-    const clientId = getOrCreateWebSessionClientId();
-    const defaultSession = await postJson<SessionCreateResponse>("/sessions", {
-      name: WEB_DEFAULT_SESSION_NAME,
-      mode: "remote",
-      client_id: WEB_DEFAULT_REMOTE_CLIENT_ID,
-      app_version: __APP_VERSION__,
-      owner: "web-ui",
-      lease_ttl_sec: 0
-    });
-    await postJson<SessionCreateResponse>("/sessions", {
-      name: "Local",
-      mode: "local",
-      client_id: clientId,
-      app_version: __APP_VERSION__,
-      owner: "web-ui",
-      lease_ttl_sec: 0
-    });
-
-    const sessionsResponse = await fetchJson<SessionsListResponse>(
-      `/sessions?client_id=${encodeURIComponent(clientId)}`
-    );
-    const nextSessions = sessionsResponse.sessions ?? [];
-    setSessions(nextSessions);
-    await refreshSessionLocks();
-
-    const stored = (() => {
-      try {
-        return localStorage.getItem(WEB_SESSION_ID_KEY);
-      } catch {
-        return null;
-      }
-    })();
-    const nextSessionId =
-      (stored && nextSessions.some((session) => session.id === stored) ? stored : null) ??
-      nextSessions.find((session) => isDefaultSessionName(session.name))?.id ??
-      defaultSession.session_id;
-    setSessionId(nextSessionId);
-    try {
-      localStorage.setItem(WEB_SESSION_ID_KEY, nextSessionId);
-    } catch {
-      // ignore storage failures
-    }
-    await refreshSessionDetail(nextSessionId);
-  }, [refreshSessionDetail, refreshSessionLocks]);
-
   const handleSessionChange = useCallback(
     async (nextSessionId: string) => {
-      setSessionId(nextSessionId);
-      setActiveOutputId(null);
       setStatus(null);
       setSessionVolume(null);
       setQueue([]);
       try {
-        localStorage.setItem(WEB_SESSION_ID_KEY, nextSessionId);
-      } catch {
-        // ignore storage failures
-      }
-      try {
-        await refreshSessionDetail(nextSessionId);
+        await selectSession(nextSessionId);
       } catch (err) {
         reportError((err as Error).message);
       }
     },
-    [refreshSessionDetail, reportError]
+    [reportError, selectSession]
   );
 
   const createNamedSession = useCallback(async (name: string, neverExpires = false) => {
@@ -905,12 +703,7 @@ export default function App() {
       await fetchJson(`/sessions/${encodeURIComponent(sessionId)}`, {
         method: "DELETE"
       });
-      const clientId = getOrCreateWebSessionClientId();
-      const sessionsResponse = await fetchJson<SessionsListResponse>(
-        `/sessions?client_id=${encodeURIComponent(clientId)}`
-      );
-      const nextSessions = sessionsResponse.sessions ?? [];
-      setSessions(nextSessions);
+      const nextSessions = await refreshSessions();
       await refreshSessionLocks();
       const defaultSession =
         nextSessions.find((item) => isDefaultSessionName(item.name)) ?? nextSessions[0] ?? null;
@@ -920,33 +713,18 @@ export default function App() {
         setSessionId(null);
         setActiveOutputId(null);
         setStatus(null);
+        setSessionVolume(null);
+        setQueue([]);
+        try {
+          localStorage.removeItem(WEB_SESSION_ID_KEY);
+        } catch {
+          // ignore storage failures
+        }
       }
     } catch (err) {
       reportError((err as Error).message);
     }
-  }, [sessionId, sessions, refreshSessionLocks, handleSessionChange, reportError]);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    ensureSession().catch((err) => {
-      reportError((err as Error).message);
-    });
-  }, [serverConnected, apiBaseOverride, ensureSession, reportError]);
-
-  useEffect(() => {
-    if (!serverConnected || !sessionId) return;
-    refreshSessionDetail(sessionId).catch(() => {
-      // Session may have expired or been removed.
-    });
-  }, [serverConnected, sessionId, refreshSessionDetail]);
-
-  useEffect(() => {
-    if (!sessionId) return;
-    const current = sessions.find((item) => item.id === sessionId);
-    if (!current) return;
-    const nextActiveOutputId = current.active_output_id ?? null;
-    setActiveOutputId((prev) => (prev === nextActiveOutputId ? prev : nextActiveOutputId));
-  }, [sessionId, sessions]);
+  }, [sessionId, sessions, refreshSessionLocks, refreshSessions, handleSessionChange, reportError]);
 
   useEffect(() => {
     if (!canControlVolume || !sessionId) {
@@ -956,56 +734,6 @@ export default function App() {
     volumeRequestSeqRef.current += 1;
     refreshSessionVolume(sessionId, true);
   }, [activeOutputId, canControlVolume, refreshSessionVolume, sessionId]);
-
-  useEffect(() => {
-    if (!serverConnected || !sessionId) return;
-    const sendHeartbeat = async () => {
-      try {
-        await postJson(`/sessions/${encodeURIComponent(sessionId)}/heartbeat`, {
-          state: document.hidden ? "background" : "foreground"
-        });
-      } catch {
-        // Best-effort heartbeat.
-      }
-    };
-    sendHeartbeat();
-    const timer = window.setInterval(sendHeartbeat, 10000);
-    const onVisibilityChange = () => {
-      sendHeartbeat();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [serverConnected, sessionId]);
-
-  useEffect(() => {
-    if (!serverConnected) return;
-    let mounted = true;
-    const poll = async () => {
-      try {
-        const [sessionsResponse, locksResponse] = await Promise.all([
-          fetchJson<SessionsListResponse>(
-            `/sessions?client_id=${encodeURIComponent(getOrCreateWebSessionClientId())}`
-          ),
-          fetchJson<SessionLocksResponse>("/sessions/locks")
-        ]);
-        if (!mounted) return;
-        setSessions(sessionsResponse.sessions ?? []);
-        setSessionOutputLocks(locksResponse.output_locks ?? []);
-        setSessionBridgeLocks(locksResponse.bridge_locks ?? []);
-      } catch {
-        // Best-effort list refresh.
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 15000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, [serverConnected]);
 
   const streamKey = useMemo(
     () => `${apiBaseOverride}:${serverConnected ? "up" : "down"}:${sessionId ?? "none"}`,
