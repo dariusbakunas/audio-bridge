@@ -353,6 +353,7 @@ impl OutputRegistry {
     }
 }
 
+/// Apply persisted output settings (disable/rename) to output list response.
 fn apply_output_settings(resp: &mut OutputsResponse, state: &AppState) {
     let settings = state
         .output_settings
@@ -373,6 +374,7 @@ fn apply_output_settings(resp: &mut OutputsResponse, state: &AppState) {
     }
 }
 
+/// Return whether output id is disabled by saved output settings.
 fn is_output_disabled(state: &AppState, output_id: &str) -> bool {
     state
         .output_settings

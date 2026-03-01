@@ -261,6 +261,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     Ok(())
 }
 
+/// Spawn filesystem watcher that incrementally rescans changed/removed tracks.
 fn spawn_library_watcher(state: web::Data<AppState>) {
     let root = state.library.read().unwrap().root().to_path_buf();
     let metadata_service = state.metadata_service();
@@ -396,6 +397,7 @@ where
     type Transform = FilteredLoggerMiddleware<S>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
+    /// Build middleware instance around inner service.
     fn new_transform(&self, service: S) -> Self::Future {
         ok(FilteredLoggerMiddleware { service })
     }
@@ -415,10 +417,12 @@ where
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
+    /// Delegate readiness polling to wrapped service.
     fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(ctx)
     }
 
+    /// Log request/latency with noisy-path filtering.
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let path = req.path().to_string();
         let should_log = should_log_path(&path);
@@ -505,6 +509,7 @@ fn resolve_bind(
     })
 }
 
+/// Build TLS server config from CLI/config cert+key paths.
 fn resolve_tls_config(
     args: &crate::Args,
     cfg: &config::ServerConfig,
@@ -564,6 +569,7 @@ fn resolve_metadata_db_path(
     db_path.or_else(|| config::metadata_db_path_from_config(cfg))
 }
 
+/// Locate `web-ui/dist` from current directory or executable directory.
 fn locate_web_ui_dist() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(dir) = std::env::current_dir() {
@@ -577,10 +583,12 @@ fn locate_web_ui_dist() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+/// Serve SPA index file for root/index routes.
 async fn serve_index(index_path: PathBuf) -> actix_web::Result<NamedFile> {
     Ok(NamedFile::open(index_path)?)
 }
 
+/// Initialize optional MusicBrainz client from server config.
 fn init_musicbrainz(cfg: &config::ServerConfig) -> Result<Option<Arc<MusicBrainzClient>>> {
     let musicbrainz = match cfg.musicbrainz.as_ref() {
         Some(cfg) => MusicBrainzClient::new(cfg)?,
@@ -598,6 +606,7 @@ fn init_musicbrainz(cfg: &config::ServerConfig) -> Result<Option<Arc<MusicBrainz
     Ok(musicbrainz)
 }
 
+/// Initialize metadata DB/service and perform initial library scan.
 fn init_metadata_db_and_library(
     media_dir: &PathBuf,
     metadata_db_path: Option<PathBuf>,
@@ -620,6 +629,7 @@ fn init_metadata_db_and_library(
     Ok((metadata_db, library))
 }
 
+/// Apply preselected bridge output device at startup when configured.
 async fn apply_active_bridge_device(
     device_to_set: Option<String>,
     active_http_addr: Option<std::net::SocketAddr>,
@@ -633,6 +643,7 @@ async fn apply_active_bridge_device(
     }
 }
 
+/// Construct bridge provider state and command channel.
 fn build_bridge_state(
     bridges: Vec<crate::config::BridgeConfigResolved>,
     active_bridge_id: Option<String>,
@@ -656,6 +667,7 @@ fn build_bridge_state(
     ))
 }
 
+/// Construct shared playback manager, queue service, and status store.
 fn build_playback_manager(
     player: Arc<Mutex<crate::bridge::BridgePlayer>>,
     events: crate::events::EventBus,
@@ -668,6 +680,7 @@ fn build_playback_manager(
     crate::playback_manager::PlaybackManager::new(player, status_store, queue_service)
 }
 
+/// Build local-output provider state and device-selection stores.
 fn build_local_state(
     cfg: &config::ServerConfig,
 ) -> (Arc<LocalProviderState>, crate::state::DeviceSelectionState) {

@@ -148,6 +148,7 @@ pub fn bind_from_config(cfg: &ServerConfig) -> Result<Option<std::net::SocketAdd
     Ok(Some(addr))
 }
 
+/// Derive public base URL from config or bind address.
 pub fn public_base_url_from_config(
     cfg: &ServerConfig,
     bind: std::net::SocketAddr,

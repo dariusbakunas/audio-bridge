@@ -945,6 +945,7 @@ pub async fn sessions_stop(state: web::Data<AppState>, id: web::Path<String>) ->
     }
 }
 
+/// Ensure a session exists and refresh its last-seen timestamp.
 fn require_session(session_id: &str) -> Result<(), HttpResponse> {
     if crate::session_registry::touch_session(session_id) {
         Ok(())
@@ -953,6 +954,7 @@ fn require_session(session_id: &str) -> Result<(), HttpResponse> {
     }
 }
 
+/// Emit structured warning logs for session status failures.
 fn log_session_status_error(
     session_id: &str,
     endpoint: &str,
@@ -1069,6 +1071,7 @@ fn log_session_status_error(
     }
 }
 
+/// Return whether session status stream should use periodic refresh ticks.
 fn session_should_periodic_refresh(session_id: &str) -> bool {
     crate::session_registry::get_session(session_id)
         .and_then(|s| s.active_output_id)
@@ -1076,6 +1079,7 @@ fn session_should_periodic_refresh(session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Return whether session is in local playback mode.
 fn is_local_session(session_id: &str) -> bool {
     matches!(
         crate::session_registry::get_session(session_id).map(|s| s.mode),
@@ -1083,6 +1087,7 @@ fn is_local_session(session_id: &str) -> bool {
     )
 }
 
+/// Resolve and canonicalize track path for a metadata track id.
 fn canonical_track_path_by_id(state: &web::Data<AppState>, track_id: i64) -> Option<PathBuf> {
     let raw_path = match state.metadata.db.track_path_for_id(track_id) {
         Ok(Some(path)) => path,
@@ -1113,6 +1118,7 @@ fn canonical_track_path_by_id(state: &web::Data<AppState>, track_id: i64) -> Opt
     }
 }
 
+/// Filter queue-add ids to tracks that still resolve under media root.
 fn resolve_queue_add_track_ids(state: &web::Data<AppState>, body: &QueueAddRequest) -> Vec<i64> {
     let mut resolved = Vec::new();
     for track_id in &body.track_ids {
@@ -1129,6 +1135,7 @@ fn resolve_queue_add_track_ids(state: &web::Data<AppState>, body: &QueueAddReque
     resolved
 }
 
+/// Build local playback response containing direct track stream URL.
 fn build_local_playback_response(
     req: &HttpRequest,
     track_id: i64,
@@ -1497,6 +1504,7 @@ pub async fn sessions_queue_previous(
     }
 }
 
+/// Build queue API payload from session queue snapshot.
 fn build_queue_response(
     state: &AppState,
     snapshot: crate::session_registry::SessionQueueSnapshot,
@@ -1567,6 +1575,7 @@ fn build_queue_response(
     QueueResponse { items }
 }
 
+/// Build one queue item payload from track id and playback flags.
 fn build_queue_item(
     state: &AppState,
     track_id: i64,

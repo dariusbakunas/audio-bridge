@@ -42,11 +42,13 @@ struct LocalPlaybackSessionInternal {
     last_seen: Instant,
 }
 
+/// Return global in-memory local-session store.
 fn store() -> &'static Mutex<LocalPlaybackStore> {
     static STORE: OnceLock<Mutex<LocalPlaybackStore>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(LocalPlaybackStore::default()))
 }
 
+/// Register or refresh a local playback session by `(kind, client_id)`.
 pub fn register_session(
     kind: String,
     name: String,
@@ -126,6 +128,7 @@ pub fn list_sessions() -> Vec<LocalPlaybackSession> {
         .unwrap_or_default()
 }
 
+/// Sanitize free-form id segment for `local:<kind>:...` session ids.
 fn sanitize_segment(value: &str) -> String {
     value
         .chars()

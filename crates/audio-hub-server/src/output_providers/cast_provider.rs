@@ -22,6 +22,7 @@ impl CastProvider {
         "cast"
     }
 
+    /// Build cast output id from discovered device id.
     fn output_id(device_id: &str) -> String {
         format!("cast:{device_id}")
     }
@@ -98,6 +99,7 @@ impl CastProvider {
         Ok(cmd_tx)
     }
 
+    /// Return globally active output id from bridge state.
     fn active_output_id(state: &AppState) -> Option<String> {
         state
             .providers
@@ -109,6 +111,7 @@ impl CastProvider {
             .clone()
     }
 
+    /// Map discovered cast device into output listing payload.
     fn device_output_info(
         device: &crate::state::DiscoveredCast,
         active_id: &Option<String>,
@@ -139,6 +142,7 @@ impl CastProvider {
         }
     }
 
+    /// Build idle status payload for cast outputs without active media state.
     fn idle_status(
         output_id: &str,
         device_name: Option<String>,
@@ -372,6 +376,7 @@ impl OutputProvider for CastProvider {
     }
 }
 
+/// Estimate bitrate from file size and known duration.
 fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: u64) -> Option<u32> {
     if duration_ms == 0 {
         return None;
@@ -388,6 +393,7 @@ fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: u64) -> Option<
     u32::try_from(kbps).ok()
 }
 
+/// Infer container label from file extension.
 fn container_from_path(path: &std::path::PathBuf) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     match ext.as_str() {
@@ -402,6 +408,7 @@ fn container_from_path(path: &std::path::PathBuf) -> Option<&'static str> {
     }
 }
 
+/// Merge remote cast status with local library metadata for API response.
 fn status_from_remote(
     state: &AppState,
     output_id: &str,

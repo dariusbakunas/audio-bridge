@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crate::metadata_db::MetadataDb;
 use anyhow::Result;
 
+/// Build stable track stream URL for a library path.
 pub fn build_stream_url_for(
     path: &PathBuf,
     public_base_url: &str,

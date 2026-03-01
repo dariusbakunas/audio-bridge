@@ -25,6 +25,7 @@ const STANDARD_TRACK_FIELDS: &[&str] = &[
     "disc_number",
 ];
 
+/// Mutable track-tag update payload used by metadata write endpoints.
 pub struct TrackTagUpdate<'a> {
     pub title: Option<&'a str>,
     pub artist: Option<&'a str>,
@@ -44,6 +45,7 @@ pub struct TrackTagUpdate<'a> {
     pub clear_extra_tags: Option<&'a HashSet<String>>,
 }
 
+/// Write selected metadata fields into track tags using lofty.
 pub fn write_track_tags(path: &Path, update: TrackTagUpdate<'_>) -> Result<()> {
     let mut tagged_file = read_from_path(path).context("read tags")?;
     let mut tag_type = tagged_file.primary_tag_type();
@@ -150,6 +152,7 @@ pub fn write_track_tags(path: &Path, update: TrackTagUpdate<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Return default tag type inferred from file extension.
 pub fn default_tag_type(path: &Path) -> Option<TagType> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     let tag_type = match ext.as_str() {
@@ -162,6 +165,7 @@ pub fn default_tag_type(path: &Path) -> Option<TagType> {
     Some(tag_type)
 }
 
+/// Return editable track fields supported for this file/tag type.
 pub fn supported_track_fields(path: &Path) -> (Option<TagType>, Vec<String>) {
     let tag_type = detect_tag_type(path).or_else(|| default_tag_type(path));
     let fields = match tag_type {
@@ -190,6 +194,7 @@ pub fn supported_track_fields(path: &Path) -> (Option<TagType>, Vec<String>) {
     (tag_type, fields)
 }
 
+/// Read all Vorbis comment tags as uppercase keys.
 pub fn read_vorbis_comment_tags(path: &Path) -> Result<BTreeMap<String, String>> {
     let mut values = BTreeMap::new();
     let tagged_file = read_from_path(path).context("read tags")?;
@@ -229,6 +234,7 @@ pub fn read_vorbis_comment_tags(path: &Path) -> Result<BTreeMap<String, String>>
     Ok(values)
 }
 
+/// Read only non-standard/editable Vorbis comment tags.
 pub fn read_editable_vorbis_tags(path: &Path) -> Result<BTreeMap<String, String>> {
     let mut tags = read_vorbis_comment_tags(path)?;
     let reserved: HashSet<&str> = STANDARD_VORBIS_KEYS.iter().copied().collect();
@@ -236,6 +242,7 @@ pub fn read_editable_vorbis_tags(path: &Path) -> Result<BTreeMap<String, String>
     Ok(tags)
 }
 
+/// Detect effective tag type from existing file tags.
 fn detect_tag_type(path: &Path) -> Option<TagType> {
     let tagged_file = read_from_path(path).ok()?;
     let mut tag_type = tagged_file.primary_tag_type();
@@ -247,6 +254,7 @@ fn detect_tag_type(path: &Path) -> Option<TagType> {
     Some(tag_type)
 }
 
+/// Remove Vorbis tag key case-insensitively.
 fn remove_vorbis_key(tag: &mut Tag, key: &str) {
     tag.retain(|item| {
         item.key()
@@ -256,6 +264,7 @@ fn remove_vorbis_key(tag: &mut Tag, key: &str) {
     });
 }
 
+/// Convert lofty [`TagType`] into API-friendly label.
 pub fn tag_type_label(tag_type: TagType) -> &'static str {
     match tag_type {
         TagType::VorbisComments => "vorbis_comments",

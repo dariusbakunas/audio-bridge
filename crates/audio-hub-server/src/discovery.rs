@@ -10,6 +10,7 @@ use crate::bridge_device_streams::{
 };
 use crate::state::{AppState, DiscoveredCast};
 
+/// Spawn mDNS discovery loop for bridge devices.
 pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
     std::thread::spawn(move || {
         let daemon = match ServiceDaemon::new() {
@@ -115,6 +116,7 @@ pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
     });
 }
 
+/// Spawn mDNS discovery loop for Google Cast devices.
 pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
     std::thread::spawn(move || {
         let daemon = match ServiceDaemon::new() {
@@ -187,6 +189,7 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
     });
 }
 
+/// Spawn periodic health checker for discovered bridges.
 pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
     std::thread::spawn(move || {
         loop {
@@ -236,6 +239,7 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
     });
 }
 
+/// Return true when `/health` endpoint responds with success.
 fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
     let url = format!("http://{http_addr}/health");
     let resp = ureq::get(&url)
@@ -246,12 +250,14 @@ fn ping_bridge(http_addr: std::net::SocketAddr) -> bool {
     resp.map(|r| r.status().is_success()).unwrap_or(false)
 }
 
+/// Read TXT property value and strip optional `key=` prefix.
 fn property_value(info: &mdns_sd::ResolvedService, key: &str) -> Option<String> {
     info.get_property(key)
         .map(|p| p.val_str().to_string())
         .map(|s| s.strip_prefix(&format!("{key}=")).unwrap_or(&s).to_string())
 }
 
+/// Return first resolved IPv4 address from mDNS service info.
 fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr> {
     info.get_addresses().iter().find_map(|ip| match ip {
         mdns_sd::ScopedIp::V4(v4) => Some(*v4.addr()),
@@ -259,6 +265,7 @@ fn first_ipv4_addr(info: &mdns_sd::ResolvedService) -> Option<std::net::Ipv4Addr
     })
 }
 
+/// Require matching major version between discovered bridge and server.
 fn is_bridge_version_compatible(version: Option<&str>) -> bool {
     let Some(version) = version else {
         return false;
@@ -272,6 +279,7 @@ fn is_bridge_version_compatible(version: Option<&str>) -> bool {
     bridge_major == server_major
 }
 
+/// Parse major semver component from version string.
 fn parse_major(version: &str) -> Option<u64> {
     version.split('.').next()?.parse().ok()
 }

@@ -205,6 +205,7 @@ pub async fn outputs_select(
     }
 }
 
+/// Ensure `active_id` points to an existing output entry.
 pub(crate) fn normalize_outputs_response(mut resp: OutputsResponse) -> OutputsResponse {
     if let Some(active_id) = resp.active_id.as_deref() {
         if !resp.outputs.iter().any(|o| o.id == active_id) {
@@ -214,6 +215,7 @@ pub(crate) fn normalize_outputs_response(mut resp: OutputsResponse) -> OutputsRe
     resp
 }
 
+/// Resolve provider address string for bridge-backed provider id.
 fn provider_address(state: &AppState, provider_id: &str) -> Option<String> {
     let bridge_id = parse_provider_id(provider_id).ok()?;
     let bridges_state = state.providers.bridge.bridges.lock().ok()?;

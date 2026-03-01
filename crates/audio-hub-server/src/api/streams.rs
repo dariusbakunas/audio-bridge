@@ -18,6 +18,7 @@ use super::outputs::normalize_outputs_response;
 
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 
+/// SSE loop state for outputs stream.
 struct OutputsStreamState {
     state: web::Data<AppState>,
     receiver: broadcast::Receiver<HubEvent>,
@@ -27,29 +28,34 @@ struct OutputsStreamState {
     last_ping: Instant,
 }
 
+/// SSE loop state for metadata stream.
 struct MetadataStreamState {
     receiver: broadcast::Receiver<HubEvent>,
     pending: VecDeque<Bytes>,
     last_ping: Instant,
 }
 
+/// SSE loop state for logs stream.
 struct LogsStreamState {
     receiver: broadcast::Receiver<LogEvent>,
     pending: VecDeque<Bytes>,
     last_ping: Instant,
 }
 
+/// SSE loop state for albums stream.
 struct AlbumsStreamState {
     receiver: broadcast::Receiver<HubEvent>,
     pending: VecDeque<Bytes>,
     last_ping: Instant,
 }
 
+/// Internal signal emitted by stream poll loop.
 enum StreamSignal<E> {
     Tick,
     Event(Result<E, RecvError>),
 }
 
+/// Encode one SSE event frame.
 fn sse_event(event: &str, data: &str) -> Bytes {
     let mut payload = String::new();
     payload.push_str("event: ");
@@ -64,6 +70,7 @@ fn sse_event(event: &str, data: &str) -> Bytes {
     Bytes::from(payload)
 }
 
+/// Emit periodic SSE ping comments to keep idle connections alive.
 fn push_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
     if pending.is_empty() && last_ping.elapsed() >= PING_INTERVAL {
         *last_ping = Instant::now();
@@ -71,6 +78,7 @@ fn push_ping_if_needed(pending: &mut VecDeque<Bytes>, last_ping: &mut Instant) {
     }
 }
 
+/// Wait for either broadcast event or interval tick.
 async fn recv_signal<E: Clone>(
     receiver: &mut broadcast::Receiver<E>,
     interval: Option<&mut Interval>,
@@ -86,6 +94,7 @@ async fn recv_signal<E: Clone>(
     }
 }
 
+/// Build HTTP response configured for SSE streaming.
 fn sse_response<S>(stream: S) -> HttpResponse
 where
     S: Stream<Item = Result<Bytes, Error>> + 'static,

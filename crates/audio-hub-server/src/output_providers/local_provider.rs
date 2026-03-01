@@ -31,6 +31,7 @@ impl LocalProvider {
         state.providers.local.enabled
     }
 
+    /// Parse `local:<local_id>:<device_id>` and return device id.
     fn parse_output_id(output_id: &str) -> Option<String> {
         let mut parts = output_id.splitn(3, ':');
         let kind = parts.next().unwrap_or("");
@@ -42,6 +43,7 @@ impl LocalProvider {
         Some(device_id.to_string())
     }
 
+    /// Shorten long device ids for human-readable labels.
     fn short_device_id(id: &str) -> String {
         const MAX_LEN: usize = 48;
         if id.len() <= MAX_LEN {
@@ -365,6 +367,7 @@ impl OutputProvider for LocalProvider {
     }
 }
 
+/// Normalize min/max rate tuple into API supported-rates payload.
 fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates> {
     if min_hz == 0 || max_hz == 0 || max_hz < min_hz || max_hz == u32::MAX {
         return None;
@@ -372,6 +375,7 @@ fn normalize_supported_rates(min_hz: u32, max_hz: u32) -> Option<SupportedRates>
     Some(SupportedRates { min_hz, max_hz })
 }
 
+/// Estimate bitrate from file size and known duration.
 fn estimate_bitrate_kbps(path: &std::path::PathBuf, duration_ms: Option<u64>) -> Option<u32> {
     let duration_ms = duration_ms?;
     if duration_ms == 0 {

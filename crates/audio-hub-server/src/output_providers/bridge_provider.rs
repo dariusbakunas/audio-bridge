@@ -692,6 +692,7 @@ impl OutputProvider for BridgeProvider {
     }
 }
 
+/// Resolve bridge HTTP address from a bridge output id.
 fn bridge_http_addr_for_output(
     state: &AppState,
     output_id: &str,
@@ -815,6 +816,7 @@ async fn build_outputs_for_bridge(
     Ok(outputs)
 }
 
+/// Return cached device list or fetch from bridge and populate cache.
 async fn list_devices_cached_or_fetch(
     state: &AppState,
     bridge_id: &str,
@@ -838,6 +840,7 @@ async fn list_devices_cached_or_fetch(
     Ok(devices)
 }
 
+/// Resolve display device name from id or fallback name lookup.
 fn resolve_device_name(devices: &[HttpDeviceInfo], device_id: &str) -> Option<String> {
     devices
         .iter()
@@ -846,6 +849,7 @@ fn resolve_device_name(devices: &[HttpDeviceInfo], device_id: &str) -> Option<St
         .map(|d| d.name.clone())
 }
 
+/// Fetch cached bridge status snapshot for bridge id.
 fn get_cached_status(
     state: &AppState,
     bridge_id: &str,
@@ -859,6 +863,7 @@ fn get_cached_status(
         .and_then(|cache| cache.get(bridge_id).cloned())
 }
 
+/// Apply bridge remote status snapshot onto API status response.
 fn apply_remote_status(
     resp: &mut StatusResponse,
     remote: crate::bridge_transport::HttpStatusResponse,
@@ -883,6 +888,7 @@ fn apply_remote_status(
     resp.buffer_capacity_frames = remote.buffer_capacity_frames;
 }
 
+/// Fetch bridge devices with bounded retry policy.
 async fn list_devices_with_retry(
     bridge: &crate::config::BridgeConfigResolved,
     attempts: usize,
@@ -895,6 +901,7 @@ async fn list_devices_with_retry(
     .await
 }
 
+/// Retry wrapper for bridge device-list requests using caller-supplied fetch fn.
 async fn list_devices_with_retry_fn<F, Fut>(
     bridge: &crate::config::BridgeConfigResolved,
     attempts: usize,
@@ -1060,6 +1067,7 @@ fn inject_active_output_for_bridge(
     });
 }
 
+/// Decide whether resumed playback should start paused after output switch.
 fn start_paused_for_resume(
     prior_active_output_id: Option<&str>,
     paused: bool,

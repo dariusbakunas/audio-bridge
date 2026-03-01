@@ -10,31 +10,51 @@ use symphonia::core::{
     meta::MetadataOptions, probe::Hint,
 };
 
+/// Parameters controlling on-demand track analysis.
 pub struct AnalysisOptions {
+    /// Max analyzed duration in seconds (`<=0` means full track).
     pub max_seconds: f32,
+    /// Desired output spectrogram width (columns).
     pub width: usize,
+    /// Desired output spectrogram height (frequency bins).
     pub height: usize,
+    /// FFT window size in samples.
     pub window_size: usize,
+    /// Optional frequency above which energy is treated as ultrasonic.
     pub high_cutoff_hz: Option<f32>,
 }
 
+/// Heuristic summary derived from spectrogram/energy analysis.
 pub struct AnalysisHeuristics {
+    /// 95% spectral rolloff frequency estimate.
     pub rolloff_hz: Option<f32>,
+    /// Ratio of energy above configured ultrasonic cutoff.
     pub ultrasonic_ratio: Option<f32>,
+    /// Ratio of energy in upper-audible band (20-24kHz).
     pub upper_audible_ratio: Option<f32>,
+    /// Approximate dynamic range from RMS window distribution.
     pub dynamic_range_db: Option<f32>,
+    /// Human-readable notes inferred from heuristics.
     pub notes: Vec<String>,
 }
 
+/// Binary spectrogram output and heuristic metadata.
 pub struct AnalysisResult {
+    /// Spectrogram width (columns).
     pub width: usize,
+    /// Spectrogram height (rows).
     pub height: usize,
+    /// Source sample rate in Hz.
     pub sample_rate: u32,
+    /// Track duration in milliseconds when known.
     pub duration_ms: Option<u64>,
+    /// Row-major grayscale spectrogram bytes (0..255).
     pub data: Vec<u8>,
+    /// Derived heuristic summary.
     pub heuristics: AnalysisHeuristics,
 }
 
+/// Analyze one track file and return compact spectrogram + heuristics.
 pub fn analyze_track(path: &Path, options: AnalysisOptions) -> Result<AnalysisResult> {
     let file = File::open(path).with_context(|| format!("open {:?}", path))?;
     let mut hint = Hint::new();
@@ -330,6 +350,7 @@ pub fn analyze_track(path: &Path, options: AnalysisOptions) -> Result<AnalysisRe
     })
 }
 
+/// Downsample FFT bins into fixed output height using mean pooling.
 fn downsample_bins(input: &[f32], height: usize) -> Vec<f32> {
     if height == 0 {
         return Vec::new();
@@ -353,6 +374,7 @@ fn downsample_bins(input: &[f32], height: usize) -> Vec<f32> {
     out
 }
 
+/// Compute median of finite values (in-place sort).
 fn median(values: &mut [f32]) -> Option<f32> {
     if values.is_empty() {
         return None;
