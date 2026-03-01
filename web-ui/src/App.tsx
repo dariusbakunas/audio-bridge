@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useState, useCallback, useRef, SetStateAction} from "react";
+import { useCallback, useEffect, useMemo, useRef, SetStateAction, useState } from "react";
 import {
   fetchJson,
-  postJson,
+  postJson
 } from "./api";
 import {
   LogEvent,
   MetadataEvent,
   OutputInfo,
-  SessionCreateResponse,
   SessionVolumeResponse,
   StatusResponse,
-  QueueItem,
-  TrackSummary
+  QueueItem
 } from "./types";
 import AppModals from "./components/AppModals";
 import AppChrome from "./components/AppChrome";
@@ -26,15 +24,27 @@ import {
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
+import { useAlbumMetadataTargets } from "./hooks/useAlbumMetadataTargets";
 import { useAlbumsState } from "./hooks/useAlbumsState";
 import { useLocalPlayback } from "./hooks/useLocalPlayback";
+import { useMediaSessionControls } from "./hooks/useMediaSessionControls";
 import { useNowPlayingCover } from "./hooks/useNowPlayingCover";
 import { useOutputSettings } from "./hooks/useOutputSettings";
 import { usePlaybackCommands } from "./hooks/usePlaybackCommands";
+import { useSessionUiActions } from "./hooks/useSessionUiActions";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
 import { SettingsSection, useViewNavigation } from "./hooks/useViewNavigation";
+import {
+  albumPlaceholder,
+  describeMetadataEvent,
+  formatHz,
+  formatMs,
+  formatRateRange,
+  metadataDetailLines,
+  normalizeMatch
+} from "./utils/viewFormatters";
 
 interface MetadataEventEntry {
   id: number;
@@ -47,38 +57,6 @@ interface LogEventEntry {
   event: LogEvent;
 }
 
-type MatchTarget = {
-  trackId?: number;
-  title: string;
-  artist: string;
-  album?: string | null;
-};
-
-type EditTarget = {
-  trackId?: number;
-  label: string;
-  defaults: {
-    title?: string | null;
-    artist?: string | null;
-    album?: string | null;
-    albumArtist?: string | null;
-    year?: number | null;
-    trackNumber?: number | null;
-    discNumber?: number | null;
-  };
-};
-
-type AlbumEditTarget = {
-  albumId: number;
-  label: string;
-  artist: string;
-  defaults: {
-    title?: string | null;
-    albumArtist?: string | null;
-    year?: number | null;
-  };
-};
-
 const MAX_METADATA_EVENTS = 200;
 const MAX_LOG_EVENTS = 300;
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
@@ -88,124 +66,6 @@ const WEB_DEFAULT_SESSION_NAME = "Default";
 
 function isDefaultSessionName(name: string | null | undefined): boolean {
   return (name ?? "").trim().toLowerCase() === WEB_DEFAULT_SESSION_NAME.toLowerCase();
-}
-
-function albumPlaceholder(title?: string | null, artist?: string | null): string {
-  const source = title?.trim() || artist?.trim() || "";
-  const initials = source
-      .split(/\s+/)
-      .map((part) => part.replace(/[^A-Za-z0-9]/g, ""))
-      .filter(Boolean)
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
-  const label = initials || "NA";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1a1d23"/><stop offset="100%" stop-color="#0f1215"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="18" y="32" font-family="Space Grotesk, sans-serif" font-size="28" fill="#d4965f" text-anchor="start">${label}</text></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-function formatMs(ms?: number | null): string {
-  if (!ms && ms !== 0) return "--:--";
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatHz(hz?: number | null): string {
-  if (!hz) return "—";
-  if (hz >= 1000) {
-    return `${(hz / 1000).toFixed(1)} kHz`;
-  }
-  return `${hz} Hz`;
-}
-
-function formatRateRange(output: OutputInfo): string {
-  if (!output.supported_rates) return "rate range unknown";
-  return `${formatHz(output.supported_rates.min_hz)} - ${formatHz(output.supported_rates.max_hz)}`;
-}
-
-function normalizeMatch(value?: string | null): string {
-  return value?.trim().toLowerCase() ?? "";
-}
-
-// Folders view removed.
-
-function describeMetadataEvent(event: MetadataEvent): { title: string; detail?: string } {
-  switch (event.kind) {
-    case "library_scan_album_start":
-      return {title: "Scanning album folder", detail: event.album};
-    case "library_scan_album_finish":
-      return {title: "Scanned album folder", detail: `${event.tracks} tracks`};
-    case "music_brainz_batch":
-      return {title: "MusicBrainz batch", detail: `${event.count} candidates`};
-    case "music_brainz_lookup_start":
-      return {
-        title: "MusicBrainz lookup started",
-        detail: `${event.title} — ${event.artist}${event.album ? ` (${event.album})` : ""}`
-      };
-    case "music_brainz_lookup_success":
-      return {
-        title: "MusicBrainz lookup success",
-        detail: event.recording_mbid ?? "match found"
-      };
-    case "music_brainz_lookup_no_match":
-      return {
-        title: "MusicBrainz lookup no match",
-        detail: `${event.title} — ${event.artist}${event.album ? ` (${event.album})` : ""}`
-      };
-    case "music_brainz_lookup_failure":
-      return {title: "MusicBrainz lookup failed", detail: event.error};
-    case "cover_art_batch":
-      return {title: "Cover art batch", detail: `${event.count} albums`};
-    case "cover_art_fetch_start":
-      return {title: "Cover art fetch started", detail: `album ${event.album_id}`};
-    case "cover_art_fetch_success":
-      return {title: "Cover art fetched", detail: `album ${event.album_id}`};
-    case "cover_art_fetch_failure":
-      return {
-        title: "Cover art fetch failed",
-        detail: `${event.error} (attempt ${event.attempts})`
-      };
-    default:
-      return {title: "Metadata event"};
-  }
-}
-
-function metadataDetailLines(event: MetadataEvent): string[] {
-  if (event.kind !== "music_brainz_lookup_no_match") {
-    if (event.kind === "library_scan_album_finish") {
-      return [event.album];
-    }
-    if (event.kind === "library_scan_album_start") {
-      return [event.album];
-    }
-    if (event.kind === "cover_art_fetch_failure") {
-      return [`MBID: ${event.mbid}`];
-    }
-    return [];
-  }
-  const lines: string[] = [];
-  if (event.query) {
-    lines.push(`Query: ${event.query}`);
-  }
-  if (event.top_score !== null && event.top_score !== undefined) {
-    lines.push(`Top score: ${event.top_score}`);
-  }
-  if (event.best_recording_title || event.best_recording_id) {
-    const title = event.best_recording_title ?? "unknown";
-    const id = event.best_recording_id ? ` (${event.best_recording_id})` : "";
-    lines.push(`Best: ${title}${id}`);
-  }
-  return lines;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select";
 }
 
 function getOrCreateWebSessionClientId(): string {
@@ -225,10 +85,6 @@ function getOrCreateWebSessionClientId(): string {
 
 export default function App() {
   const [outputs, setOutputs] = useState<OutputInfo[]>([]);
-  const [createSessionOpen, setCreateSessionOpen] = useState<boolean>(false);
-  const [newSessionName, setNewSessionName] = useState<string>("");
-  const [newSessionNeverExpires, setNewSessionNeverExpires] = useState<boolean>(false);
-  const [createSessionBusy, setCreateSessionBusy] = useState<boolean>(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [sessionVolume, setSessionVolume] = useState<SessionVolumeResponse | null>(null);
   const [volumeBusy, setVolumeBusy] = useState<boolean>(false);
@@ -260,9 +116,6 @@ export default function App() {
   const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
   const [albumViewId, setAlbumViewId] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [matchTarget, setMatchTarget] = useState<MatchTarget | null>(null);
-  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  const [albumEditTarget, setAlbumEditTarget] = useState<AlbumEditTarget | null>(null);
   const logIdRef = useRef(0);
   const metadataIdRef = useRef(0);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -452,6 +305,26 @@ export default function App() {
       () => albums.find((album) => album.id === albumViewId) ?? null,
       [albums, albumViewId]
   );
+  const {
+    matchTarget,
+    setMatchTarget,
+    editTarget,
+    setEditTarget,
+    albumEditTarget,
+    setAlbumEditTarget,
+    openTrackMatchForAlbum,
+    openAlbumEditor,
+    openTrackEditorForAlbum,
+    matchLabel,
+    matchDefaults,
+    editLabel,
+    editDefaults,
+    albumEditLabel,
+    albumEditDefaults
+  } = useAlbumMetadataTargets({
+    albumTracks,
+    selectedAlbum
+  });
   const filteredAlbums = useMemo(() => {
     const query = albumSearch.trim().toLowerCase();
     if (!query) return albums;
@@ -511,77 +384,6 @@ export default function App() {
     isLocalSessionRef.current = Boolean(isLocalSession);
   }, [isLocalSession, sessionId]);
 
-  const openTrackMatchForAlbum = useCallback(
-    (trackId: number) => {
-      const track = albumTracks.find((item) => item.id === trackId);
-      const title = track?.title ?? track?.file_name ?? "Unknown track";
-      const artist = track?.artist ?? "Unknown artist";
-      const album = track?.album ?? selectedAlbum?.title ?? "";
-      setMatchTarget({
-        trackId: track?.id ?? trackId,
-        title,
-        artist,
-        album
-      });
-    },
-    [albumTracks, selectedAlbum]
-  );
-
-  const openAlbumEditor = useCallback(() => {
-    if (!selectedAlbum) return;
-    const label = selectedAlbum.artist
-      ? `${selectedAlbum.title} — ${selectedAlbum.artist}`
-      : selectedAlbum.title;
-    setAlbumEditTarget({
-      albumId: selectedAlbum.id,
-      label,
-      artist: selectedAlbum.artist ?? "Unknown artist",
-      defaults: {
-        title: selectedAlbum.title,
-        albumArtist: selectedAlbum.artist ?? null,
-        year: selectedAlbum.year ?? null
-      }
-    });
-  }, [selectedAlbum]);
-
-  const openTrackEditorForAlbum = useCallback(
-    (trackId: number) => {
-      const track = albumTracks.find((item) => item.id === trackId);
-      const title = track?.title ?? track?.file_name ?? "Unknown track";
-      const artist = track?.artist ?? "";
-      const album = track?.album ?? selectedAlbum?.title ?? "";
-      const label = artist ? `${title} — ${artist}` : title;
-      setEditTarget({
-        trackId: track?.id ?? trackId,
-        label,
-        defaults: {
-          title,
-          artist,
-          album,
-          albumArtist: selectedAlbum?.artist ?? null,
-          trackNumber: track?.track_number ?? null,
-          discNumber: track?.disc_number ?? null
-        }
-      });
-    },
-    [albumTracks, selectedAlbum]
-  );
-
-  const matchLabel = matchTarget
-    ? `${matchTarget.title}${matchTarget.artist ? ` — ${matchTarget.artist}` : ""}`
-    : "";
-  const matchDefaults = matchTarget
-    ? {
-        title: matchTarget.title,
-        artist: matchTarget.artist,
-        album: matchTarget.album ?? ""
-      }
-    : { title: "", artist: "", album: "" };
-  const editLabel = editTarget?.label ?? "";
-  const editDefaults = editTarget?.defaults ?? {};
-  const albumEditLabel = albumEditTarget?.label ?? "";
-  const albumEditDefaults = albumEditTarget?.defaults ?? {};
-
   useEffect(() => {
     if (!status?.now_playing_track_id && signalOpen) {
       setSignalOpen(false);
@@ -605,98 +407,44 @@ export default function App() {
     [reportError]
   );
 
-  const handleSessionChange = useCallback(
-    async (nextSessionId: string) => {
-      setStatus(null);
-      setSessionVolume(null);
-      setQueue([]);
-      try {
-        await selectSession(nextSessionId);
-      } catch (err) {
-        reportError((err as Error).message);
-      }
-    },
-    [reportError, selectSession]
-  );
+  const resetSessionContext = useCallback(() => {
+    setStatus(null);
+    setSessionVolume(null);
+    setQueue([]);
+  }, []);
 
-  const createNamedSession = useCallback(async (name: string, neverExpires = false) => {
-    try {
-      const response = await postJson<SessionCreateResponse>("/sessions", {
-        name,
-        mode: "remote",
-        client_id:
-          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-            ? `${getOrCreateWebSessionClientId()}:${crypto.randomUUID()}`
-            : `${getOrCreateWebSessionClientId()}-${Date.now()}`,
-        app_version: __APP_VERSION__,
-        owner: "web-ui",
-        ...(neverExpires ? { lease_ttl_sec: 0 } : {})
-      });
-      await Promise.all([refreshSessions(), refreshSessionLocks()]);
-      await handleSessionChange(response.session_id);
-    } catch (err) {
-      reportError((err as Error).message);
-    }
-  }, [refreshSessionLocks, refreshSessions, handleSessionChange, reportError]);
+  const clearSessionSelection = useCallback(() => {
+    setSessionId(null);
+    setActiveOutputId(null);
+    resetSessionContext();
+  }, [resetSessionContext, setActiveOutputId, setSessionId]);
 
-  const handleCreateSession = useCallback(() => {
-    setNewSessionName(`Session ${sessions.length + 1}`);
-    setNewSessionNeverExpires(false);
-    setCreateSessionOpen(true);
-  }, [sessions.length]);
-
-  const submitCreateSession = useCallback(async () => {
-    const name = newSessionName.trim();
-    if (!name) {
-      reportError("Session name is required.");
-      return;
-    }
-    setCreateSessionBusy(true);
-    try {
-      await createNamedSession(name, newSessionNeverExpires);
-      setCreateSessionOpen(false);
-      setNewSessionName("");
-      setNewSessionNeverExpires(false);
-    } finally {
-      setCreateSessionBusy(false);
-    }
-  }, [createNamedSession, newSessionName, newSessionNeverExpires, reportError]);
-
-  const handleDeleteSession = useCallback(async () => {
-    if (!sessionId) return;
-    const session = sessions.find((item) => item.id === sessionId) ?? null;
-    if (!session || isDefaultSessionName(session.name)) {
-      return;
-    }
-    const confirmed = window.confirm(`Delete session "${session.name}"?`);
-    if (!confirmed) return;
-
-    try {
-      await fetchJson(`/sessions/${encodeURIComponent(sessionId)}`, {
-        method: "DELETE"
-      });
-      const nextSessions = await refreshSessions();
-      await refreshSessionLocks();
-      const defaultSession =
-        nextSessions.find((item) => isDefaultSessionName(item.name)) ?? nextSessions[0] ?? null;
-      if (defaultSession) {
-        await handleSessionChange(defaultSession.id);
-      } else {
-        setSessionId(null);
-        setActiveOutputId(null);
-        setStatus(null);
-        setSessionVolume(null);
-        setQueue([]);
-        try {
-          localStorage.removeItem(WEB_SESSION_ID_KEY);
-        } catch {
-          // ignore storage failures
-        }
-      }
-    } catch (err) {
-      reportError((err as Error).message);
-    }
-  }, [sessionId, sessions, refreshSessionLocks, refreshSessions, handleSessionChange, reportError]);
+  const {
+    createSessionOpen,
+    setCreateSessionOpen,
+    newSessionName,
+    setNewSessionName,
+    newSessionNeverExpires,
+    setNewSessionNeverExpires,
+    createSessionBusy,
+    handleSessionChange,
+    handleCreateSession,
+    submitCreateSession,
+    handleDeleteSession
+  } = useSessionUiActions({
+    sessions,
+    sessionId,
+    refreshSessions,
+    refreshSessionLocks,
+    selectSession,
+    reportError,
+    getClientId: getOrCreateWebSessionClientId,
+    appVersion: __APP_VERSION__,
+    sessionStorageKey: WEB_SESSION_ID_KEY,
+    onSessionContextReset: resetSessionContext,
+    onNoSessionsRemaining: clearSessionSelection,
+    isDefaultSessionName
+  });
 
   useEffect(() => {
     if (!canControlVolume || !sessionId) {
@@ -965,116 +713,22 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [albumViewId]);
-
-
-  const handlePlayMedia = useCallback(async () => {
-    if (hasNowPlaying) {
-      if (status.paused) {
-        await handlePause();
-      }
-      return;
-    }
-    if (replayTrackId !== null) {
-      await handleQueuePlayFrom(replayTrackId);
-    }
-  }, [handlePause, handleQueuePlayFrom, hasNowPlaying, replayTrackId, status?.paused]);
-
-  const handlePauseMedia = useCallback(async () => {
-    if (hasNowPlaying && !status?.paused) {
-      await handlePause();
-    }
-  }, [handlePause, hasNowPlaying, status?.paused]);
-
-  useEffect(() => {
-    function handleKey(event: KeyboardEvent) {
-      if (event.code !== "Space") return;
-      if (event.repeat) return;
-      if (isEditableTarget(event.target)) return;
-      event.preventDefault();
-      handlePrimaryAction();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [handlePrimaryAction]);
-
-  useEffect(() => {
-    const session = navigator.mediaSession;
-    if (!session) return;
-
-    if (status?.title || status?.artist || status?.album) {
-      const artwork = nowPlayingCover ? [{ src: nowPlayingCover, sizes: "512x512" }] : [];
-      session.metadata = new MediaMetadata({
-        title: status?.title ?? "",
-        artist: status?.artist ?? "",
-        album: status?.album ?? "",
-        artwork
-      });
-    } else {
-      session.metadata = null;
-    }
-
-    try {
-      session.setActionHandler("play", () => {
-        handlePlayMedia();
-      });
-      session.setActionHandler("pause", () => {
-        handlePauseMedia();
-      });
-      session.setActionHandler("previoustrack", () => {
-        handlePrevious();
-      });
-      session.setActionHandler("nexttrack", () => {
-        handleNext();
-      });
-    } catch {
-      // MediaSession action handlers are best-effort.
-    }
-
-    return () => {
-      try {
-        session.setActionHandler("play", null);
-        session.setActionHandler("pause", null);
-        session.setActionHandler("previoustrack", null);
-        session.setActionHandler("nexttrack", null);
-      } catch {
-        // Best-effort cleanup.
-      }
-    };
-  }, [
-    handleNext,
-    handlePauseMedia,
-    handlePlayMedia,
-    handlePrevious,
+  const { handlePrimaryAction } = useMediaSessionControls({
+    status,
     nowPlayingCover,
-    status?.album,
-    status?.artist,
-    status?.title
-  ]);
-
-  async function handlePrimaryAction() {
-    if (hasNowPlaying) {
-      if (isLocalSession && status.paused && sessionId) {
-        try {
-          const currentQueueTrack = queue.find(
-            (item) => item.kind === "track" && item.now_playing && item.id
-          ) as { id?: number } | undefined;
-          const replayId = currentQueueTrack?.id ?? effectiveNowPlayingTrackId;
-          const resumed = await resumeLocalFromStatus(replayId ?? null, status.elapsed_ms ?? null);
-          if (resumed) {
-            return;
-          }
-        } catch (err) {
-          reportError((err as Error).message);
-          return;
-        }
-      }
-      await handlePause();
-      return;
-    }
-    if (replayTrackId !== null) {
-      await handleQueuePlayFrom(replayTrackId);
-    }
-  }
+    hasNowPlaying,
+    replayTrackId,
+    isLocalSession,
+    sessionId,
+    queue,
+    effectiveNowPlayingTrackId,
+    resumeLocalFromStatus,
+    handlePause,
+    handleQueuePlayFrom,
+    handlePrevious,
+    handleNext,
+    reportError
+  });
 
   const showGate = !serverConnected;
   const queueHasNext = Boolean(sessionId && (activeOutputId || isLocalSession)) && queue.some((item) =>
