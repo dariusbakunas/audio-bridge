@@ -69,6 +69,8 @@ import {
 } from "./hooks/streams";
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
+import { useToasts } from "./hooks/useToasts";
+import { SettingsSection, useViewNavigation } from "./hooks/useViewNavigation";
 
 interface MetadataEventEntry {
   id: number;
@@ -111,15 +113,6 @@ type AlbumEditTarget = {
     albumArtist?: string | null;
     year?: number | null;
   };
-};
-
-type ToastLevel = "error" | "warn" | "info" | "success";
-
-type ToastNotification = {
-  id: number;
-  level: ToastLevel;
-  message: string;
-  createdAt: Date;
 };
 
 type LocalPlaybackCommand = {
@@ -362,7 +355,7 @@ export default function App() {
       return false;
     }
   });
-  const [settingsSection, setSettingsSection] = useState<"metadata" | "logs" | "connection" | "outputs">("metadata");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("metadata");
   const [outputsSettings, setOutputsSettings] = useState<OutputSettings | null>(null);
   const [outputsProviders, setOutputsProviders] = useState<ProviderOutputs[]>([]);
   const [outputsLoading, setOutputsLoading] = useState<boolean>(false);
@@ -386,9 +379,6 @@ export default function App() {
   const [nowPlayingCover, setNowPlayingCover] = useState<string | null>(null);
   const [nowPlayingCoverFailed, setNowPlayingCoverFailed] = useState<boolean>(false);
   const [nowPlayingAlbumId, setNowPlayingAlbumId] = useState<number | null>(null);
-  const [notifications, setNotifications] = useState<ToastNotification[]>([]);
-  const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [serverConnected, setServerConnected] = useState<boolean>(false);
   const [serverConnecting, setServerConnecting] = useState<boolean>(true);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -403,8 +393,6 @@ export default function App() {
   const metadataIdRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const localTrackIdRef = useRef<number | null>(null);
-  const notificationIdRef = useRef(0);
-  const toastLastRef = useRef<{ message: string; level: ToastLevel; at: number } | null>(null);
   const activeSessionIdRef = useRef<string | null>(sessionId);
   const isLocalSessionRef = useRef<boolean>(false);
   const volumeRequestSeqRef = useRef(0);
@@ -475,67 +463,58 @@ export default function App() {
     [sessions, sessionId]
   );
   const isLocalSession = currentSession?.mode === "local";
+  const queueNowPlayingTrackId = useMemo(() => {
+    const item = queue.find((entry) => entry.kind === "track" && Boolean(entry.now_playing));
+    return item?.kind === "track" ? item.id : null;
+  }, [queue]);
+  const replayTrackId = useMemo(() => {
+    const playedTracks = queue.filter(
+      (entry): entry is QueueItem & { kind: "track" } =>
+        entry.kind === "track" && Boolean(entry.played) && Number.isFinite(entry.id)
+    );
+    if (!playedTracks.length) return null;
+    return playedTracks[playedTracks.length - 1].id;
+  }, [queue]);
+  const hasPlayedHistory = Boolean(replayTrackId);
+  const staleEndedStatus =
+    !isLocalSession && hasPlayedHistory && queueNowPlayingTrackId === null;
+  const effectiveNowPlayingTrackId = staleEndedStatus
+    ? null
+    : queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null;
+  const hasNowPlaying = effectiveNowPlayingTrackId !== null;
+  const canReplayFromHistory = Boolean(
+    sessionId &&
+      (isLocalSession || activeOutputId) &&
+      !hasNowPlaying &&
+      replayTrackId
+  );
   const canTogglePlayback = Boolean(
-    sessionId && status?.now_playing_track_id && (isLocalSession || activeOutputId)
+    sessionId &&
+      (isLocalSession || activeOutputId) &&
+      (hasNowPlaying || canReplayFromHistory)
   );
   const canControlVolume = Boolean(serverConnected && sessionId && !isLocalSession && activeOutputId);
-  const isPlaying = Boolean(status?.now_playing_track_id && !status?.paused);
-  const isPaused = Boolean(status?.now_playing_track_id && status?.paused);
+  const isPlaying = Boolean(hasNowPlaying && !status?.paused);
+  const isPaused = Boolean(!hasNowPlaying || status?.paused);
   const uiBuildId = useMemo(() => {
     if (__BUILD_MODE__ === "development") {
       return "dev";
     }
     return `v${__APP_VERSION__}+${__GIT_SHA__}`;
   }, []);
-type ViewState = {
-  view: "albums" | "album" | "settings";
-  albumId?: number | null;
-  settingsSection?: "metadata" | "logs" | "connection" | "outputs";
-};
-
-type BrowserViewHistoryState = {
-  kind: "audio_hub_view";
-  view: ViewState;
-};
-
-function sameViewState(a: ViewState, b: ViewState): boolean {
-  return (
-    a.view === b.view &&
-    (a.albumId ?? null) === (b.albumId ?? null) &&
-    (a.settingsSection ?? null) === (b.settingsSection ?? null)
-  );
-}
-
-function toBrowserHistoryState(view: ViewState): BrowserViewHistoryState {
-  return {
-    kind: "audio_hub_view",
-    view
-  };
-}
-
-function parseBrowserHistoryState(value: unknown): ViewState | null {
-  if (!value || typeof value !== "object") return null;
-  const state = value as Partial<BrowserViewHistoryState>;
-  if (state.kind !== "audio_hub_view" || !state.view) return null;
-  const view = state.view;
-  if (view.view !== "albums" && view.view !== "album" && view.view !== "settings") return null;
-  return {
-    view: view.view,
-    albumId: view.albumId ?? null,
-    settingsSection: view.settingsSection ?? "metadata"
-  };
-}
-
-  const initialViewState: ViewState = {
-    view: "albums",
-    albumId: null,
-    settingsSection: "metadata"
-  };
-  const [navState, setNavState] = useState<{ stack: ViewState[]; index: number }>(() => ({
-    stack: [initialViewState],
-    index: 0
-  }));
-  const applyingHistoryRef = useRef(false);
+  const {
+    notifications,
+    notificationsOpen,
+    unreadCount,
+    reportError,
+    clearNotifications,
+    toggleNotifications
+  } = useToasts();
+  const { navigateTo, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
+    setSettingsOpen,
+    setAlbumViewId,
+    setSettingsSection
+  });
 
   const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
   const playButtonTitle = !sessionId
@@ -544,8 +523,10 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     ? (isLocalSession
       ? "Local session is ready."
       : "Select an output to control playback.")
-    : !status?.now_playing_track_id
-      ? "Select an album track to play."
+    : !hasNowPlaying
+      ? canReplayFromHistory
+        ? "Replay the last track."
+        : "Select an album track to play."
       : undefined;
   const selectedAlbum = useMemo(
       () => albums.find((album) => album.id === albumViewId) ?? null,
@@ -626,47 +607,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
     setServerError(message);
   }, []);
 
-  const pushToast = useCallback((message: string, level: ToastLevel = "error") => {
-    const now = Date.now();
-    const last = toastLastRef.current;
-    if (last && last.message === message && last.level === level && now - last.at < 2500) {
-      return;
-    }
-    toastLastRef.current = { message, level, at: now };
-    const id = (notificationIdRef.current += 1);
-    const entry: ToastNotification = {
-      id,
-      level,
-      message,
-      createdAt: new Date()
-    };
-    setNotifications((prev) => [entry, ...prev].slice(0, 200));
-    setUnreadCount((prev) => prev + 1);
-  }, []);
-
-  const reportError = useCallback(
-    (message: string | null, level: ToastLevel = "error") => {
-      if (!message) return;
-      pushToast(message, level);
-    },
-    [pushToast]
-  );
-
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-    setUnreadCount(0);
-  }, []);
-
-  const toggleNotifications = useCallback(() => {
-    setNotificationsOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        setUnreadCount(0);
-      }
-      return next;
-    });
-  }, []);
-
   useEffect(() => {
     let active = true;
     let timer: number | null = null;
@@ -695,21 +635,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       }
     };
   }, [apiBaseOverride, connectionError, markServerConnected, markServerDisconnected]);
-
-  useEffect(() => {
-    if (notificationsOpen) {
-      setUnreadCount(0);
-    }
-  }, [notificationsOpen]);
-
-  useEffect(() => {
-    if (!notificationsOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [notificationsOpen]);
 
   useEffect(() => {
     try {
@@ -794,124 +719,6 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   const editDefaults = editTarget?.defaults ?? {};
   const albumEditLabel = albumEditTarget?.label ?? "";
   const albumEditDefaults = albumEditTarget?.defaults ?? {};
-
-  const applyViewState = useCallback((state: ViewState) => {
-    applyingHistoryRef.current = true;
-    if (state.view === "settings") {
-      setSettingsSection(state.settingsSection ?? "metadata");
-      setSettingsOpen(true);
-      setAlbumViewId(null);
-      return;
-    }
-    setSettingsOpen(false);
-    if (state.view === "album") {
-      setAlbumViewId(state.albumId ?? null);
-      return;
-    }
-    setAlbumViewId(null);
-  }, []);
-
-  useEffect(() => {
-    if (applyingHistoryRef.current) {
-      applyingHistoryRef.current = false;
-    }
-  });
-
-  const pushViewState = useCallback((next: ViewState) => {
-    setNavState((prev) => {
-      const base = prev.stack.slice(0, prev.index + 1);
-      const last = base[base.length - 1];
-      const isSame = sameViewState(last, next);
-      if (isSame) return prev;
-      const stack = [...base, next];
-      return { stack, index: stack.length - 1 };
-    });
-    try {
-      window.history.pushState(toBrowserHistoryState(next), "");
-    } catch {
-      // ignore history failures
-    }
-  }, []);
-
-  const navigateTo = useCallback(
-    (next: ViewState) => {
-      applyViewState(next);
-      pushViewState(next);
-    },
-    [applyViewState, pushViewState]
-  );
-
-  const canGoBack = navState.index > 0;
-  const canGoForward = navState.index < navState.stack.length - 1;
-
-  const goBack = useCallback(() => {
-    if (!canGoBack) return;
-    window.history.back();
-  }, [canGoBack]);
-
-  const goForward = useCallback(() => {
-    if (!canGoForward) return;
-    window.history.forward();
-  }, [canGoForward]);
-
-  useEffect(() => {
-    try {
-      const existing = parseBrowserHistoryState(window.history.state);
-      if (existing) {
-        applyViewState(existing);
-        setNavState((prev) => {
-          const idx = prev.stack.findIndex((item) => sameViewState(item, existing));
-          if (idx >= 0) return { ...prev, index: idx };
-          return { stack: [existing], index: 0 };
-        });
-      } else {
-        const current = navState.stack[navState.index] ?? initialViewState;
-        window.history.replaceState(toBrowserHistoryState(current), "");
-      }
-    } catch {
-      // ignore history failures
-    }
-    // Intentionally mount-only: initialize browser history state once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      const next = parseBrowserHistoryState(event.state);
-      if (!next) {
-        return;
-      }
-      applyViewState(next);
-      setNavState((prev) => {
-        let index = -1;
-        for (let i = prev.index - 1; i >= 0; i -= 1) {
-          if (sameViewState(prev.stack[i], next)) {
-            index = i;
-            break;
-          }
-        }
-        if (index < 0) {
-          for (let i = prev.index + 1; i < prev.stack.length; i += 1) {
-            if (sameViewState(prev.stack[i], next)) {
-              index = i;
-              break;
-            }
-          }
-        }
-        if (index >= 0) {
-          return { ...prev, index };
-        }
-        const base = prev.stack.slice(0, prev.index + 1);
-        const stack = [...base, next];
-        return { stack, index: stack.length - 1 };
-      });
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, [applyViewState]);
 
   useEffect(() => {
     if (!trackMenuTrackId) return;
@@ -2049,19 +1856,22 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   }, [albumViewId, loadCatalogProfiles, serverConnected]);
 
   const handlePlayMedia = useCallback(async () => {
-    if (status?.now_playing_track_id) {
+    if (hasNowPlaying) {
       if (status.paused) {
         await handlePause();
       }
       return;
     }
-  }, [handlePause, status?.now_playing_track_id, status?.paused]);
+    if (replayTrackId !== null) {
+      await handleQueuePlayFrom(replayTrackId);
+    }
+  }, [handlePause, handleQueuePlayFrom, hasNowPlaying, replayTrackId, status?.paused]);
 
   const handlePauseMedia = useCallback(async () => {
-    if (status?.now_playing_track_id && !status?.paused) {
+    if (hasNowPlaying && !status?.paused) {
       await handlePause();
     }
-  }, [handlePause, status?.now_playing_track_id, status?.paused]);
+  }, [handlePause, hasNowPlaying, status?.paused]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -2130,7 +1940,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   ]);
 
   async function handlePrimaryAction() {
-    if (status?.now_playing_track_id) {
+    if (hasNowPlaying) {
       if (isLocalSession && status.paused && sessionId) {
         const audio = audioRef.current;
         const hasSource = Boolean(audio?.src);
@@ -2139,12 +1949,13 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
             const currentQueueTrack = queue.find(
               (item) => item.kind === "track" && item.now_playing && item.id
             ) as { id?: number } | undefined;
-            if (!currentQueueTrack?.id) {
+            const replayId = currentQueueTrack?.id ?? effectiveNowPlayingTrackId;
+            if (!replayId) {
               throw new Error("Track ID is required to resume local playback.");
             }
             const payload = await postJson<LocalPlaybackCommand>(
               `/sessions/${encodeURIComponent(sessionId)}/queue/play_from`,
-              { track_id: currentQueueTrack.id }
+              { track_id: replayId }
             );
             await applyLocalPlayback(payload);
             const seekMs = status.elapsed_ms ?? null;
@@ -2173,6 +1984,9 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       }
       await handlePause();
       return;
+    }
+    if (replayTrackId !== null) {
+      await handleQueuePlayFrom(replayTrackId);
     }
   }
 
@@ -2414,7 +2228,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
               isPaused={isPaused}
               onPause={handlePause}
               formatMs={formatMs}
-              nowPlayingTrackId={status?.now_playing_track_id ?? null}
+              nowPlayingTrackId={effectiveNowPlayingTrackId}
               onPlayAlbum={() => {
                 if (!selectedAlbum) return;
                 handlePlayAlbumById(selectedAlbum.id);
@@ -2502,7 +2316,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
       {notificationsOpen && !showGate ? (
         <div
           className="side-panel-backdrop notifications-backdrop"
-          onClick={() => setNotificationsOpen(false)}
+          onClick={toggleNotifications}
         >
           <aside
             className="side-panel notification-panel"
@@ -2516,7 +2330,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
                 <button className="btn ghost small" onClick={clearNotifications}>
                   Clear
                 </button>
-                <button className="btn ghost small" onClick={() => setNotificationsOpen(false)}>
+                <button className="btn ghost small" onClick={toggleNotifications}>
                   Close
                 </button>
               </div>
@@ -2543,9 +2357,11 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
           nowPlayingCover={nowPlayingCover}
           nowPlayingCoverFailed={nowPlayingCoverFailed}
           showSignalAction={!isLocalSession}
-          showSignalPath={Boolean(status?.now_playing_track_id)}
+          showSignalPath={hasNowPlaying}
           canTogglePlayback={canTogglePlayback}
           canGoPrevious={canGoPrevious}
+          hasNowPlaying={hasNowPlaying}
+          isPaused={isPaused}
           playButtonTitle={playButtonTitle}
           queueHasItems={queueHasNext}
           queueOpen={queueOpen}
@@ -2765,7 +2581,7 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
         formatMs={formatMs}
         placeholder={albumPlaceholder}
         canPlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
-        isPaused={Boolean(status?.paused)}
+        isPaused={isPaused}
         onPause={handlePause}
         onPlayFrom={handleQueuePlayFrom}
         onClear={handleQueueClear}

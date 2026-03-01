@@ -13,6 +13,8 @@ interface PlayerBarProps {
   showSignalPath: boolean;
   canTogglePlayback: boolean;
   canGoPrevious: boolean;
+  hasNowPlaying: boolean;
+  isPaused: boolean;
   playButtonTitle?: string;
   queueHasItems: boolean;
   queueOpen: boolean;
@@ -45,6 +47,8 @@ export default function PlayerBar({
   showSignalPath,
   canTogglePlayback,
   canGoPrevious,
+  hasNowPlaying,
+  isPaused,
   playButtonTitle,
   queueHasItems,
   queueOpen,
@@ -114,7 +118,7 @@ export default function PlayerBar({
   }, [volumePopoverOpen]);
 
   useEffect(() => {
-    if (!status?.now_playing_track_id || status?.paused) {
+    if (!hasNowPlaying || isPaused) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -123,9 +127,9 @@ export default function PlayerBar({
     return () => {
       window.clearInterval(timer);
     };
-  }, [status?.now_playing_track_id, status?.paused]);
+  }, [hasNowPlaying, isPaused]);
 
-  const showPlayIcon = !status?.now_playing_track_id || Boolean(status?.paused);
+  const showPlayIcon = !hasNowPlaying || isPaused;
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
   const outputRate = status?.output_sample_rate ?? status?.sample_rate;
@@ -152,10 +156,13 @@ export default function PlayerBar({
 
   const displayedVolume = volumeDragging ? volumeDraft : volumeValue;
   const displayedElapsedMs = (() => {
+    if (!hasNowPlaying) {
+      return null;
+    }
     if (status?.elapsed_ms === null || status?.elapsed_ms === undefined) {
       return status?.elapsed_ms ?? null;
     }
-    if (status?.paused || !updatedAt) {
+    if (isPaused || !updatedAt) {
       return status.elapsed_ms;
     }
     const base = status.elapsed_ms;
