@@ -438,6 +438,7 @@ mod tests {
             buffered_frames: None,
             buffer_capacity_frames: None,
             end_reason: None,
+            output_nominal_rate: None,
         }
     }
 
