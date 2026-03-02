@@ -1,0 +1,13 @@
+bind = "0.0.0.0:8080"
+public_base_url = "http://hub:8080"
+media_dir = "/music"
+
+[[bridges]]
+id = "docker-bridge"
+name = "Docker Bridge"
+http_addr = "172.30.0.2:5556"
+
+[[bridges]]
+id = "docker-bridge-2"
+name = "Docker Bridge 2"
+http_addr = "172.30.0.3:5556"

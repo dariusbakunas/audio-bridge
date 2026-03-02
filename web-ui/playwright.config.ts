@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -25,19 +27,11 @@ export default defineConfig({
       use: { ...devices["Desktop Safari"] }
     }
   ],
-  webServer: [
-    {
-      command:
-        "cd .. && cargo run -p audio-hub-server -- --config web-ui/tests/fixtures/e2e.server.toml --bind 127.0.0.1:18080 --media-dir web-ui/tests/fixtures/media --metadata-db-path /tmp/audio-hub-e2e.sqlite",
-      url: "http://127.0.0.1:18080/health",
-      reuseExistingServer: !process.env.CI,
-      timeout: 180000
-    },
-    {
-      command: "VITE_API_BASE=http://127.0.0.1:18080 npm run dev -- --host 127.0.0.1 --port 5173",
-      url: "http://127.0.0.1:5173",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120000
-    }
-  ]
+  webServer: {
+    command:
+      "VITE_API_BASE=${E2E_API_BASE:-http://127.0.0.1:${E2E_HUB_PORT:-18080}} npm run dev -- --host 127.0.0.1 --port 5173",
+    url: "http://127.0.0.1:5173",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120000
+  }
 });

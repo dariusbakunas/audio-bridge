@@ -1,0 +1,73 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: ${AUDIO_HUB_IMAGE:-audio-hub-server:local}
+    user: "${AUDIO_HUB_UID:-1000}:${AUDIO_HUB_GID:-1000}"
+    environment:
+      - AUDIO_HUB_WEB_API_BASE=${AUDIO_HUB_WEB_API_BASE:-}
+    volumes:
+      - ./crates/audio-hub-server/config.docker-isolated.toml:/config/config.toml
+      - ${AUDIO_HUB_MEDIA_DIR:-./music}:/music
+      - ${AUDIO_HUB_DATA_DIR:-./data}:/data
+    command:
+      - --bind
+      - 0.0.0.0:8080
+      - --config
+      - /config/config.toml
+      - --metadata-db-path
+      - /data/metadata.sqlite
+    depends_on:
+      - bridge
+      - bridge2
+    ports:
+      - "${AUDIO_HUB_PORT:-8080}:8080"
+    networks:
+      - audiohub_isolated
+    restart: unless-stopped
+
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    image: ${AUDIO_BRIDGE_IMAGE:-audio-bridge:local}
+    environment:
+      - AUDIO_BRIDGE_ID=${AUDIO_BRIDGE_ID:-docker-bridge}
+      - AUDIO_BRIDGE_NAME=${AUDIO_BRIDGE_NAME:-Docker Bridge}
+    command:
+      - --http-bind
+      - 0.0.0.0:5556
+      - listen
+    expose:
+      - "5556"
+    networks:
+      audiohub_isolated:
+        ipv4_address: 172.30.0.2
+    restart: unless-stopped
+
+  bridge2:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    image: ${AUDIO_BRIDGE_IMAGE:-audio-bridge:local}
+    environment:
+      - AUDIO_BRIDGE_ID=${AUDIO_BRIDGE2_ID:-docker-bridge-2}
+      - AUDIO_BRIDGE_NAME=${AUDIO_BRIDGE2_NAME:-Docker Bridge 2}
+    command:
+      - --http-bind
+      - 0.0.0.0:5556
+      - listen
+    expose:
+      - "5556"
+    networks:
+      audiohub_isolated:
+        ipv4_address: 172.30.0.3
+    restart: unless-stopped
+
+networks:
+  audiohub_isolated:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

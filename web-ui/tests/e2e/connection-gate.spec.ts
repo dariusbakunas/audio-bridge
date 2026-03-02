@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+const E2E_API_BASE =
+  process.env.E2E_API_BASE ?? `http://127.0.0.1:${process.env.E2E_HUB_PORT ?? "18080"}`;
+
 test("shows offline gate and recovers after updating API base", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("audioHub.apiBase", "http://127.0.0.1:9");
@@ -14,7 +17,7 @@ test("shows offline gate and recovers after updating API base", async ({ page })
 
   const apiBaseInput = page.getByLabel("API base URL");
   const saveButton = page.getByRole("button", { name: "Save" });
-  await apiBaseInput.fill("http://127.0.0.1:18080");
+  await apiBaseInput.fill(E2E_API_BASE);
   await expect(saveButton).toBeEnabled();
   await saveButton.click();
 

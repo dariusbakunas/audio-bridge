@@ -244,6 +244,23 @@ docker compose pull
 docker compose up -d
 ```
 
+For isolated testing (hub + bridge in a private Docker network, no host networking), use:
+
+```bash
+export AUDIO_HUB_MEDIA_DIR=/path/to/music
+export AUDIO_HUB_DATA_DIR=$(pwd)/data
+export AUDIO_HUB_UID=$(id -u)
+export AUDIO_HUB_GID=$(id -g)
+docker compose -f docker-compose.isolated.yml up --build -d
+```
+
+This stack uses:
+- `crates/audio-hub-server/config.docker-isolated.toml`
+- `Dockerfile.server` for hub
+- `Dockerfile.bridge` for bridge containers (`bridge` + `bridge2`)
+
+Open the UI at `http://localhost:8080/` (or override with `AUDIO_HUB_PORT`).
+
 Notes:
 - `docker run` example uses host networking, so no `-p` flag is needed.
 - `--config /config/config.toml` is required by the server entrypoint.
@@ -259,6 +276,9 @@ Notes:
 - Compose image can be overridden with `AUDIO_HUB_IMAGE` (default: `audio-hub-server:local`).
 - For writable bind mounts, run container as your host user (`UID:GID`) via `--user` (docker run) or `AUDIO_HUB_UID`/`AUDIO_HUB_GID` (compose).
 - Host networking is intended for Linux hosts; Docker Desktop (macOS/Windows) has limitations.
+- `docker-compose.isolated.yml` avoids host networking and isolates hub/bridge traffic inside a private Docker network.
+- Isolated stack includes two bridges by default to support E2E output switching flows.
+- Containerized `bridge` may not see host audio devices without explicit device passthrough; this stack is primarily for session/output/control flow testing.
 
 ### Docker Hub publish (GitHub Actions)
 
@@ -313,7 +333,7 @@ By default the Vite dev server proxies API requests to `http://localhost:8080`. 
 
 ### Web UI E2E tests (Playwright)
 
-Playwright tests live in `web-ui/tests/e2e` and run against a real local `audio-hub-server` instance (not mocked API).
+Playwright tests live in `web-ui/tests/e2e` and run against the isolated Docker Compose stack (`hub + bridge`) from `docker-compose.isolated.yml` (not mocked API).
 
 Run:
 
@@ -332,9 +352,14 @@ npm run test:e2e:ui
 ```
 
 Notes:
-- The Playwright config starts both backend (`audio-hub-server` on `127.0.0.1:18080`) and frontend (`vite` on `127.0.0.1:5173`).
+- Playwright global setup starts `docker-compose.isolated.yml` with a per-run `COMPOSE_PROJECT_NAME`.
+- Fixture media from `web-ui/tests/fixtures/media` is copied to a temporary directory for each run, so tests can safely modify files.
+- The frontend still runs via `vite` on `127.0.0.1:5173`, with API base pointing to Dockerized hub on `127.0.0.1:18080` by default.
+- Docker services are always started with `--build` to ensure E2E runs against current source.
 - Test fixtures are in `web-ui/tests/fixtures` (server config + media fixture directory).
 - Current coverage includes server-backed app/session smoke tests and offline connection-gate recovery behavior.
+- Prerequisites: Docker Engine with `docker compose`, Node/npm, and Playwright browsers (`npx playwright install`).
+- Optional env overrides: `E2E_HUB_PORT`, `E2E_API_BASE`.
 
 #### Generate E2E Audio Fixtures
 
