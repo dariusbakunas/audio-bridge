@@ -12,7 +12,8 @@ export const WEB_UI_ROOT = path.resolve(__dirname, "../..");
 export const REPO_ROOT = path.resolve(WEB_UI_ROOT, "..");
 export const STATE_FILE = path.join(WEB_UI_ROOT, "test-results", ".e2e-docker-state.json");
 export const COMPOSE_FILE = path.join(REPO_ROOT, "docker-compose.isolated.yml");
-export const FIXTURE_MEDIA_DIR = path.join(WEB_UI_ROOT, "tests", "fixtures", "media");
+export const FIXTURE_MANIFEST = path.join(WEB_UI_ROOT, "tests", "fixtures", "album-fixtures.yml");
+export const FIXTURE_GENERATOR = path.join(REPO_ROOT, "scripts", "gen-audio-fixtures-from-yaml.sh");
 const DEFAULT_HUB_PORT = process.env.E2E_HUB_PORT ?? "18080";
 export const E2E_API_BASE = process.env.E2E_API_BASE ?? `http://127.0.0.1:${DEFAULT_HUB_PORT}`;
 
@@ -78,7 +79,7 @@ export async function createDockerState(): Promise<DockerState> {
 
   await fs.mkdir(mediaDir, { recursive: true });
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.cp(FIXTURE_MEDIA_DIR, mediaDir, { recursive: true });
+  generateFixtures(mediaDir);
 
   return {
     composeProject,
@@ -87,6 +88,17 @@ export async function createDockerState(): Promise<DockerState> {
     dataDir,
     hubPort
   };
+}
+
+function generateFixtures(outputDir: string): void {
+  const result = spawnSync(FIXTURE_GENERATOR, ["--config", FIXTURE_MANIFEST, "--output-dir", outputDir], {
+    cwd: REPO_ROOT,
+    env: process.env,
+    stdio: "inherit"
+  });
+  if (result.status !== 0) {
+    throw new Error("failed to generate E2E fixtures from album-fixtures.yml");
+  }
 }
 
 export async function saveState(state: DockerState): Promise<void> {

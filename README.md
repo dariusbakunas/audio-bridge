@@ -353,12 +353,12 @@ npm run test:e2e:ui
 
 Notes:
 - Playwright global setup starts `docker-compose.isolated.yml` with a per-run `COMPOSE_PROJECT_NAME`.
-- Fixture media from `web-ui/tests/fixtures/media` is copied to a temporary directory for each run, so tests can safely modify files.
+- Fixture media is generated per run into a temporary directory from `web-ui/tests/fixtures/album-fixtures.yml`, so tests can safely modify files.
 - The frontend still runs via `vite` on `127.0.0.1:5173`, with API base pointing to Dockerized hub on `127.0.0.1:18080` by default.
 - Docker services are always started with `--build` to ensure E2E runs against current source.
 - Test fixtures are in `web-ui/tests/fixtures` (server config + media fixture directory).
 - Current coverage includes server-backed app/session smoke tests and offline connection-gate recovery behavior.
-- Prerequisites: Docker Engine with `docker compose`, Node/npm, and Playwright browsers (`npx playwright install`).
+- Prerequisites: Docker Engine with `docker compose`, Node/npm, `ffmpeg`, `ruby`, and Playwright browsers (`npx playwright install`).
 - Optional env overrides: `E2E_HUB_PORT`, `E2E_API_BASE`.
 
 #### Generate E2E Audio Fixtures

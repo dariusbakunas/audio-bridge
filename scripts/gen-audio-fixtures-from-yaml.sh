@@ -6,10 +6,11 @@ usage() {
 Generate multiple audio fixtures from a YAML manifest.
 
 Usage:
-  scripts/gen-audio-fixtures-from-yaml.sh --config <file> [--dry-run]
+  scripts/gen-audio-fixtures-from-yaml.sh --config <file> [--output-dir <path>] [--dry-run]
 
 Options:
   -c, --config <file>   YAML manifest path
+      --output-dir       Override defaults.output_dir for this run
       --dry-run         Print generated commands without executing
   -h, --help            Show this help
 
@@ -60,6 +61,7 @@ require_cmd() {
 
 CONFIG=""
 DRY_RUN=0
+OUTPUT_DIR_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,6 +72,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       DRY_RUN=1
       shift
+      ;;
+    --output-dir)
+      OUTPUT_DIR_OVERRIDE="${2:-}"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -105,13 +111,14 @@ if [[ ! -x "$GENERATOR" ]]; then
   exit 1
 fi
 
-ruby - "$CONFIG" "$GENERATOR" "$DRY_RUN" <<'RUBY'
+ruby - "$CONFIG" "$GENERATOR" "$DRY_RUN" "$OUTPUT_DIR_OVERRIDE" <<'RUBY'
 require "yaml"
 require "shellwords"
 
 config_path = ARGV.fetch(0)
 generator = ARGV.fetch(1)
 dry_run = ARGV.fetch(2) == "1"
+output_dir_override = ARGV.fetch(3).to_s
 
 manifest = YAML.load_file(config_path) || {}
 unless manifest.is_a?(Hash)
@@ -175,6 +182,9 @@ files.each_with_index do |item, idx|
   end
 
   merged = deep_merge(defaults, item)
+  unless output_dir_override.empty?
+    merged["output_dir"] = output_dir_override
+  end
   output = merged["output"] || merged["path"]
   if output.nil? || output.to_s.strip.empty?
     warn "error: files[#{idx}] missing required 'output'"
