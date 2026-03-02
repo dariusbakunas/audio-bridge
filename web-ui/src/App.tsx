@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import AppModals from "./components/AppModals";
 import AppChrome from "./components/AppChrome";
 import MainContent from "./components/MainContent";
@@ -84,6 +84,10 @@ export default function App() {
   });
   const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
+  const getClientId = useCallback(
+    () => getOrCreateWebSessionClientId(WEB_SESSION_CLIENT_ID_KEY),
+    []
+  );
   const {
     notifications,
     notificationsOpen,
@@ -132,7 +136,7 @@ export default function App() {
     serverConnected,
     apiBaseOverride,
     appVersion: __APP_VERSION__,
-    getClientId: () => getOrCreateWebSessionClientId(WEB_SESSION_CLIENT_ID_KEY),
+    getClientId,
     sessionStorageKey: WEB_SESSION_ID_KEY,
     onError: reportError
   });
@@ -346,7 +350,7 @@ export default function App() {
     refreshSessionLocks,
     selectSession,
     reportError,
-    getClientId: () => getOrCreateWebSessionClientId(WEB_SESSION_CLIENT_ID_KEY),
+    getClientId,
     appVersion: __APP_VERSION__,
     sessionStorageKey: WEB_SESSION_ID_KEY,
     onSessionContextReset: resetSessionContext,
