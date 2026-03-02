@@ -1,18 +1,11 @@
-import { useCallback, useMemo, useRef, SetStateAction, useState } from "react";
-import {
-  OutputInfo,
-  StatusResponse,
-  QueueItem
-} from "./types";
+import { useMemo, useRef } from "react";
 import AppModals from "./components/AppModals";
 import AppChrome from "./components/AppChrome";
 import MainContent from "./components/MainContent";
-import {
-  useOutputsStream,
-  useQueueStream,
-  useStatusStream
-} from "./hooks/streams";
 import { useActivityEvents } from "./hooks/useActivityEvents";
+import { useAppChromeActions } from "./hooks/useAppChromeActions";
+import { useAppUiState } from "./hooks/useAppUiState";
+import { useAlbumModalActions } from "./hooks/useAlbumModalActions";
 import { usePlaybackActions } from "./hooks/usePlaybackActions";
 import { useQueueActions } from "./hooks/useQueueActions";
 import { useHubConnection } from "./hooks/useHubConnection";
@@ -20,18 +13,22 @@ import { useAlbumMetadataTargets } from "./hooks/useAlbumMetadataTargets";
 import { useAlbumViewState } from "./hooks/useAlbumViewState";
 import { useAlbumsState } from "./hooks/useAlbumsState";
 import { useLocalPlayback } from "./hooks/useLocalPlayback";
+import { useMainContentActions } from "./hooks/useMainContentActions";
 import { useMediaSessionControls } from "./hooks/useMediaSessionControls";
 import { useNowPlayingCover } from "./hooks/useNowPlayingCover";
 import { useOutputSettings } from "./hooks/useOutputSettings";
 import { usePlaybackCommands } from "./hooks/usePlaybackCommands";
 import { usePlaybackDerivedState } from "./hooks/usePlaybackDerivedState";
 import { useSessionUiActions } from "./hooks/useSessionUiActions";
+import { useSessionContext } from "./hooks/useSessionContext";
+import { useSessionStreams } from "./hooks/useSessionStreams";
 import { useSessionVolumeControl } from "./hooks/useSessionVolumeControl";
+import { useSessionOutputSelection } from "./hooks/useSessionOutputSelection";
 import { useSessionsState } from "./hooks/useSessionsState";
 import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
 import { useUiShellEffects } from "./hooks/useUiShellEffects";
-import { SettingsSection, useViewNavigation } from "./hooks/useViewNavigation";
+import { useViewNavigation } from "./hooks/useViewNavigation";
 import {
   albumPlaceholder,
   describeMetadataEvent,
@@ -40,59 +37,51 @@ import {
   formatRateRange,
   metadataDetailLines
 } from "./utils/viewFormatters";
+import { getOrCreateWebSessionClientId, isDefaultSessionName } from "./utils/session";
 
 const WEB_SESSION_CLIENT_ID_KEY = "audioHub.webSessionClientId";
 const WEB_SESSION_ID_KEY = "audioHub.webSessionId";
 const NAV_COLLAPSED_KEY = "audioHub.navCollapsed";
-const WEB_DEFAULT_SESSION_NAME = "Default";
-
-function isDefaultSessionName(name: string | null | undefined): boolean {
-  return (name ?? "").trim().toLowerCase() === WEB_DEFAULT_SESSION_NAME.toLowerCase();
-}
-
-function getOrCreateWebSessionClientId(): string {
-  try {
-    const existing = localStorage.getItem(WEB_SESSION_CLIENT_ID_KEY);
-    if (existing) return existing;
-    const generated =
-      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(WEB_SESSION_CLIENT_ID_KEY, generated);
-    return generated;
-  } catch {
-    return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-}
 
 export default function App() {
-  const [outputs, setOutputs] = useState<OutputInfo[]>([]);
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [rescanBusy, setRescanBusy] = useState<boolean>(false);
-  const [queueOpen, setQueueOpen] = useState<boolean>(false);
-  const [signalOpen, setSignalOpen] = useState<boolean>(false);
-  const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [catalogOpen, setCatalogOpen] = useState<boolean>(false);
-  const [albumNotesOpen, setAlbumNotesOpen] = useState<boolean>(false);
-  const [analysisTarget, setAnalysisTarget] = useState<{
-    trackId: number;
-    title: string;
-    artist?: string | null;
-  } | null>(null);
-  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(NAV_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
+  const {
+    outputs,
+    setOutputs,
+    status,
+    setStatus,
+    queue,
+    setQueue,
+    rescanBusy,
+    setRescanBusy,
+    queueOpen,
+    setQueueOpen,
+    signalOpen,
+    setSignalOpen,
+    outputsOpen,
+    setOutputsOpen,
+    settingsOpen,
+    setSettingsOpen,
+    catalogOpen,
+    setCatalogOpen,
+    albumNotesOpen,
+    setAlbumNotesOpen,
+    analysisTarget,
+    setAnalysisTarget,
+    navCollapsed,
+    setNavCollapsed,
+    settingsSection,
+    setSettingsSection,
+    albumSearch,
+    setAlbumSearch,
+    albumViewMode,
+    setAlbumViewMode,
+    albumViewId,
+    setAlbumViewId,
+    updatedAt,
+    setUpdatedAt
+  } = useAppUiState({
+    navCollapsedKey: NAV_COLLAPSED_KEY
   });
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("metadata");
-  const [albumSearch, setAlbumSearch] = useState<string>("");
-  const [albumViewMode, setAlbumViewMode] = useState<"grid" | "list">("grid");
-  const [albumViewId, setAlbumViewId] = useState<number | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
   const {
@@ -143,7 +132,7 @@ export default function App() {
     serverConnected,
     apiBaseOverride,
     appVersion: __APP_VERSION__,
-    getClientId: getOrCreateWebSessionClientId,
+    getClientId: () => getOrCreateWebSessionClientId(WEB_SESSION_CLIENT_ID_KEY),
     sessionStorageKey: WEB_SESSION_ID_KEY,
     onError: reportError
   });
@@ -196,6 +185,14 @@ export default function App() {
     settingsSection,
     serverConnected
   });
+  const { onSavedEdit, onUpdatedAlbumEdit, onCatalogUpdated } = useAlbumModalActions({
+    albumViewId,
+    setAlbumViewId,
+    loadAlbumTracks,
+    loadAlbums,
+    setAlbumProfile,
+    loadCatalogProfiles
+  });
   const activeOutput = useMemo(
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
@@ -204,7 +201,7 @@ export default function App() {
     () => sessions.find((session) => session.id === sessionId) ?? null,
     [sessions, sessionId]
   );
-  const isLocalSession = currentSession?.mode === "local";
+  const isLocalSession = Boolean(currentSession?.mode === "local");
   const {
     audioRef,
     applyLocalPlayback,
@@ -212,7 +209,7 @@ export default function App() {
     toggleLocalPause,
     resumeLocalFromStatus
   } = useLocalPlayback({
-    isLocalSession: Boolean(isLocalSession),
+    isLocalSession,
     sessionId,
     activeOutputId,
     queue,
@@ -245,7 +242,7 @@ export default function App() {
   } = usePlaybackDerivedState({
     queue,
     status,
-    isLocalSession: Boolean(isLocalSession),
+    isLocalSession,
     sessionId,
     activeOutputId,
     serverConnected,
@@ -297,7 +294,7 @@ export default function App() {
     handleToggleMute
   } = useSessionVolumeControl({
     sessionId,
-    isLocalSession: Boolean(isLocalSession),
+    isLocalSession,
     activeOutputId,
     canControlVolume,
     reportError
@@ -312,7 +309,7 @@ export default function App() {
     activeSessionIdRef,
     sessionId,
     isLocalSessionRef,
-    isLocalSession: Boolean(isLocalSession),
+    isLocalSession,
     statusNowPlayingTrackId: status?.now_playing_track_id,
     signalOpen,
     setSignalOpen,
@@ -322,17 +319,13 @@ export default function App() {
     setAlbumNotesOpen
   });
 
-  const resetSessionContext = useCallback(() => {
-    setStatus(null);
-    setSessionVolume(null);
-    setQueue([]);
-  }, [setSessionVolume]);
-
-  const clearSessionSelection = useCallback(() => {
-    setSessionId(null);
-    setActiveOutputId(null);
-    resetSessionContext();
-  }, [resetSessionContext, setActiveOutputId, setSessionId]);
+  const { resetSessionContext, clearSessionSelection } = useSessionContext({
+    setStatus,
+    setSessionVolume,
+    setQueue,
+    setSessionId,
+    setActiveOutputId
+  });
 
   const {
     createSessionOpen,
@@ -353,7 +346,7 @@ export default function App() {
     refreshSessionLocks,
     selectSession,
     reportError,
-    getClientId: getOrCreateWebSessionClientId,
+    getClientId: () => getOrCreateWebSessionClientId(WEB_SESSION_CLIENT_ID_KEY),
     appVersion: __APP_VERSION__,
     sessionStorageKey: WEB_SESSION_ID_KEY,
     onSessionContextReset: resetSessionContext,
@@ -361,23 +354,22 @@ export default function App() {
     isDefaultSessionName
   });
 
-  useOutputsStream({
-    enabled: serverConnected,
-    sourceKey: streamKey,
-    onEvent: (data) => {
-      setOutputs(data.outputs);
-      const sid = activeSessionIdRef.current;
-      if (sid) {
-        refreshSessionDetail(sid).catch(() => {
-          // Best-effort session output sync for cross-client output switches.
-        });
-      }
-      markServerConnected();
-    },
-    onError: () => {
-      const message = connectionError("Live outputs disconnected", "/outputs/stream");
-      reportError(message, "warn");
-    }
+  useSessionStreams({
+    serverConnected,
+    streamKey,
+    sessionId,
+    activeOutputId,
+    isLocalSession: Boolean(isLocalSession),
+    activeSessionIdRef,
+    isLocalSessionRef,
+    setOutputs,
+    setStatus,
+    setQueue,
+    setUpdatedAt,
+    markServerConnected,
+    refreshSessionDetail,
+    connectionError,
+    reportError
   });
 
   const {
@@ -414,7 +406,7 @@ export default function App() {
     handlePlayAlbumTrack,
     handlePlayAlbumById
   } = usePlaybackCommands({
-    isLocalSession: Boolean(isLocalSession),
+    isLocalSession,
     sessionId,
     reportError,
     applyLocalPlayback,
@@ -428,75 +420,44 @@ export default function App() {
     handlePreviousRemote,
     handleQueuePlayFromRemote
   });
-
-  const handleSelectOutputForSession = useCallback(
-    async (id: string) => {
-      if (isLocalSession) return;
-      await handleSelectOutput(id, false);
-      if (!sessionId) return;
-      try {
-        await Promise.all([refreshSessions(), refreshSessionLocks(), refreshSessionDetail(sessionId)]);
-      } catch {
-        // best-effort refresh
-      }
-    },
-    [
-      handleSelectOutput,
+  const {
+    onSelectAlbum,
+    onSettingsSectionChange,
+    onMenuPlay,
+    onMenuQueue,
+    onMenuPlayNext,
+    onMenuRescan,
+    onFixTrackMatch,
+    onEditTrackMetadata,
+    onAnalyzeTrack
+  } = useMainContentActions({
+    navigateTo,
+    runTrackMenuAction,
+    handlePlay,
+    handleQueue,
+    handlePlayNext,
+    handleRescanTrack,
+    openTrackMatchForAlbum,
+    openTrackEditorForAlbum,
+    setAnalysisTarget
+  });
+  const handleSelectOutputForSession = useSessionOutputSelection({
+    isLocalSession,
+    sessionId,
+    handleSelectOutput,
+    refreshSessions,
+    refreshSessionLocks,
+    refreshSessionDetail
+  });
+  const { onAlbumNavigate, onSignalOpen, onQueueOpen, onSelectOutput, onDeleteSession } =
+    useAppChromeActions({
+      navigateTo,
       isLocalSession,
-      refreshSessionDetail,
-      refreshSessionLocks,
-      refreshSessions,
-      sessionId
-    ]
-  );
-
-  useStatusStream({
-    enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputId),
-    sourceKey: streamKey,
-    sessionId,
-    onEvent: (data: SetStateAction<StatusResponse | null>) => {
-      if (isLocalSessionRef.current) {
-        return;
-      }
-      if (!sessionId || activeSessionIdRef.current !== sessionId) {
-        return;
-      }
-      setStatus(data);
-      setUpdatedAt(new Date());
-      markServerConnected();
-    },
-    onError: () => {
-      if (!activeOutputId) {
-        return;
-      }
-      const message = connectionError(
-        "Live status disconnected",
-        sessionId
-          ? `/sessions/${encodeURIComponent(sessionId)}/status/stream`
-          : "/sessions/{id}/status/stream"
-      );
-      reportError(message, "warn");
-    }
-  });
-
-  useQueueStream({
-    enabled: serverConnected && Boolean(sessionId),
-    sourceKey: streamKey,
-    sessionId,
-    onEvent: (items) => {
-      setQueue(items ?? []);
-      markServerConnected();
-    },
-    onError: () => {
-      const message = connectionError(
-        "Live queue disconnected",
-        sessionId
-          ? `/sessions/${encodeURIComponent(sessionId)}/queue/stream`
-          : "/sessions/{id}/queue/stream"
-      );
-      reportError(message, "warn");
-    }
-  });
+      setSignalOpen,
+      setQueueOpen,
+      setOutputsOpen,
+      handleDeleteSession
+    });
 
   const { handlePrimaryAction } = useMediaSessionControls({
     status,
@@ -543,9 +504,7 @@ export default function App() {
       serverConnected={serverConnected}
       onSessionChange={handleSessionChange}
       onCreateSession={handleCreateSession}
-      onDeleteSession={() => {
-        void handleDeleteSession();
-      }}
+      onDeleteSession={onDeleteSession}
       deleteSessionDisabled={deleteSessionDisabled}
       notificationsOpen={notificationsOpen}
       unreadCount={unreadCount}
@@ -557,7 +516,7 @@ export default function App() {
       playerUpdatedAt={updatedAt}
       nowPlayingCover={nowPlayingCover}
       nowPlayingCoverFailed={nowPlayingCoverFailed}
-      isLocalSession={Boolean(isLocalSession)}
+      isLocalSession={isLocalSession}
       hasNowPlaying={hasNowPlaying}
       canTogglePlayback={canTogglePlayback}
       canGoPrevious={canGoPrevious}
@@ -573,24 +532,15 @@ export default function App() {
       formatMs={formatMs}
       albumPlaceholder={albumPlaceholder}
       onCoverError={onCoverError}
-      onAlbumNavigate={(albumId) =>
-        navigateTo({
-          view: "album",
-          albumId
-        })
-      }
+      onAlbumNavigate={onAlbumNavigate}
       onPrimaryAction={handlePrimaryAction}
       onPrevious={handlePrevious}
       onNext={handleNext}
-      onSignalOpen={() => setSignalOpen(true)}
-      onQueueOpen={() => setQueueOpen((value) => !value)}
+      onSignalOpen={onSignalOpen}
+      onQueueOpen={onQueueOpen}
       onVolumeChange={handleSetVolume}
       onVolumeToggleMute={handleToggleMute}
-      onSelectOutput={() => {
-        if (!isLocalSession) {
-          setOutputsOpen(true);
-        }
-      }}
+      onSelectOutput={onSelectOutput}
       mainContent={
         <MainContent
           settingsOpen={settingsOpen}
@@ -601,17 +551,12 @@ export default function App() {
           placeholder={albumPlaceholder}
           sessionId={sessionId}
           activeOutputId={activeOutputId}
-          isLocalSession={Boolean(isLocalSession)}
+          isLocalSession={isLocalSession}
           activeAlbumId={activeAlbumId}
           isPlaying={isPlaying}
           isPaused={isPaused}
           albumViewMode={albumViewMode}
-          onSelectAlbum={(id) =>
-            navigateTo({
-              view: "album",
-              albumId: id
-            })
-          }
+          onSelectAlbum={onSelectAlbum}
           onPlayAlbumById={handlePlayAlbumById}
           onPlayAlbumTrack={handlePlayAlbumTrack}
           onPause={handlePause}
@@ -624,50 +569,19 @@ export default function App() {
           trackMenuTrackId={trackMenuTrackId}
           trackMenuPosition={trackMenuPosition}
           onToggleMenu={toggleTrackMenu}
-          onMenuPlay={(trackId) =>
-            runTrackMenuAction((id) => {
-              handlePlay(id);
-            }, trackId)
-          }
-          onMenuQueue={(trackId) =>
-            runTrackMenuAction((id) => {
-              handleQueue(id);
-            }, trackId)
-          }
-          onMenuPlayNext={(trackId) =>
-            runTrackMenuAction((id) => {
-              handlePlayNext(id);
-            }, trackId)
-          }
-          onMenuRescan={(trackId) =>
-            runTrackMenuAction((id) => {
-              handleRescanTrack(id);
-            }, trackId)
-          }
-          onFixTrackMatch={(trackId) => runTrackMenuAction(openTrackMatchForAlbum, trackId)}
-          onEditTrackMetadata={(trackId) =>
-            runTrackMenuAction(openTrackEditorForAlbum, trackId)
-          }
-          onAnalyzeTrack={(track) => {
-            runTrackMenuAction(() => {
-              setAnalysisTarget({
-                trackId: track.id,
-                title: track.title ?? track.file_name,
-                artist: track.artist ?? null
-              });
-            }, track.id);
-          }}
+          onMenuPlay={onMenuPlay}
+          onMenuQueue={onMenuQueue}
+          onMenuPlayNext={onMenuPlayNext}
+          onMenuRescan={onMenuRescan}
+          onFixTrackMatch={onFixTrackMatch}
+          onEditTrackMetadata={onEditTrackMetadata}
+          onAnalyzeTrack={onAnalyzeTrack}
           onEditAlbumMetadata={openAlbumEditor}
           onEditCatalogMetadata={() => setCatalogOpen(true)}
           onReadAlbumNotes={() => setAlbumNotesOpen(true)}
           albumProfile={albumProfile}
           settingsSection={settingsSection}
-          onSettingsSectionChange={(section) =>
-            navigateTo({
-              view: "settings",
-              settingsSection: section
-            })
-          }
+          onSettingsSectionChange={onSettingsSectionChange}
           apiBase={apiBaseOverride}
           apiBaseDefault={apiBaseDefault}
           onApiBaseChange={handleApiBaseChange}
@@ -696,7 +610,7 @@ export default function App() {
     >
       <AppModals
         showGate={showGate}
-        isLocalSession={Boolean(isLocalSession)}
+        isLocalSession={isLocalSession}
         createSessionOpen={createSessionOpen}
         createSessionBusy={createSessionBusy}
         newSessionName={newSessionName}
@@ -733,12 +647,7 @@ export default function App() {
         editLabel={editLabel}
         editDefaults={editDefaults}
         onCloseEdit={() => setEditTarget(null)}
-        onSavedEdit={() => {
-          if (albumViewId !== null) {
-            loadAlbumTracks(albumViewId);
-          }
-          loadAlbums();
-        }}
+        onSavedEdit={onSavedEdit}
         albumEditOpen={Boolean(albumEditTarget)}
         albumEditAlbumId={albumEditTarget?.albumId ?? null}
         albumEditLabel={albumEditLabel}
@@ -748,13 +657,7 @@ export default function App() {
         isPlaying={isPlaying}
         onPause={handlePause}
         onCloseAlbumEdit={() => setAlbumEditTarget(null)}
-        onUpdatedAlbumEdit={(updatedAlbumId) => {
-          if (albumViewId !== null) {
-            setAlbumViewId(updatedAlbumId);
-            loadAlbumTracks(updatedAlbumId);
-          }
-          loadAlbums();
-        }}
+        onUpdatedAlbumEdit={onUpdatedAlbumEdit}
         albumNotesOpen={albumNotesOpen}
         selectedAlbumTitle={selectedAlbum?.title ?? ""}
         selectedAlbumArtist={selectedAlbum?.artist ?? ""}
@@ -768,13 +671,7 @@ export default function App() {
         catalogOpen={catalogOpen}
         albumViewId={albumViewId}
         onCloseCatalog={() => setCatalogOpen(false)}
-        onCatalogUpdated={({ album }) => {
-          if (album) {
-            setAlbumProfile(album);
-          } else {
-            loadCatalogProfiles(albumViewId);
-          }
-        }}
+        onCatalogUpdated={onCatalogUpdated}
         queueOpen={queueOpen}
         queue={queue}
         formatMs={formatMs}
