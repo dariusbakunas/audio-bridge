@@ -20,7 +20,7 @@ export default function SignalModal({
 }: SignalModalProps) {
   const sourceCodec = status?.source_codec ?? status?.format ?? "Unknown source";
   const sourceDepth = status?.source_bit_depth ? `${status.source_bit_depth}-bit` : "bit depth —";
-  const sourceRate = formatHz(status?.sample_rate);
+  const sourceRate = formatHz(status?.resample_from_hz ?? status?.sample_rate);
   const outputRate = formatHz(status?.output_sample_rate);
   const outputFormat = status?.output_sample_format ?? "format —";
   const outputChannels = status?.channels ? `${status.channels}ch` : "channels —";
