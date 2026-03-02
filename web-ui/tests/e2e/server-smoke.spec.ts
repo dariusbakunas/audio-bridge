@@ -23,7 +23,7 @@ test("creates a new remote playback session through UI", async ({ page }) => {
   await expect(page.locator(".modal .card-header span").filter({ hasText: "Create session" })).toBeVisible();
 
   const name = `E2E Session ${Date.now()}`;
-  await page.getByPlaceholder("My session").fill(name);
+  await page.getByLabel("Name").fill(name);
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   const sessionSelect = page.getByRole("combobox", { name: "Playback session" });
