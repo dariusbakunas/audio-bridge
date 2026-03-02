@@ -9,6 +9,7 @@ files:
   sample_rate: 96000
   channels: 2
   sample_format: s24
+  length: 60
   metadata:
     title: I'm In
     artist: A-Ha
@@ -600,3 +601,185 @@ files:
     track: '9'
     disc: '2'
     year: '2013-05-20'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/01.
+    Teen Age Riot (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Teen Age Riot (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '1'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/02.
+    Silver Rocket (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Silver Rocket (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '2'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/03.
+    The Sprawl (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: The Sprawl (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '3'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/04.
+    'Cross the Breeze (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: "'Cross the Breeze (Album Version)"
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '4'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/05.
+    Eric's Trip (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Eric's Trip (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '5'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/06.
+    Total Trash (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Total Trash (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '6'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/07.
+    Hey Joni (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Hey Joni (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '7'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/08.
+    Providence.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Providence
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '8'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/09.
+    Candle.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Candle
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '9'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/10.
+    Rain King (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Rain King (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '10'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/11.
+    Kissability (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Kissability (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '11'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/12.
+    A) the Wonder (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: A) the Wonder (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '12'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/13.
+    B) Hyperstation (Album Version).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: B) Hyperstation (Album Version)
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '13'
+    year: '1988-10-01'
+- output: Sonic Youth - Daydream Nation (Remastered Original Album) (1988) [16B-44.1kHz]/14.
+    Z) Eliminator, Jr.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s16
+  metadata:
+    title: Z) Eliminator, Jr.
+    artist: Sonic Youth
+    album: Daydream Nation (Remastered Original Album)
+    album_artist: Sonic Youth
+    genre: Pop, Rock, Alternatif et Indé
+    track: '14'
+    year: '1988-10-01'
