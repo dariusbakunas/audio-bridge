@@ -45,6 +45,8 @@ sequenceDiagram
     participant AP as audio-player
 
     UI->>HUB: POST /sessions/{id}/queue + /sessions/{id}/queue/next
+    HUB->>BR: POST /play (stream URL, seek, paused)
+    BR-->>HUB: 200 OK
     HUB-->>UI: 200 OK
     BR->>HUB: GET /stream/track/{id}
     HUB-->>BR: 206 Partial Content (audio)
