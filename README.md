@@ -33,9 +33,10 @@ For deeper implementation diagrams (container/component/session/playback/event v
 1. `web-ui` (or another client) creates/refreshes a playback session and binds an output to that session.
 2. The client sends session-scoped play/seek/queue commands (`/sessions/{id}/...`).
 3. `audio-hub-server` resolves the selected output and exposes `/stream/track/{id}` for the current track.
-4. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
-5. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
-6. Status and queue updates stream from the hub over session SSE endpoints (no polling).
+4. `audio-hub-server` sends post to `bridge` to start playing the stream.
+5. `bridge` pulls the stream over HTTP range requests and decodes via `audio-player`.
+6. `audio-player` resamples if needed, fills the queue, and pushes samples to the output device.
+7. Status and queue updates stream from the hub over session SSE endpoints (no polling).
 
 ```mermaid
 sequenceDiagram
