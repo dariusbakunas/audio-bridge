@@ -113,6 +113,8 @@ sequenceDiagram
     participant AP as audio-player
 
     UI->>HUB: Queue/play command (/sessions/{id}/...)
+    HUB->>BR: POST /play (stream URL, seek, paused)
+    BR-->>HUB: 200 accepted
     HUB-->>UI: 200 + session updates
 
     BR->>HUB: GET /stream/track/{id} (range)
