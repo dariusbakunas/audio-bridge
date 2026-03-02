@@ -15,8 +15,8 @@ type UseMainContentActionsArgs = {
     albumId?: number | null;
     settingsSection?: SettingsSection;
   }) => void;
-  runTrackMenuAction: (action: (id: number) => void, trackId?: number) => void;
-  handlePlay: (trackId?: number) => Promise<void>;
+  runTrackMenuAction: (action: (id: number) => void | Promise<void>, trackId: number) => void;
+  handlePlay: (trackId: number) => Promise<void>;
   handleQueue: (trackId: number) => Promise<void>;
   handlePlayNext: (trackId: number) => Promise<void>;
   handleRescanTrack: (trackId: number) => Promise<void>;
