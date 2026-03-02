@@ -1,0 +1,602 @@
+---
+defaults:
+  output_dir: web-ui/tests/fixtures/media
+  source: sine
+  overwrite: true
+  length: 5
+files:
+- output: A-Ha - True North (2022) [24B-96kHz]/01. I'm In.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: I'm In
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '1'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/02. Hunter In The Hills.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Hunter In The Hills
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '2'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/03. As If.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: As If
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '3'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/04. Between The Halo And The Horn.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Between The Halo And The Horn
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '4'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/05. True North.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: True North
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '5'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/06. Bumblebee.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Bumblebee
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '6'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/07. Forest For The Trees.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Forest For The Trees
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '7'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/08. Bluest Of Blue.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Bluest Of Blue
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '8'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/09. Make Me Understand.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Make Me Understand
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '9'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/10. You Have What It Takes.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: You Have What It Takes
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '10'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/11. Summer Rain.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Summer Rain
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '11'
+    year: '2022-10-21'
+- output: A-Ha - True North (2022) [24B-96kHz]/12. Oh My Word.flac
+  sample_rate: 96000
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Oh My Word
+    artist: A-Ha
+    album: True North
+    album_artist: A-Ha
+    genre: Pop, Rock
+    track: '12'
+    year: '2022-10-21'
+- output: Charlotte De Witte - Charlotte de Witte/01 The Realm.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: The Realm
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 1/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/02 No Division (feat. XSALT).flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: No Division (feat. XSALT)
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 2/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/03 Vidmahe.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Vidmahe
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 3/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/04 Memento Mori.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Memento Mori
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 4/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/05 Become.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Become
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 5/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/06 The Heads That Know (feat. Comma.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: The Heads That Know (feat. Comma Dee)
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 6/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/07 Higher.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Higher
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 7/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/08 Domine.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Domine
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 8/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/09 After The Fall (feat. Lisa Gerra.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: After The Fall (feat. Lisa Gerrard)
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 9/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/10 Hymn.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Hymn
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 10/11
+    disc: 1/1
+    year: '2025'
+- output: Charlotte De Witte - Charlotte de Witte/11 Matière Noire (feat. Alice Everm.flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Matière Noire (feat. Alice Evermore)
+    artist: Charlotte De Witte
+    album: Charlotte de Witte
+    album_artist: Charlotte De Witte
+    genre: Techno
+    track: 11/11
+    disc: 1/1
+    year: '2025'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/01.
+    Give Life Back to Music.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Give Life Back to Music
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '1'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/02.
+    The Game of Love.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: The Game of Love
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '2'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/03.
+    Giorgio by Moroder.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Giorgio by Moroder
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '3'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/04.
+    Within.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Within
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '4'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/05.
+    Instant Crush.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Instant Crush  (feat. Julian Casablancas)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '5'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/06.
+    Lose Yourself to Dance.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Lose Yourself to Dance  (feat. Pharrell Williams)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '6'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/07.
+    Touch.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Touch  (feat. Paul Williams)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '7'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/08.
+    Get Lucky.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Get Lucky  (feat. Pharrell Williams and Nile Rodgers)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '8'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/09.
+    Beyond.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Beyond
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '9'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/10.
+    Motherboard.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Motherboard
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '10'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/11.
+    Fragments of Time.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Fragments of Time  (feat. Todd Edwards)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '11'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/12.
+    Doin' it Right.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Doin' it Right  (feat. Panda Bear)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '12'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/13.
+    Contact.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Contact
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '13'
+    disc: '1'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/01.
+    Horizon Ouverture.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Horizon Ouverture
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '1'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/02.
+    Horizon (Japan CD).flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Horizon (Japan CD)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '2'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/03.
+    GLBTM (Studio Outtakes).flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: GLBTM (Studio Outtakes)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '3'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/04.
+    Infinity Repeating (2013 Demo) [feat. Julian Casablancas+The Voidz].flac
+  sample_rate: 44100
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Infinity Repeating (2013 Demo) [feat. Julian Casablancas+The Voidz]
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '4'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/05.
+    GL (Early Take) [feat. Pharrell Williams and Nile Rodgers].flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: GL (Early Take) [feat. Pharrell Williams and Nile Rodgers]
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '5'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/06.
+    Prime (2012 Unfinished).flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Prime (2012 Unfinished)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '6'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/07.
+    LYTD (Vocoder Tests) [feat. Pharrell Williams].flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: LYTD (Vocoder Tests) [feat. Pharrell Williams]
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '7'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/08.
+    The Writing of Fragments of Time.flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: The Writing of Fragments of Time  (feat. Todd Edwards)
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '8'
+    disc: '2'
+    year: '2013-05-20'
+- output: Daft Punk - Random Access Memories  (10th Anniversary Edition) (2013) [24B-88.2kHz]/09.
+    Touch (2021 Epilogue) [feat. Paul Williams].flac
+  sample_rate: 88200
+  channels: 2
+  sample_format: s24
+  metadata:
+    title: Touch (2021 Epilogue) [feat. Paul Williams]
+    artist: Daft Punk
+    album: 'Random Access Memories '
+    album_artist: Daft Punk
+    genre: Électronique
+    track: '9'
+    disc: '2'
+    year: '2013-05-20'
