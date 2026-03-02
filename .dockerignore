@@ -4,6 +4,9 @@
 target
 web-ui/node_modules
 web-ui/dist
+web-ui/storybook-static
+web-ui/test-results
+web-ui/tests/fixtures/media
 metadata.sqlite
 certs
 docs
