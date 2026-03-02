@@ -21,7 +21,7 @@ export default function SignalModal({
   const sourceCodec = status?.source_codec ?? status?.format ?? "Unknown source";
   const sourceDepth = status?.source_bit_depth ? `${status.source_bit_depth}-bit` : "bit depth —";
   const sourceRate = formatHz(status?.resample_from_hz ?? status?.sample_rate);
-  const outputRate = formatHz(status?.output_sample_rate);
+  const hardwareNominalRate = formatHz(status?.output_nominal_rate);
   const outputFormat = status?.output_sample_format ?? "format —";
   const outputChannels = status?.channels ? `${status.channels}ch` : "channels —";
   const outputName = activeOutput?.name ?? "No output selected";
@@ -31,6 +31,11 @@ export default function SignalModal({
         status?.resample_to_hz ?? status?.output_sample_rate
       )}`
     : `${sourceRate} passthrough`;
+  const resampleSummary = status?.resampling
+    ? `Yes (${formatHz(status?.resample_from_hz ?? status?.sample_rate)} -> ${formatHz(
+        status?.resample_to_hz ?? status?.output_sample_rate
+      )})`
+    : "No";
 
   return (
     <Modal
@@ -58,11 +63,16 @@ export default function SignalModal({
           <div className="signal-stage-title">Output</div>
           <div className="signal-stage-main">{outputName}</div>
           <div className="signal-stage-sub">
-            {outputFormat} · {outputChannels} · {outputRate}
+            {outputFormat} · {outputChannels} ·{" "}
+            <span className="signal-nowrap">nominal {hardwareNominalRate}</span>
           </div>
         </div>
       </div>
       <div className="signal-grid">
+        <div>
+          <div className="signal-label">Resample</div>
+          <div className="signal-value">{resampleSummary}</div>
+        </div>
         <div>
           <div className="signal-label">Bitrate</div>
           <div className="signal-value">

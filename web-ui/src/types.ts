@@ -21,6 +21,7 @@ export interface StatusResponse {
   resample_to_hz?: number | null;
   sample_rate?: number | null;
   output_sample_rate?: number | null;
+  output_nominal_rate?: number | null;
   channels?: number | null;
   output_device?: string | null;
   title?: string | null;

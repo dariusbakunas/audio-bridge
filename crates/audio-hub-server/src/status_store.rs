@@ -84,6 +84,7 @@ impl StatusStore {
                 PlaybackFields {
                     output_device: None,
                     sample_rate: None,
+                    output_nominal_rate: None,
                     channels: None,
                     duration_ms: None,
                     source_codec: None,
@@ -125,6 +126,7 @@ impl StatusStore {
             s.elapsed_ms = None;
             s.duration_ms = None;
             s.sample_rate = None;
+            s.output_nominal_rate = None;
             s.channels = None;
             s.source_codec = None;
             s.source_bit_depth = None;
@@ -178,6 +180,7 @@ impl StatusStore {
                 PlaybackFields {
                     output_device,
                     sample_rate: Some(sample_rate),
+                    output_nominal_rate: None,
                     channels: Some(channels),
                     duration_ms,
                     source_codec,
@@ -284,6 +287,7 @@ impl StatusStore {
             PlaybackFields {
                 output_device: remote.device.clone(),
                 sample_rate: remote.sample_rate,
+                output_nominal_rate: remote.output_nominal_rate,
                 channels: remote.channels,
                 duration_ms: remote.duration_ms,
                 source_codec: remote.source_codec.clone(),
@@ -342,6 +346,7 @@ pub(crate) fn reduce_remote_status(
 struct PlaybackFields {
     output_device: Option<String>,
     sample_rate: Option<u32>,
+    output_nominal_rate: Option<u32>,
     channels: Option<u16>,
     duration_ms: Option<u64>,
     source_codec: Option<String>,
@@ -362,6 +367,7 @@ struct PlaybackFields {
 fn apply_playback_fields(s: &mut PlayerStatus, fields: PlaybackFields) {
     s.output_device = fields.output_device;
     s.sample_rate = fields.sample_rate;
+    s.output_nominal_rate = fields.output_nominal_rate;
     s.channels = fields.channels;
     s.duration_ms = fields.duration_ms;
     s.source_codec = fields.source_codec;

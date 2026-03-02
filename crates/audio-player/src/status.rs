@@ -12,6 +12,8 @@ pub struct PlayerStatusState {
     pub device: Option<String>,
     /// Effective output sample rate in Hz.
     pub sample_rate: Option<u32>,
+    /// Hardware nominal output sample rate in Hz.
+    pub output_nominal_rate: Option<u32>,
     /// Effective output channel count.
     pub channels: Option<u16>,
     /// Total track duration in milliseconds when known.
@@ -84,6 +86,7 @@ impl PlayerStatusState {
             resample_from_hz: self.resample_from_hz,
             resample_to_hz: self.resample_to_hz,
             sample_rate: self.sample_rate,
+            output_nominal_rate: self.output_nominal_rate,
             channels: self.channels,
             device: self.device.clone(),
             underrun_frames: self
@@ -111,6 +114,7 @@ impl PlayerStatusState {
     pub fn clear_playback(&mut self) {
         self.now_playing = None;
         self.sample_rate = None;
+        self.output_nominal_rate = None;
         self.channels = None;
         self.duration_ms = None;
         self.source_codec = None;

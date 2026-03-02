@@ -338,6 +338,7 @@ impl OutputProvider for LocalProvider {
             sample_rate,
             channels: status.channels,
             output_sample_rate: status.sample_rate,
+            output_nominal_rate: status.output_nominal_rate,
             output_device: status.output_device.clone(),
             title,
             artist,

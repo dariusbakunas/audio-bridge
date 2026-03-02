@@ -44,6 +44,8 @@ pub struct BridgeStatus {
     pub resample_to_hz: Option<u32>,
     /// Source sample rate (Hz).
     pub sample_rate: Option<u32>,
+    /// Hardware device nominal sample rate (Hz), when available.
+    pub output_nominal_rate: Option<u32>,
     /// Channel count.
     pub channels: Option<u16>,
     /// Active output device name, if known.
@@ -98,6 +100,8 @@ pub struct PlaybackStatus {
     pub channels: Option<u16>,
     /// Renderer output sample rate (Hz).
     pub output_sample_rate: Option<u32>,
+    /// Hardware device nominal sample rate (Hz), when available.
+    pub output_nominal_rate: Option<u32>,
     /// Selected output device display name.
     pub output_device: Option<String>,
     /// Current track title.

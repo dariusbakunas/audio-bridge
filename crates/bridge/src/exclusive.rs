@@ -91,6 +91,12 @@ mod macos {
                 error = ?err,
                 "exclusive mode: failed to set device sample rate"
             );
+        } else {
+            tracing::info!(
+                device = %name,
+                rate_hz = sample_rate,
+                "exclusive mode: set device sample rate"
+            );
         }
 
         Some(ExclusiveGuard {

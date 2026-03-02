@@ -132,7 +132,7 @@ export default function PlayerBar({
   const showPlayIcon = !hasNowPlaying || isPaused;
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
-  const outputRate = status?.output_sample_rate ?? status?.sample_rate;
+  const outputRate = status?.output_nominal_rate ?? status?.output_sample_rate;
   const sourceRate = status?.sample_rate;
   const sourceBitDepth = status?.source_bit_depth;
   const volumeAvailable = Boolean(volume?.available);

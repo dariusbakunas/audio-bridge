@@ -390,9 +390,11 @@ fn play_one_http(
     let selected = device_selected.lock().unwrap().clone();
     let device = device::pick_device(host, selected.as_deref())?;
     let exclusive_mode = exclusive_selected.lock().map(|g| *g).unwrap_or(false);
-    let _exclusive = crate::exclusive::maybe_acquire(&device, src_spec.rate, exclusive_mode);
-    let nominal_rate = crate::exclusive::current_nominal_rate(&device);
     let config = device::pick_output_config(&device, Some(src_spec.rate))?;
+    let target_output_rate = config.sample_rate();
+    let nominal_before = crate::exclusive::current_nominal_rate(&device);
+    let _exclusive = crate::exclusive::maybe_acquire(&device, target_output_rate, exclusive_mode);
+    let nominal_rate = crate::exclusive::current_nominal_rate(&device);
     let mut stream_config: cpal::StreamConfig = config.clone().into();
     if let Some(buf) = device::pick_buffer_size(&config) {
         stream_config.buffer_size = buf;
@@ -414,12 +416,22 @@ fn play_one_http(
         .or_else(|| infer_ext_from_url(&url))
         .map(|s| s.to_ascii_uppercase());
     let resampling = src_spec.rate != stream_config.sample_rate;
+    tracing::info!(
+        device = %device.description().map(|d| d.to_string()).unwrap_or_else(|_| "<unknown>".to_string()),
+        exclusive_mode,
+        source_rate_hz = src_spec.rate,
+        stream_rate_hz = stream_config.sample_rate,
+        nominal_before_hz = ?nominal_before,
+        nominal_after_hz = ?nominal_rate,
+        "bridge playback stream configured"
+    );
     {
         if let Ok(mut s) = status.lock() {
             s.end_reason = None;
             s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
             s.device = device.description().ok().map(|d| d.to_string());
             s.sample_rate = Some(status_sample_rate(stream_config.sample_rate, nominal_rate));
+            s.output_nominal_rate = nominal_rate;
             s.channels = Some(src_spec.channels.count() as u16);
             s.duration_ms = duration_ms;
             s.source_codec = source_info.codec.clone();

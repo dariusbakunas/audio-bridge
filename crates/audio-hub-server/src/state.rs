@@ -71,6 +71,8 @@ pub struct PlayerStatus {
     pub elapsed_ms: Option<u64>,
     /// Source sample rate.
     pub sample_rate: Option<u32>,
+    /// Hardware nominal output sample rate.
+    pub output_nominal_rate: Option<u32>,
     /// Source channel count.
     pub channels: Option<u16>,
     /// Output device name (if known).

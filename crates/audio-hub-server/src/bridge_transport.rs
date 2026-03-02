@@ -157,6 +157,25 @@ impl BridgeTransportClient {
         Ok(())
     }
 
+    /// Select an output device by stable device id on the bridge.
+    pub async fn set_device_by_id(&self, id: &str, exclusive: Option<bool>) -> Result<()> {
+        let url = format!("http://{}/devices/select", self.http_addr);
+        let mut payload = serde_json::json!({ "id": id });
+        if let Some(exclusive) = exclusive {
+            payload["exclusive"] = serde_json::json!(exclusive);
+        }
+        self.client
+            .post(&url)
+            .timeout(Duration::from_secs(2))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("http set device failed: {e}"))?
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("http set device failed: {e}"))?;
+        Ok(())
+    }
+
     /// Fetch the current bridge status snapshot.
     pub async fn status(&self) -> Result<HttpStatusResponse> {
         let url = format!("http://{}/status", self.http_addr);

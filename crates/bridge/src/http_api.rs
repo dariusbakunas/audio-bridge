@@ -258,6 +258,7 @@ async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResp
             if let Ok(mut g) = state.exclusive_selected.lock() {
                 *g = exclusive;
             }
+            tracing::info!(exclusive, "bridge device select updated exclusive mode");
         }
         HttpResponse::NoContent().finish()
     } else {
@@ -480,6 +481,7 @@ fn build_status_snapshot(state: &AppState) -> StatusSnapshot {
             resample_from_hz: None,
             resample_to_hz: None,
             sample_rate: None,
+            output_nominal_rate: None,
             channels: None,
             device: None,
             underrun_frames: None,

@@ -576,6 +576,7 @@ impl OutputProvider for BridgeProvider {
             sample_rate,
             channels: status.channels,
             output_sample_rate: status.sample_rate,
+            output_nominal_rate: status.output_nominal_rate,
             output_device: status.output_device.clone(),
             title,
             artist,
@@ -883,7 +884,8 @@ fn apply_remote_status(
     resp.resample_from_hz = remote.resample_from_hz;
     resp.resample_to_hz = remote.resample_to_hz;
     resp.channels = remote.channels;
-    resp.output_sample_rate = remote.sample_rate;
+    resp.output_sample_rate = remote.resample_to_hz.or(remote.sample_rate);
+    resp.output_nominal_rate = remote.output_nominal_rate;
     resp.output_device = remote.device;
     resp.underrun_frames = remote.underrun_frames;
     resp.underrun_events = remote.underrun_events;

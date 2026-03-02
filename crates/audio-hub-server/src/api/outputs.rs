@@ -3,6 +3,8 @@
 use actix_web::{HttpResponse, Responder, get, post, web};
 
 use crate::bridge_manager::{merge_bridges, parse_provider_id};
+use crate::bridge_manager::parse_output_id;
+use crate::bridge_transport::BridgeTransportClient;
 use crate::models::{
     OutputSelectRequest, OutputSettings, OutputSettingsResponse, OutputsResponse, ProviderOutputs,
     ProvidersResponse,
@@ -143,6 +145,46 @@ pub async fn outputs_settings_update(
                     let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::Stop);
                 }
             }
+        }
+    }
+
+    // Re-apply exclusive mode for the active bridge output immediately so users
+    // don't need to reselect the output for the change to take effect.
+    let active_bridge_target = {
+        let bridges = state
+            .providers
+            .bridge
+            .bridges
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        if let Some(active_output_id) = bridges.active_output_id.clone() {
+            if let Ok((bridge_id, device_id)) = parse_output_id(&active_output_id) {
+                let http_addr = bridges
+                    .bridges
+                    .iter()
+                    .find(|b| b.id == bridge_id)
+                    .map(|b| b.http_addr);
+                http_addr.map(|addr| (addr, device_id, active_output_id))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+    if let Some((http_addr, device_id, active_output_id)) = active_bridge_target {
+        let exclusive = new_settings.is_exclusive(&active_output_id);
+        if let Err(err) = BridgeTransportClient::new(http_addr)
+            .set_device_by_id(&device_id, Some(exclusive))
+            .await
+        {
+            tracing::warn!(
+                output_id = %active_output_id,
+                device_id = %device_id,
+                bridge_addr = %http_addr,
+                error = %err,
+                "failed to re-apply exclusive mode for active bridge output"
+            );
         }
     }
 

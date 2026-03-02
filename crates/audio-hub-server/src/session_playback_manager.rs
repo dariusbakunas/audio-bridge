@@ -218,18 +218,23 @@ impl SessionPlaybackManager {
                     output_id: target.output_id.clone(),
                     reason: format!("list_devices_failed {err:#}"),
                 })?;
-        let Some(device_name) = devices
-            .iter()
-            .find(|d| d.id == target.device_id)
-            .map(|d| d.name.clone())
-        else {
+        let has_device = devices.iter().any(|d| d.id == target.device_id);
+        if !has_device {
             return Err(SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id: target.output_id,
                 reason: "unknown_device".to_string(),
             });
-        };
-        client.set_device(&device_name, None).await.map_err(|err| {
+        }
+        let exclusive = state
+            .output_settings
+            .lock()
+            .map(|settings| settings.is_exclusive(&target.output_id))
+            .unwrap_or(false);
+        client
+            .set_device_by_id(&target.device_id, Some(exclusive))
+            .await
+            .map_err(|err| {
             SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id: target.output_id.clone(),
@@ -446,7 +451,7 @@ impl SessionPlaybackManager {
                         .flatten()
                 })
             });
-        let (title, artist, album, format) = now_playing_track_id
+        let (title, artist, album, format, source_sample_rate) = now_playing_track_id
             .and_then(|track_id| {
                 state
                     .metadata
@@ -461,9 +466,14 @@ impl SessionPlaybackManager {
                     record.artist,
                     record.album,
                     record.format,
+                    record.sample_rate,
                 )
             })
-            .unwrap_or((None, None, None, None));
+            .unwrap_or((None, None, None, None, None));
+        let source_rate = source_sample_rate
+            .or(status.resample_from_hz)
+            .or(status.sample_rate);
+        let output_rate = status.resample_to_hz.or(status.sample_rate);
         crate::models::StatusResponse {
             now_playing_track_id,
             paused: status.paused,
@@ -477,9 +487,10 @@ impl SessionPlaybackManager {
             resampling: status.resampling,
             resample_from_hz: status.resample_from_hz,
             resample_to_hz: status.resample_to_hz,
-            sample_rate: status.sample_rate,
+            sample_rate: source_rate,
             channels: status.channels,
-            output_sample_rate: status.sample_rate,
+            output_sample_rate: output_rate,
+            output_nominal_rate: status.output_nominal_rate,
             output_device: status.device,
             title,
             artist,
@@ -767,6 +778,7 @@ impl SessionPlaybackManager {
             sample_rate,
             channels: None,
             output_sample_rate: sample_rate,
+            output_nominal_rate: None,
             output_device: None,
             title,
             artist,
