@@ -154,8 +154,8 @@ flowchart LR
     LEvt[Locks/output events]
     MetaEvt[Metadata/log events]
 
-    HubState --> QEvt --> QSSE[/sessions/{id}/queue/stream]
-    HubState --> SEvt --> SSSE[/sessions/{id}/status/stream]
+    HubState --> QEvt --> QSSE[/sessions/:id/queue/stream]
+    HubState --> SEvt --> SSSE[/sessions/:id/status/stream]
     HubState --> LEvt --> OSSE[/outputs/stream]
     HubState --> MetaEvt --> MSSE[/metadata/stream,/logs/stream]
 ```
