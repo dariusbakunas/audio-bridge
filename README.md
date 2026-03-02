@@ -26,6 +26,8 @@ This repository is a Rust workspace with two primary applications:
 - **`bridge`** (receiver): runs on a target machine (e.g. RPi). It exposes an HTTP control API, pulls audio via HTTP, decodes locally, and plays through a selected output device.
 - **`audio-hub-server`** (server): runs on the media host. It scans your library, manages outputs and sessions, and streams audio to bridges.
 
+For deeper implementation diagrams (container/component/session/playback/event views), see [docs/architecture.md](docs/architecture.md).
+
 ### Playback flow
 
 1. `web-ui` (or another client) creates/refreshes a playback session and binds an output to that session.
