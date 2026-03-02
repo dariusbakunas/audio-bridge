@@ -336,6 +336,41 @@ Notes:
 - Test fixtures are in `web-ui/tests/fixtures` (server config + media fixture directory).
 - Current coverage includes server-backed app/session smoke tests and offline connection-gate recovery behavior.
 
+#### Generate E2E Audio Fixtures
+
+Audio fixture files under `web-ui/tests/fixtures/media` are ignored by git (only `.gitkeep`/`.gitignore` are tracked).
+
+Create a portable fixture manifest from a real album:
+
+```bash
+scripts/gen-audio-fixtures-yaml-from-album.sh \
+  --album-dir "/path/to/Album Folder" \
+  --config-out web-ui/tests/fixtures/album-fixtures.yml \
+  --length 5 \
+  --overwrite
+```
+
+Append another album into the same manifest:
+
+```bash
+scripts/gen-audio-fixtures-yaml-from-album.sh \
+  --album-dir "/path/to/Another Album" \
+  --config-out web-ui/tests/fixtures/album-fixtures.yml \
+  --append
+```
+
+Generate synthetic fixture files from the YAML:
+
+```bash
+scripts/gen-audio-fixtures-from-yaml.sh \
+  --config web-ui/tests/fixtures/album-fixtures.yml
+```
+
+Notes:
+- Generated YAML is portable by default (no per-file machine paths).
+- Synthetic output uses the extracted fixture parameters (sample rate/channels/bitrate/sample format + metadata).
+- If you need source-based trimming, `gen-audio-fixtures-yaml-from-album.sh` supports `--include-input-dir`.
+
 If you enable TLS on the hub server, use `https://` for `VITE_API_BASE` and in the desktop app connection settings.
 
 For Docker deployments, prefer runtime configuration with `AUDIO_HUB_WEB_API_BASE` (instead of `VITE_API_BASE`) so one built image can be reused across environments.
