@@ -18,6 +18,20 @@ export default function SignalModal({
   formatHz,
   onClose
 }: SignalModalProps) {
+  const sourceCodec = status?.source_codec ?? status?.format ?? "Unknown source";
+  const sourceDepth = status?.source_bit_depth ? `${status.source_bit_depth}-bit` : "bit depth —";
+  const sourceRate = formatHz(status?.sample_rate);
+  const outputRate = formatHz(status?.output_sample_rate);
+  const outputFormat = status?.output_sample_format ?? "format —";
+  const outputChannels = status?.channels ? `${status.channels}ch` : "channels —";
+  const outputName = activeOutput?.name ?? "No output selected";
+  const bridgeStage = status?.resampling ? "Decode + resample" : "Decode (direct rate)";
+  const bridgeDetail = status?.resampling
+    ? `${formatHz(status?.resample_from_hz ?? status?.sample_rate)} -> ${formatHz(
+        status?.resample_to_hz ?? status?.output_sample_rate
+      )}`
+    : `${sourceRate} passthrough`;
+
   return (
     <Modal
       open={open}
@@ -25,37 +39,30 @@ export default function SignalModal({
       onClose={onClose}
       headerRight={<span className="pill">{activeOutput?.name ?? "No output"}</span>}
     >
+      <div className="signal-flow" aria-label="Audio pipeline">
+        <div className="signal-stage">
+          <div className="signal-stage-title">Source</div>
+          <div className="signal-stage-main">{sourceCodec}</div>
+          <div className="signal-stage-sub">
+            {sourceDepth} · {sourceRate}
+          </div>
+        </div>
+        <div className={`signal-stage-arrow ${status?.resampling ? "resampling" : ""}`}>→</div>
+        <div className="signal-stage">
+          <div className="signal-stage-title">Bridge Processing</div>
+          <div className="signal-stage-main">{bridgeStage}</div>
+          <div className="signal-stage-sub">{bridgeDetail}</div>
+        </div>
+        <div className="signal-stage-arrow">→</div>
+        <div className="signal-stage">
+          <div className="signal-stage-title">Output</div>
+          <div className="signal-stage-main">{outputName}</div>
+          <div className="signal-stage-sub">
+            {outputFormat} · {outputChannels} · {outputRate}
+          </div>
+        </div>
+      </div>
       <div className="signal-grid">
-        <div>
-          <div className="signal-label">Source</div>
-          <div className="signal-value">
-            {status?.source_codec ?? status?.format ?? "—"}
-            {status?.source_bit_depth ? ` - ${status.source_bit_depth}-bit` : ""}
-          </div>
-        </div>
-        <div>
-          <div className="signal-label">Sample rate</div>
-          <div className="signal-value">{formatHz(status?.sample_rate)}</div>
-        </div>
-        <div>
-          <div className="signal-label">Output rate</div>
-          <div className="signal-value">{formatHz(status?.output_sample_rate)}</div>
-        </div>
-        <div>
-          <div className="signal-label">Resample</div>
-          <div className="signal-value">
-            {status?.resampling ? "Enabled" : "Direct"}
-            {status?.resample_to_hz ? ` → ${formatHz(status.resample_to_hz)}` : ""}
-          </div>
-        </div>
-        <div>
-          <div className="signal-label">Output format</div>
-          <div className="signal-value">{status?.output_sample_format ?? "—"}</div>
-        </div>
-        <div>
-          <div className="signal-label">Channels</div>
-          <div className="signal-value">{status?.channels ?? "—"}</div>
-        </div>
         <div>
           <div className="signal-label">Bitrate</div>
           <div className="signal-value">
