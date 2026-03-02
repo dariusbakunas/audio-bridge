@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-03-02
+
+### Added
+- New architecture reference document at `docs/architecture.md` with system/component/session/playback/event diagrams.
+- Additional Storybook coverage for core UI building blocks:
+  - `SideNav`
+  - `ViewHeader`
+  - `NotificationsPanel`
+  - `CreateSessionModal`
+- Signal dialog pipeline visualization showing:
+  - source format/rate/depth
+  - bridge processing stage (direct vs resample)
+  - output format/channels/rate
+
+### Changed
+- Continued web UI refactor to reduce `App.tsx` complexity by extracting orchestration into focused hooks/utilities (`session streams`, `session context`, `main content actions`, `chrome actions`, `UI state`, and related helpers).
+- Signal dialog now avoids duplicated field presentation; pipeline view is primary, with diagnostics focused on bitrate and buffer state.
+
+### Fixed
+- Web UI session request storm regression after refactor (unstable `getClientId` callback causing repeated `/sessions` and `/sessions/locks` refresh loops).
+- Signal dialog source-rate display now prefers pre-resample source rate (`resample_from_hz`) when available.
+- TypeScript typing issues introduced during hook extraction (track menu action and play handler signatures).
+- Missing Vite client type reference causing IDE asset import warning for `.png` modules.
+
 ## [0.14.1] - 2026-02-27
 
 ### Changed
