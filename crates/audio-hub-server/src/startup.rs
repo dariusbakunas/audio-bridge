@@ -218,6 +218,7 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
             .service(api::providers_list)
             .service(api::provider_outputs_list)
             .service(api::provider_refresh)
+            .service(api::bridge_unregister)
             .service(api::outputs_list)
             .service(api::outputs_stream)
             .service(api::metadata_stream)

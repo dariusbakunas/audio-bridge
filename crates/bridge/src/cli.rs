@@ -47,6 +47,10 @@ pub struct Args {
     /// Allow insecure TLS when streaming from the hub.
     #[arg(long, default_value_t = false)]
     pub tls_insecure: bool,
+
+    /// Hub base URL for graceful bridge unregister (for example http://hub.local:8080).
+    #[arg(long)]
+    pub hub_url: Option<String>,
 }
 
 /// Bridge subcommands.

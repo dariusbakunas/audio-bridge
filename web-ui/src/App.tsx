@@ -201,6 +201,7 @@ export default function App() {
       () => outputs.find((output) => output.id === activeOutputId) ?? null,
       [outputs, activeOutputId]
   );
+  const activeOutputAvailable = Boolean(activeOutput);
   const currentSession = useMemo(
     () => sessions.find((session) => session.id === sessionId) ?? null,
     [sessions, sessionId]
@@ -248,7 +249,7 @@ export default function App() {
     status,
     isLocalSession,
     sessionId,
-    activeOutputId,
+    activeOutputAvailable,
     serverConnected,
     settingsOpen,
     albumViewId,
@@ -363,6 +364,7 @@ export default function App() {
     streamKey,
     sessionId,
     activeOutputId,
+    activeOutputAvailable,
     isLocalSession: Boolean(isLocalSession),
     activeSessionIdRef,
     isLocalSessionRef,
@@ -680,7 +682,7 @@ export default function App() {
         queue={queue}
         formatMs={formatMs}
         placeholder={albumPlaceholder}
-        canQueuePlay={Boolean(sessionId && (activeOutputId || isLocalSession))}
+        canQueuePlay={Boolean(sessionId && (activeOutputAvailable || isLocalSession))}
         isPaused={isPaused}
         onQueueClose={() => setQueueOpen(false)}
         onQueuePause={handlePause}

@@ -10,6 +10,9 @@ use crate::bridge_device_streams::{
 };
 use crate::state::{AppState, DiscoveredCast};
 
+const DISCOVERED_HEALTH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+const DISCOVERED_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Spawn mDNS discovery loop for bridge devices.
 pub(crate) fn spawn_mdns_discovery(state: web::Data<AppState>) {
     std::thread::spawn(move || {
@@ -193,7 +196,7 @@ pub(crate) fn spawn_cast_mdns_discovery(state: web::Data<AppState>) {
 pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
     std::thread::spawn(move || {
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(15));
+            std::thread::sleep(DISCOVERED_HEALTH_INTERVAL);
             let snapshot = match state.providers.bridge.discovered_bridges.lock() {
                 Ok(map) => map
                     .iter()
@@ -211,7 +214,7 @@ pub(crate) fn spawn_discovered_health_watcher(state: web::Data<AppState>) {
                             entry.last_seen = now;
                         }
                     }
-                } else if now.duration_since(last_seen) > std::time::Duration::from_secs(60) {
+                } else if now.duration_since(last_seen) > DISCOVERED_STALE_AFTER {
                     let active_bridge_id = state
                         .providers
                         .bridge

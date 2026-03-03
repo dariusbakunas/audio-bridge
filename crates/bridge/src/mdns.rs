@@ -61,6 +61,12 @@ pub(crate) fn spawn_mdns_advertiser(http_bind: std::net::SocketAddr) -> Option<M
     Some(MdnsAdvertiser { daemon, fullname })
 }
 
+/// Resolve the current bridge id using the same logic as mDNS advertisement.
+pub(crate) fn current_bridge_id() -> String {
+    let host_base = resolve_host_base();
+    resolve_bridge_id(&host_base)
+}
+
 impl MdnsAdvertiser {
     /// Unregister and shutdown the mDNS daemon.
     pub(crate) fn shutdown(&self) {

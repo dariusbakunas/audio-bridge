@@ -4,6 +4,8 @@
 
 use anyhow::Result;
 use cpal::traits::DeviceTrait;
+use serde_json::json;
+use std::collections::HashSet;
 
 use crate::config::{BridgeListenConfig, BridgePlayConfig};
 use crate::{http_api, mdns, player};
@@ -34,11 +36,20 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     let exclusive_selected = std::sync::Arc::new(std::sync::Mutex::new(false));
     let status = PlayerStatusState::shared();
     let volume = std::sync::Arc::new(player::BridgeVolumeState::new(100, false));
+    let known_hub_origins = std::sync::Arc::new(std::sync::Mutex::new(HashSet::<String>::new()));
+    if let Some(origin) = normalize_origin(config.hub_url.as_deref()) {
+        if let Ok(mut known) = known_hub_origins.lock() {
+            known.insert(origin);
+        }
+    }
+    let bridge_id = mdns::current_bridge_id();
 
     let mdns_handle: std::sync::Arc<std::sync::Mutex<Option<mdns::MdnsAdvertiser>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     if install_ctrlc {
         let mdns_for_signal = mdns_handle.clone();
+        let hubs_for_signal = known_hub_origins.clone();
+        let bridge_id_for_signal = bridge_id.clone();
         let _ = ctrlc::set_handler(move || {
             if let Ok(mut g) = mdns_for_signal.lock() {
                 if let Some(ad) = g.as_ref() {
@@ -46,6 +57,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
                 }
                 *g = None;
             }
+            notify_hubs_bridge_unavailable(&bridge_id_for_signal, &hubs_for_signal);
             std::process::exit(130);
         });
     }
@@ -65,6 +77,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         device_selected.clone(),
         exclusive_selected.clone(),
         player_handle.cmd_tx,
+        known_hub_origins.clone(),
     );
     if let Ok(mut g) = mdns_handle.lock() {
         *g = mdns::spawn_mdns_advertiser(config.http_bind);
@@ -85,7 +98,58 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         });
     }
     let _ = _http.join();
+    notify_hubs_bridge_unavailable(&bridge_id, &known_hub_origins);
     Ok(())
+}
+
+/// Normalize and retain only URL origin (`scheme://authority`).
+fn normalize_origin(url: Option<&str>) -> Option<String> {
+    let value = url?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let uri = actix_web::http::Uri::try_from(value).ok()?;
+    let scheme = uri.scheme_str()?;
+    let authority = uri.authority()?;
+    Some(format!("{scheme}://{authority}"))
+}
+
+/// Best-effort hub notification that this bridge is shutting down.
+fn notify_hubs_bridge_unavailable(
+    bridge_id: &str,
+    known_hub_origins: &std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
+) {
+    let origins = known_hub_origins
+        .lock()
+        .map(|set| set.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for origin in origins {
+        let url = format!(
+            "{}/providers/bridge/unregister",
+            origin.trim_end_matches('/')
+        );
+        let response = ureq::post(&url)
+            .config()
+            .timeout_global(Some(std::time::Duration::from_secs(2)))
+            .build()
+            .send_json(json!({ "bridge_id": bridge_id }));
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!(bridge_id = %bridge_id, hub = %origin, "bridge unregister sent");
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    bridge_id = %bridge_id,
+                    hub = %origin,
+                    status = %resp.status(),
+                    "bridge unregister returned non-success"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(bridge_id = %bridge_id, hub = %origin, error = %err, "bridge unregister failed");
+            }
+        }
+    }
 }
 
 /// Normalize optional device name input by trimming and dropping empty values.

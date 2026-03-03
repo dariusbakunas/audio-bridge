@@ -8,6 +8,7 @@ type UseSessionStreamsArgs = {
   streamKey: string;
   sessionId: string | null;
   activeOutputId: string | null;
+  activeOutputAvailable: boolean;
   isLocalSession: boolean;
   activeSessionIdRef: MutableRefObject<string | null>;
   isLocalSessionRef: MutableRefObject<boolean>;
@@ -26,6 +27,7 @@ export function useSessionStreams({
   streamKey,
   sessionId,
   activeOutputId,
+  activeOutputAvailable,
   isLocalSession,
   activeSessionIdRef,
   isLocalSessionRef,
@@ -58,7 +60,7 @@ export function useSessionStreams({
   });
 
   useStatusStream({
-    enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputId),
+    enabled: serverConnected && !isLocalSession && Boolean(sessionId && activeOutputAvailable),
     sourceKey: streamKey,
     sessionId,
     onEvent: (data) => {

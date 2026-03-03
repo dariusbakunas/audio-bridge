@@ -636,6 +636,24 @@ pub struct OutputSelectRequest {
     pub id: String,
 }
 
+/// Request sent by bridge on graceful shutdown to unregister itself.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct BridgeUnregisterRequest {
+    /// Bridge id to unregister.
+    pub bridge_id: String,
+}
+
+/// Response after bridge unregister processing.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct BridgeUnregisterResponse {
+    /// True when a discovered bridge entry was removed.
+    pub removed_discovered: bool,
+    /// Number of sessions whose active bridge output was released.
+    pub released_sessions: usize,
+    /// True when legacy active bridge/output selection was cleared.
+    pub cleared_active_output: bool,
+}
+
 /// Request payload for starting or refreshing a local playback session.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct LocalPlaybackRegisterRequest {

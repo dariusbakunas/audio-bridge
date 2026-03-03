@@ -59,6 +59,7 @@ fn main() -> Result<()> {
                 device: args.device.clone(),
                 playback,
                 tls_insecure: args.tls_insecure,
+                hub_url: args.hub_url.clone(),
             };
             runtime::run_listen(cfg, true)?;
         }

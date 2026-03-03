@@ -7,7 +7,7 @@ type UsePlaybackDerivedStateArgs = {
   status: StatusResponse | null;
   isLocalSession: boolean;
   sessionId: string | null;
-  activeOutputId: string | null;
+  activeOutputAvailable: boolean;
   serverConnected: boolean;
   settingsOpen: boolean;
   albumViewId: number | null;
@@ -20,7 +20,7 @@ export function usePlaybackDerivedState({
   status,
   isLocalSession,
   sessionId,
-  activeOutputId,
+  activeOutputAvailable,
   serverConnected,
   settingsOpen,
   albumViewId,
@@ -42,27 +42,31 @@ export function usePlaybackDerivedState({
   }, [queue]);
 
   const hasPlayedHistory = Boolean(replayTrackId);
+  const hasQueueSnapshot = queue.length > 0;
   const staleEndedStatus = !isLocalSession && hasPlayedHistory && queueNowPlayingTrackId === null;
-  const effectiveNowPlayingTrackId = staleEndedStatus
-    ? null
-    : queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null;
+  const effectiveNowPlayingTrackId = !isLocalSession && hasQueueSnapshot
+    ? queueNowPlayingTrackId
+    : staleEndedStatus
+      ? null
+      : queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null;
   const hasNowPlaying = effectiveNowPlayingTrackId !== null;
   const canReplayFromHistory = Boolean(
-    sessionId && (isLocalSession || activeOutputId) && !hasNowPlaying && replayTrackId
+    sessionId && (isLocalSession || activeOutputAvailable) && !hasNowPlaying && replayTrackId
   );
   const canTogglePlayback = Boolean(
-    sessionId && (isLocalSession || activeOutputId) && (hasNowPlaying || canReplayFromHistory)
+    sessionId && (isLocalSession || activeOutputAvailable) && (hasNowPlaying || canReplayFromHistory)
   );
   const canControlVolume = Boolean(
-    serverConnected && sessionId && !isLocalSession && activeOutputId
+    serverConnected && sessionId && !isLocalSession && activeOutputAvailable
   );
-  const isPlaying = Boolean(hasNowPlaying && !status?.paused);
-  const isPaused = Boolean(!hasNowPlaying || status?.paused);
+  const playbackAvailable = Boolean(isLocalSession || activeOutputAvailable);
+  const isPlaying = Boolean(playbackAvailable && hasNowPlaying && !status?.paused);
+  const isPaused = !isPlaying;
 
   const viewTitle = settingsOpen ? "Settings" : albumViewId !== null ? "" : "Albums";
   const playButtonTitle = !sessionId
     ? "Creating session..."
-    : !activeOutputId && !isLocalSession
+    : !activeOutputAvailable && !isLocalSession
     ? isLocalSession
       ? "Local session is ready."
       : "Select an output to control playback."
@@ -74,7 +78,7 @@ export function usePlaybackDerivedState({
 
   const showGate = !serverConnected;
   const queueHasNext =
-    Boolean(sessionId && (activeOutputId || isLocalSession)) &&
+    Boolean(sessionId && (activeOutputAvailable || isLocalSession)) &&
     queue.some((item) => (item.kind === "track" ? !item.now_playing : true));
   const deleteSessionDisabled =
     !serverConnected ||
@@ -83,7 +87,7 @@ export function usePlaybackDerivedState({
     isDefaultSessionName(sessions.find((item) => item.id === sessionId)?.name);
   const canGoPrevious = isLocalSession
     ? queue.some((item) => item.kind === "track" && Boolean(item.played))
-    : Boolean(status?.has_previous);
+    : Boolean(activeOutputAvailable && status?.has_previous);
 
   return {
     queueNowPlayingTrackId,

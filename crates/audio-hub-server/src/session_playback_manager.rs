@@ -234,13 +234,11 @@ impl SessionPlaybackManager {
         client
             .set_device_by_id(&target.device_id, Some(exclusive))
             .await
-            .map_err(|err| {
-            SessionPlaybackError::SelectFailed {
+            .map_err(|err| SessionPlaybackError::SelectFailed {
                 session_id: session_id.to_string(),
                 output_id: target.output_id.clone(),
                 reason: format!("set_device_failed {err:#}"),
-            }
-        })?;
+            })?;
 
         let ext_hint = path
             .extension()

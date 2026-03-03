@@ -2,12 +2,12 @@
 
 use actix_web::{HttpResponse, Responder, get, post, web};
 
-use crate::bridge_manager::{merge_bridges, parse_provider_id};
 use crate::bridge_manager::parse_output_id;
+use crate::bridge_manager::{merge_bridges, parse_provider_id};
 use crate::bridge_transport::BridgeTransportClient;
 use crate::models::{
-    OutputSelectRequest, OutputSettings, OutputSettingsResponse, OutputsResponse, ProviderOutputs,
-    ProvidersResponse,
+    BridgeUnregisterRequest, BridgeUnregisterResponse, OutputSelectRequest, OutputSettings,
+    OutputSettingsResponse, OutputsResponse, ProviderOutputs, ProvidersResponse,
 };
 use crate::state::AppState;
 
@@ -245,6 +245,99 @@ pub async fn outputs_select(
         }
         Err(err) => err.into_response(),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/providers/bridge/unregister",
+    request_body = BridgeUnregisterRequest,
+    responses(
+        (status = 200, description = "Bridge unregistered", body = BridgeUnregisterResponse),
+        (status = 400, description = "Invalid request")
+    )
+)]
+#[post("/providers/bridge/unregister")]
+/// Unregister a bridge immediately on graceful bridge shutdown.
+pub async fn bridge_unregister(
+    state: web::Data<AppState>,
+    body: web::Json<BridgeUnregisterRequest>,
+) -> impl Responder {
+    let bridge_id = body.bridge_id.trim().to_string();
+    if bridge_id.is_empty() {
+        return HttpResponse::BadRequest().body("bridge_id is required");
+    }
+    let output_prefix = format!("bridge:{bridge_id}:");
+
+    let removed_discovered = state
+        .providers
+        .bridge
+        .discovered_bridges
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&bridge_id))
+        .is_some();
+    if let Ok(mut cache) = state.providers.bridge.device_cache.lock() {
+        cache.remove(&bridge_id);
+    }
+    if let Ok(mut cache) = state.providers.bridge.status_cache.lock() {
+        cache.remove(&bridge_id);
+    }
+    if let Ok(mut done) = state.providers.bridge.stop_on_join_done.lock() {
+        done.remove(&bridge_id);
+    }
+
+    let mut cleared_active_output = false;
+    if let Ok(mut bridges) = state.providers.bridge.bridges.lock() {
+        let active_matches = bridges
+            .active_output_id
+            .as_deref()
+            .map(|id| id.starts_with(&output_prefix))
+            .unwrap_or(false);
+        let bridge_matches = bridges.active_bridge_id.as_deref() == Some(bridge_id.as_str());
+        if active_matches || bridge_matches {
+            bridges.active_output_id = None;
+            bridges.active_bridge_id = None;
+            cleared_active_output = true;
+        }
+    }
+    if cleared_active_output {
+        if let Ok(player) = state.providers.bridge.player.lock() {
+            let _ = player.cmd_tx.send(crate::bridge::BridgeCommand::StopSilent);
+        }
+    }
+
+    let sessions_to_release = crate::session_registry::list_sessions()
+        .into_iter()
+        .filter_map(|session| {
+            let active = session.active_output_id.as_deref()?;
+            if active.starts_with(&output_prefix) {
+                Some(session.id)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for session_id in &sessions_to_release {
+        let _ = crate::session_registry::release_output(session_id);
+        if let Ok(mut cache) = state.output.session_status_cache.lock() {
+            cache.remove(session_id);
+        }
+    }
+
+    tracing::info!(
+        bridge_id = %bridge_id,
+        removed_discovered,
+        released_sessions = sessions_to_release.len(),
+        cleared_active_output,
+        "bridge unregistered via callback"
+    );
+    state.events.outputs_changed();
+    state.events.status_changed();
+    HttpResponse::Ok().json(BridgeUnregisterResponse {
+        removed_discovered,
+        released_sessions: sessions_to_release.len(),
+        cleared_active_output,
+    })
 }
 
 /// Ensure `active_id` points to an existing output entry.

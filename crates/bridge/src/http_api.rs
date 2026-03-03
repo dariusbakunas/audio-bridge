@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use actix_web::http::header;
@@ -101,6 +101,7 @@ struct AppState {
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
+    known_hub_origins: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Spawn the HTTP API server on the given bind address.
@@ -111,6 +112,7 @@ pub(crate) fn spawn_http_server(
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
     player_tx: Sender<PlayerCommand>,
+    known_hub_origins: Arc<Mutex<HashSet<String>>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let state = AppState {
@@ -119,6 +121,7 @@ pub(crate) fn spawn_http_server(
             device_selected,
             exclusive_selected,
             player_tx,
+            known_hub_origins,
         };
         let runner = match HttpServer::new(move || {
             App::new()
@@ -318,6 +321,7 @@ async fn play(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     if req.url.trim().is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "url is required");
     }
+    remember_hub_origin(&state, &req.url);
 
     if state
         .player_tx
@@ -333,6 +337,24 @@ async fn play(state: web::Data<AppState>, body: web::Bytes) -> HttpResponse {
     } else {
         HttpResponse::NoContent().finish()
     }
+}
+
+/// Save the hub URL origin seen in a play request for graceful shutdown unregister.
+fn remember_hub_origin(state: &web::Data<AppState>, url: &str) {
+    let Some(origin) = extract_origin(url) else {
+        return;
+    };
+    if let Ok(mut known) = state.known_hub_origins.lock() {
+        known.insert(origin);
+    }
+}
+
+/// Parse URL origin as `scheme://authority` for hub callback routing.
+fn extract_origin(url: &str) -> Option<String> {
+    let uri = actix_web::http::Uri::try_from(url).ok()?;
+    let scheme = uri.scheme_str()?;
+    let authority = uri.authority()?;
+    Some(format!("{scheme}://{authority}"))
 }
 
 /// Toggle pause state in the playback worker.
@@ -597,5 +619,18 @@ mod tests {
     fn mute_request_parses_muted() {
         let req: MuteRequest = serde_json::from_str(r#"{"muted":true}"#).unwrap();
         assert!(req.muted);
+    }
+
+    #[test]
+    fn extract_origin_parses_http_origin() {
+        assert_eq!(
+            extract_origin("http://hub.local:8080/stream/1"),
+            Some("http://hub.local:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_origin_rejects_relative_url() {
+        assert_eq!(extract_origin("/stream/1"), None);
     }
 }

@@ -227,10 +227,10 @@ export function useLocalPlayback({
   }, [applyLocalPlayback, isLocalSession, reportError, requestLocalCommand, updateLocalStatusFromAudio]);
 
   useEffect(() => {
-    if (!sessionId || (!activeOutputId && !isLocalSession)) {
+    if (!sessionId) {
       setStatus(null);
     }
-  }, [sessionId, activeOutputId, isLocalSession, setStatus]);
+  }, [sessionId, setStatus]);
 
   useEffect(() => {
     if (!isLocalSession || !sessionId) return;

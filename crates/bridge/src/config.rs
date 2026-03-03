@@ -15,6 +15,8 @@ pub struct BridgeListenConfig {
     pub playback: PlaybackConfig,
     /// Allow insecure TLS when streaming from the hub.
     pub tls_insecure: bool,
+    /// Optional hub URL used for graceful unregister notifications.
+    pub hub_url: Option<String>,
 }
 
 /// Configuration for playing a local file once.

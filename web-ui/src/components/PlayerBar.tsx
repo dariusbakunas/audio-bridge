@@ -129,7 +129,7 @@ export default function PlayerBar({
     };
   }, [hasNowPlaying, isPaused]);
 
-  const showPlayIcon = !hasNowPlaying || isPaused;
+  const showPlayIcon = !canTogglePlayback || !hasNowPlaying || isPaused;
   const outputBitDepth =
     deriveOutputBitDepth(status?.output_sample_format) ?? status?.source_bit_depth;
   const outputRate = status?.output_nominal_rate ?? status?.output_sample_rate;
@@ -156,13 +156,10 @@ export default function PlayerBar({
 
   const displayedVolume = volumeDragging ? volumeDraft : volumeValue;
   const displayedElapsedMs = (() => {
-    if (!hasNowPlaying) {
-      return null;
-    }
     if (status?.elapsed_ms === null || status?.elapsed_ms === undefined) {
       return status?.elapsed_ms ?? null;
     }
-    if (isPaused || !updatedAt) {
+    if (!hasNowPlaying || isPaused || !updatedAt) {
       return status.elapsed_ms;
     }
     const base = status.elapsed_ms;

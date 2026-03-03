@@ -25,8 +25,8 @@ pub use metadata::{
     tracks_metadata_fields, tracks_metadata_update, tracks_resolve,
 };
 pub use outputs::{
-    outputs_list, outputs_select, outputs_settings, outputs_settings_update, provider_outputs_list,
-    provider_refresh, providers_list,
+    bridge_unregister, outputs_list, outputs_select, outputs_settings, outputs_settings_update,
+    provider_outputs_list, provider_refresh, providers_list,
 };
 pub use sessions::{
     sessions_create, sessions_delete, sessions_get, sessions_heartbeat, sessions_list,
