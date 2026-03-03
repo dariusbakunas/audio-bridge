@@ -141,10 +141,15 @@ pub(crate) async fn run(args: crate::Args, log_bus: std::sync::Arc<LogBus>) -> R
     spawn_bridge_status_streams_for_config(state.clone());
     let server = HttpServer::new(move || {
         let cors = Cors::default()
-            .allowed_origin("http://localhost:5173")
-            .allowed_origin("http://127.0.0.1:5173")
-            .allowed_origin("tauri://localhost")
-            .allowed_origin("http://tauri.localhost")
+            .allowed_origin_fn(|origin, _req_head| {
+                let value = origin.as_bytes();
+                value == b"tauri://localhost"
+                    || value == b"http://tauri.localhost"
+                    || value.starts_with(b"http://localhost:")
+                    || value.starts_with(b"http://127.0.0.1:")
+                    || value.starts_with(b"https://localhost:")
+                    || value.starts_with(b"https://127.0.0.1:")
+            })
             .allowed_methods(vec!["GET", "POST", "HEAD"])
             .allowed_headers(vec![actix_web::http::header::CONTENT_TYPE])
             .max_age(3600);

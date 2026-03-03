@@ -12,7 +12,8 @@ declare global {
 }
 
 const RUNTIME_API_BASE = window.__AUDIO_HUB_CONFIG__?.apiBase ?? "";
-const DEFAULT_API_BASE = RUNTIME_API_BASE || import.meta.env.VITE_API_BASE || "";
+const ENV_API_BASE = import.meta.env.VITE_API_BASE === "__EMPTY__" ? "" : import.meta.env.VITE_API_BASE || "";
+const DEFAULT_API_BASE = RUNTIME_API_BASE || ENV_API_BASE;
 const API_BASE_STORAGE_KEY = "audioHub.apiBase";
 const DEFAULT_FETCH_TIMEOUT_MS = 8000;
 

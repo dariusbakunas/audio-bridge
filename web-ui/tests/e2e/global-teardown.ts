@@ -4,15 +4,20 @@ import type { FullConfig } from "@playwright/test";
 import { composeDown, loadState, removeStateFile, removeTempRoot } from "./docker-e2e";
 
 async function globalTeardown(_config: FullConfig): Promise<void> {
-  const state = await loadState();
-  if (!state) {
+  const loaded = await loadState();
+  if (!loaded) {
     return;
   }
+  const states = Array.isArray(loaded) ? loaded : [loaded];
 
   try {
-    composeDown(state);
+    for (const state of states) {
+      composeDown(state);
+    }
   } finally {
-    await removeTempRoot(state);
+    for (const state of states) {
+      await removeTempRoot(state);
+    }
     await removeStateFile();
   }
 }

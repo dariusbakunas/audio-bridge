@@ -8,9 +8,10 @@ services:
     environment:
       - AUDIO_HUB_WEB_API_BASE=${AUDIO_HUB_WEB_API_BASE:-}
     volumes:
-      - ./crates/audio-hub-server/config.docker-isolated.toml:/config/config.toml
+      - ${AUDIO_HUB_CONFIG_FILE:-./crates/audio-hub-server/config.docker-isolated.toml}:/config/config.toml
       - ${AUDIO_HUB_MEDIA_DIR:-./music}:/music
       - ${AUDIO_HUB_DATA_DIR:-./data}:/data
+      - ${AUDIO_HUB_WEB_DIST_DIR:-./web-ui/dist}:/app/web-ui/dist
     command:
       - --bind
       - 0.0.0.0:8080
@@ -44,7 +45,7 @@ services:
       - "5556"
     networks:
       audiohub_isolated:
-        ipv4_address: 172.30.0.2
+        ipv4_address: ${AUDIO_BRIDGE1_IPV4:-172.30.0.2}
     restart: unless-stopped
 
   bridge2:
@@ -64,7 +65,7 @@ services:
       - "5556"
     networks:
       audiohub_isolated:
-        ipv4_address: 172.30.0.3
+        ipv4_address: ${AUDIO_BRIDGE2_IPV4:-172.30.0.3}
     restart: unless-stopped
 
 networks:
@@ -72,4 +73,4 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: ${AUDIO_HUB_SUBNET:-172.30.0.0/24}

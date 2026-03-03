@@ -10,28 +10,30 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: process.env.E2E_BASE_URL ?? `http://127.0.0.1:${process.env.E2E_HUB_PORT ?? "18080"}`,
     trace: "on-first-retry"
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] }
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: process.env.E2E_BASE_URL_CHROMIUM ?? "http://127.0.0.1:18081"
+      }
     },
     {
       name: "firefox",
-      use: { ...devices["Desktop Firefox"] }
+      use: {
+        ...devices["Desktop Firefox"],
+        baseURL: process.env.E2E_BASE_URL_FIREFOX ?? "http://127.0.0.1:18082"
+      }
     },
     {
       name: "webkit",
-      use: { ...devices["Desktop Safari"] }
+      use: {
+        ...devices["Desktop Safari"],
+        baseURL: process.env.E2E_BASE_URL_WEBKIT ?? "http://127.0.0.1:18083"
+      }
     }
-  ],
-  webServer: {
-    command:
-      "VITE_API_BASE=${E2E_API_BASE:-http://127.0.0.1:${E2E_HUB_PORT:-18080}} npm run dev -- --host 127.0.0.1 --port 5173",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000
-  }
+  ]
 });
