@@ -8,15 +8,24 @@ use serde_json::json;
 use std::collections::HashSet;
 
 use crate::config::{BridgeListenConfig, BridgePlayConfig};
+use crate::dummy_output;
 use crate::{http_api, mdns, player};
 use audio_player::{config::PlaybackConfig, decode, device, pipeline, status::PlayerStatusState};
 
 const MDNS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// List output devices and print them to stdout.
-pub fn list_devices() -> Result<()> {
+pub fn list_devices(enable_dummy_outputs: bool) -> Result<()> {
     let host = cpal::default_host();
-    device::list_devices(&host)
+    if let Err(e) = device::list_devices(&host) {
+        tracing::warn!("failed to list physical output devices: {e:#}");
+    }
+    if enable_dummy_outputs {
+        for dev in dummy_output::list_devices() {
+            println!("#dummy: {} ({})", dev.name, dev.id);
+        }
+    }
+    Ok(())
 }
 
 /// Play a local file using the provided playback config.
@@ -65,6 +74,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
     let player_handle = player::spawn_player(
         device_selected.clone(),
         exclusive_selected.clone(),
+        config.enable_dummy_outputs,
         status.clone(),
         volume.clone(),
         config.playback.clone(),
@@ -76,6 +86,7 @@ pub fn run_listen(config: BridgeListenConfig, install_ctrlc: bool) -> Result<()>
         volume,
         device_selected.clone(),
         exclusive_selected.clone(),
+        config.enable_dummy_outputs,
         player_handle.cmd_tx,
         known_hub_origins.clone(),
     );

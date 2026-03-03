@@ -10,6 +10,7 @@ use cpal::traits::DeviceTrait;
 use crossbeam_channel::{Receiver, Sender};
 use symphonia::core::probe::Hint;
 
+use crate::dummy_output;
 use crate::http_stream::{HttpRangeConfig, HttpRangeSource};
 use crate::status::BridgeStatusState;
 use audio_bridge_types::PlaybackEndReason;
@@ -17,6 +18,8 @@ use audio_player::config::PlaybackConfig;
 use audio_player::decode;
 use audio_player::device;
 use audio_player::pipeline;
+use audio_player::queue::{self, PopStrategy};
+use audio_player::resample;
 
 /// Commands accepted by the playback worker thread.
 #[derive(Debug, Clone)]
@@ -108,6 +111,7 @@ struct SessionHandle {
 pub(crate) fn spawn_player(
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     status: Arc<Mutex<BridgeStatusState>>,
     volume: Arc<BridgeVolumeState>,
     playback: PlaybackConfig,
@@ -118,6 +122,7 @@ pub(crate) fn spawn_player(
         player_thread_main(
             device_selected,
             exclusive_selected,
+            enable_dummy_outputs,
             status,
             volume,
             playback,
@@ -132,6 +137,7 @@ pub(crate) fn spawn_player(
 fn player_thread_main(
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     status: Arc<Mutex<BridgeStatusState>>,
     volume: Arc<BridgeVolumeState>,
     playback: PlaybackConfig,
@@ -178,6 +184,7 @@ fn player_thread_main(
                 start_new_session(
                     &device_selected,
                     &exclusive_selected,
+                    enable_dummy_outputs,
                     &status,
                     &volume,
                     &playback,
@@ -214,6 +221,7 @@ fn player_thread_main(
                 start_new_session(
                     &device_selected,
                     &exclusive_selected,
+                    enable_dummy_outputs,
                     &status,
                     &volume,
                     &playback,
@@ -270,6 +278,7 @@ fn cancel_session_async(session: &mut Option<SessionHandle>) {
 fn start_new_session(
     device_selected: &Arc<Mutex<Option<String>>>,
     exclusive_selected: &Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     status: &Arc<Mutex<BridgeStatusState>>,
     volume: &Arc<BridgeVolumeState>,
     playback: &PlaybackConfig,
@@ -308,6 +317,7 @@ fn start_new_session(
             &host,
             &device_selected,
             &exclusive_selected,
+            enable_dummy_outputs,
             &status,
             &volume,
             &playback,
@@ -338,6 +348,7 @@ fn play_one_http(
     host: &cpal::Host,
     device_selected: &Arc<Mutex<Option<String>>>,
     exclusive_selected: &Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     status: &Arc<Mutex<BridgeStatusState>>,
     volume: &Arc<BridgeVolumeState>,
     playback: &PlaybackConfig,
@@ -388,6 +399,31 @@ fn play_one_http(
         .context("decode from http")?;
 
     let selected = device_selected.lock().unwrap().clone();
+    if enable_dummy_outputs {
+        if let Some(dummy) = selected.as_deref().and_then(dummy_output::by_name) {
+            return play_one_http_dummy(
+                exclusive_selected,
+                status,
+                volume,
+                &playback_eff,
+                url,
+                ext_hint,
+                title,
+                seek_ms,
+                cancel,
+                paused_flag,
+                my_id,
+                session_id,
+                stream_error,
+                src_spec,
+                srcq,
+                duration_ms,
+                source_info,
+                dummy,
+            );
+        }
+    }
+
     let device = device::pick_device(host, selected.as_deref())?;
     let exclusive_mode = exclusive_selected.lock().map(|g| *g).unwrap_or(false);
     let config = device::pick_output_config(&device, Some(src_spec.rate))?;
@@ -499,6 +535,192 @@ fn play_one_http(
     }
 
     result
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Execute playback on a synthetic dummy output device.
+fn play_one_http_dummy(
+    exclusive_selected: &Arc<Mutex<bool>>,
+    status: &Arc<Mutex<BridgeStatusState>>,
+    _volume: &Arc<BridgeVolumeState>,
+    playback: &PlaybackConfig,
+    url: String,
+    ext_hint: Option<String>,
+    title: Option<String>,
+    _seek_ms: Option<u64>,
+    cancel: Arc<AtomicBool>,
+    paused_flag: Arc<AtomicBool>,
+    my_id: u64,
+    session_id: Arc<AtomicU64>,
+    stream_error: Arc<AtomicBool>,
+    src_spec: symphonia::core::audio::SignalSpec,
+    srcq: Arc<queue::SharedAudio>,
+    duration_ms: Option<u64>,
+    source_info: audio_player::decode::SourceInfo,
+    dummy: dummy_output::DummyOutputDevice,
+) -> Result<()> {
+    let exclusive_mode = exclusive_selected.lock().map(|g| *g).unwrap_or(false);
+    let nominal_before = Some(dummy.normal_rate_hz);
+    let stream_rate = dummy.stream_rate_hz(exclusive_mode);
+    let nominal_rate = Some(stream_rate);
+
+    let played_frames = Arc::new(AtomicU64::new(0));
+    let underrun_frames = Arc::new(AtomicU64::new(0));
+    let underrun_events = Arc::new(AtomicU64::new(0));
+    let buffered_frames = Arc::new(AtomicU64::new(0));
+    let buffer_capacity_frames = Arc::new(AtomicU64::new(0));
+    let output_sample_format = Some("F32".to_string());
+    let container = ext_hint
+        .clone()
+        .or_else(|| infer_ext_from_url(&url))
+        .map(|s| s.to_ascii_uppercase());
+    let resampling = src_spec.rate != stream_rate;
+
+    tracing::info!(
+        device = dummy.name,
+        exclusive_mode,
+        source_rate_hz = src_spec.rate,
+        stream_rate_hz = stream_rate,
+        nominal_before_hz = ?nominal_before,
+        nominal_after_hz = ?nominal_rate,
+        "bridge playback stream configured (dummy output)"
+    );
+
+    if let Ok(mut s) = status.lock() {
+        s.end_reason = None;
+        s.now_playing = Some(title.clone().unwrap_or_else(|| url.clone()));
+        s.device = Some(dummy.name.to_string());
+        s.sample_rate = Some(status_sample_rate(stream_rate, nominal_rate));
+        s.output_nominal_rate = nominal_rate;
+        s.channels = Some(src_spec.channels.count() as u16);
+        s.duration_ms = duration_ms;
+        s.source_codec = source_info.codec.clone();
+        s.source_bit_depth = source_info.bit_depth;
+        s.container = container.or_else(|| source_info.container.clone());
+        s.output_sample_format = output_sample_format.clone();
+        s.resampling = Some(resampling);
+        s.resample_from_hz = Some(src_spec.rate);
+        s.resample_to_hz = Some(stream_rate);
+        s.played_frames = Some(played_frames.clone());
+        s.paused_flag = Some(paused_flag.clone());
+        s.underrun_frames = Some(underrun_frames.clone());
+        s.underrun_events = Some(underrun_events.clone());
+        s.buffer_size_frames = None;
+        s.buffered_frames = Some(buffered_frames.clone());
+        s.buffer_capacity_frames = Some(buffer_capacity_frames.clone());
+    }
+
+    let cancel_for_status = cancel.clone();
+    let stream_error_for_status = stream_error.clone();
+    let result = play_decoded_on_dummy_output(
+        playback,
+        src_spec,
+        srcq,
+        stream_rate,
+        pipeline::PlaybackSessionOptions {
+            paused: Some(paused_flag),
+            cancel: Some(cancel),
+            played_frames: Some(played_frames),
+            underrun_frames: Some(underrun_frames),
+            underrun_events: Some(underrun_events),
+            buffered_frames: Some(buffered_frames),
+            buffer_capacity_frames: Some(buffer_capacity_frames),
+            volume_percent: None,
+            muted: None,
+        },
+    );
+
+    if session_id.load(Ordering::Relaxed) == my_id {
+        if let Ok(mut s) = status.lock() {
+            let should_set = s.end_reason.is_none();
+            if should_set {
+                let cancelled = cancel_for_status.load(Ordering::Relaxed);
+                let had_error = stream_error_for_status.load(Ordering::Relaxed);
+                s.end_reason = Some(if result.is_ok() && !cancelled && !had_error {
+                    PlaybackEndReason::Eof
+                } else {
+                    PlaybackEndReason::Error
+                });
+            }
+            s.clear_playback();
+        }
+    }
+
+    result
+}
+
+/// Simulate output playback for synthetic devices while preserving queue semantics.
+fn play_decoded_on_dummy_output(
+    playback: &PlaybackConfig,
+    src_spec: symphonia::core::audio::SignalSpec,
+    srcq: Arc<queue::SharedAudio>,
+    dst_rate: u32,
+    opts: pipeline::PlaybackSessionOptions,
+) -> Result<()> {
+    let paused = opts.paused;
+    let cancel = opts.cancel;
+    let played_frames = opts.played_frames;
+    let buffered_frames = opts.buffered_frames;
+    let buffer_capacity_frames = opts.buffer_capacity_frames;
+
+    let dstq = if src_spec.rate == dst_rate {
+        srcq.clone()
+    } else {
+        resample::start_resampler(
+            srcq,
+            src_spec,
+            dst_rate,
+            resample::ResampleConfig {
+                chunk_frames: playback.chunk_frames,
+                buffer_seconds: playback.buffer_seconds,
+            },
+        )?
+    };
+
+    if let Some(cap) = &buffer_capacity_frames {
+        cap.store(dstq.max_frames() as u64, Ordering::Relaxed);
+    }
+
+    loop {
+        if let Some(flag) = &cancel {
+            if flag.load(Ordering::Relaxed) {
+                dstq.close();
+                break;
+            }
+        }
+
+        if let Some(p) = &paused {
+            if p.load(Ordering::Relaxed) {
+                if let Some(counter) = &buffered_frames {
+                    counter.store(dstq.len_frames() as u64, Ordering::Relaxed);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                continue;
+            }
+        }
+
+        let Some(samples) = dstq.pop(PopStrategy::BlockingUpTo {
+            max_frames: playback.refill_max_frames.max(1),
+        }) else {
+            break;
+        };
+        let channels = dstq.channels().max(1);
+        let frames = samples.len() / channels;
+
+        if let Some(counter) = &played_frames {
+            counter.fetch_add(frames as u64, Ordering::Relaxed);
+        }
+        if let Some(counter) = &buffered_frames {
+            counter.store(dstq.len_frames() as u64, Ordering::Relaxed);
+        }
+
+        let sleep_ms = ((frames as f64 * 1000.0) / (dst_rate as f64))
+            .max(1.0)
+            .round() as u64;
+        std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+    }
+
+    Ok(())
 }
 
 /// Derive effective playback buffering settings for the current command.

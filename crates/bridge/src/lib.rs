@@ -9,6 +9,7 @@ pub mod config;
 /// Top-level execution helpers for bridge commands.
 pub mod runtime;
 
+mod dummy_output;
 mod exclusive;
 mod http_api;
 mod http_stream;

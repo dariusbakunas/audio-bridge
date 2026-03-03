@@ -26,7 +26,7 @@ fn main() -> Result<()> {
         .init();
 
     if args.list_devices {
-        runtime::list_devices()?;
+        runtime::list_devices(args.enable_dummy_outputs)?;
         return Ok(());
     }
 
@@ -34,6 +34,7 @@ fn main() -> Result<()> {
         version = VERSION,
         http_bind = %args.http_bind,
         device = ?args.device,
+        enable_dummy_outputs = args.enable_dummy_outputs,
         "bridge starting"
     );
 
@@ -60,6 +61,7 @@ fn main() -> Result<()> {
                 playback,
                 tls_insecure: args.tls_insecure,
                 hub_url: args.hub_url.clone(),
+                enable_dummy_outputs: args.enable_dummy_outputs,
             };
             runtime::run_listen(cfg, true)?;
         }

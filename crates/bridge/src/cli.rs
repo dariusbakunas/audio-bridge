@@ -51,6 +51,10 @@ pub struct Args {
     /// Hub base URL for graceful bridge unregister (for example http://hub.local:8080).
     #[arg(long)]
     pub hub_url: Option<String>,
+
+    /// Expose synthetic dummy outputs for end-to-end testing.
+    #[arg(long, default_value_t = false)]
+    pub enable_dummy_outputs: bool,
 }
 
 /// Bridge subcommands.

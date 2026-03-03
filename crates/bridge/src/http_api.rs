@@ -14,6 +14,7 @@ use actix_web::{App, Error, HttpResponse, HttpServer, http::StatusCode, middlewa
 use crossbeam_channel::Sender;
 use futures_util::{Stream, stream::unfold};
 
+use crate::dummy_output;
 use crate::player::{BridgeVolumeState, PlayerCommand};
 use crate::status::{BridgeStatusState, StatusSnapshot};
 use audio_player::device;
@@ -100,6 +101,7 @@ struct AppState {
     volume: Arc<BridgeVolumeState>,
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     player_tx: Sender<PlayerCommand>,
     known_hub_origins: Arc<Mutex<HashSet<String>>>,
 }
@@ -111,6 +113,7 @@ pub(crate) fn spawn_http_server(
     volume: Arc<BridgeVolumeState>,
     device_selected: Arc<Mutex<Option<String>>>,
     exclusive_selected: Arc<Mutex<bool>>,
+    enable_dummy_outputs: bool,
     player_tx: Sender<PlayerCommand>,
     known_hub_origins: Arc<Mutex<HashSet<String>>>,
 ) -> std::thread::JoinHandle<()> {
@@ -120,6 +123,7 @@ pub(crate) fn spawn_http_server(
             volume,
             device_selected,
             exclusive_selected,
+            enable_dummy_outputs,
             player_tx,
             known_hub_origins,
         };
@@ -229,8 +233,7 @@ async fn select_device(state: web::Data<AppState>, body: web::Bytes) -> HttpResp
 
     let mut error: Option<HttpResponse> = None;
     let selected_name = if let Some(id) = req.id {
-        let host = cpal::default_host();
-        match device::list_device_infos(&host) {
+        match list_available_devices(state.enable_dummy_outputs) {
             Ok(devices) => devices
                 .into_iter()
                 .find(|dev| dev.id == id)
@@ -455,8 +458,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(body: &web::Bytes) -> Result<T, Ht
 
 /// Build a normalized, deduplicated device list response.
 fn build_devices_response(state: &AppState) -> Result<DevicesResponse, String> {
-    let host = cpal::default_host();
-    let devices = device::list_device_infos(&host).map_err(|e| format!("{e:#}"))?;
+    let devices = list_available_devices(state.enable_dummy_outputs)?;
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();
     for dev in devices {
@@ -482,6 +484,32 @@ fn build_devices_response(state: &AppState) -> Result<DevicesResponse, String> {
         selected,
         selected_id,
     })
+}
+
+/// Collect physical + synthetic output devices for API selection/listing.
+fn list_available_devices(enable_dummy_outputs: bool) -> Result<Vec<DeviceInfo>, String> {
+    let host = cpal::default_host();
+    let mut devices: Vec<DeviceInfo> = device::list_device_infos(&host)
+        .map_err(|e| format!("{e:#}"))?
+        .into_iter()
+        .map(|dev| DeviceInfo {
+            id: dev.id,
+            name: dev.name,
+            min_rate: dev.min_rate,
+            max_rate: dev.max_rate,
+        })
+        .collect();
+    if enable_dummy_outputs {
+        for dev in dummy_output::list_devices() {
+            devices.push(DeviceInfo {
+                id: dev.id.to_string(),
+                name: dev.name.to_string(),
+                min_rate: dev.min_rate_hz,
+                max_rate: dev.max_rate_hz,
+            });
+        }
+    }
+    Ok(devices)
 }
 
 /// Build the current status snapshot, falling back to an empty snapshot on lock failure.

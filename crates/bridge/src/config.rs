@@ -17,6 +17,8 @@ pub struct BridgeListenConfig {
     pub tls_insecure: bool,
     /// Optional hub URL used for graceful unregister notifications.
     pub hub_url: Option<String>,
+    /// Expose synthetic dummy outputs for testing.
+    pub enable_dummy_outputs: bool,
 }
 
 /// Configuration for playing a local file once.
