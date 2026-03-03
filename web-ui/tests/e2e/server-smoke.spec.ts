@@ -32,3 +32,43 @@ test("creates a new remote playback session through UI", async ({ page }) => {
     .poll(async () => (await sessionSelect.locator("option").allTextContents()).join("|"))
     .toContain(name);
 });
+
+test("shows dummy bridge outputs and allows selecting one", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Albums" })).toBeVisible();
+
+  const outputButton = page.locator(".player-action-output");
+  await expect(outputButton).toBeVisible();
+  await outputButton.click();
+
+  const outputsModal = page.locator(".modal");
+  await expect(
+    outputsModal.locator(".card-header span").filter({ hasText: "Outputs" })
+  ).toBeVisible();
+  await expect(
+    outputsModal.locator(".output-title", { hasText: "Dummy Output Fixed 48k" })
+  ).toHaveCount(2);
+  await expect(
+    outputsModal.locator(".output-title", { hasText: "Dummy Output 44.1k/96k (exclusive)" })
+  ).toHaveCount(2);
+
+  const targetRow = outputsModal
+    .locator(".output-row")
+    .filter({ hasText: "Dummy Output Fixed 48k" })
+    .first();
+  const selectedName = ((await targetRow.locator(".output-title").textContent()) ?? "").trim();
+  await targetRow.click();
+
+  await expect(outputsModal.locator(".output-row.active .output-title")).toContainText(
+    "Dummy Output Fixed 48k"
+  );
+  if (selectedName.length > 0) {
+    await expect(page.locator(".player-action-output .player-action-label")).toHaveText(
+      selectedName
+    );
+  } else {
+    await expect(page.locator(".player-action-output .player-action-label")).toContainText(
+      "Dummy Output Fixed 48k"
+    );
+  }
+});
