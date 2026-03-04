@@ -450,6 +450,34 @@ pub fn queue_previous_track_id(session_id: &str) -> Result<Option<i64>, ()> {
     Ok(None)
 }
 
+/// Mark the current track as finished for a session queue.
+///
+/// Moves `now_playing` into history (if not already newest) and clears
+/// `now_playing`. Returns `true` when state changed.
+pub fn queue_finish_now_playing(session_id: &str) -> Result<bool, ()> {
+    let mut store = store().lock().map_err(|_| ())?;
+    let session = store.by_id.get_mut(session_id).ok_or(())?;
+    let Some(current) = session.now_playing.take() else {
+        session.queue_len = session.queue_items.len();
+        session.last_seen = Instant::now();
+        return Ok(false);
+    };
+    if session
+        .history
+        .back()
+        .map(|last| last != &current)
+        .unwrap_or(true)
+    {
+        session.history.push_back(current);
+    }
+    if session.history.len() > 100 {
+        let _ = session.history.pop_front();
+    }
+    session.queue_len = session.queue_items.len();
+    session.last_seen = Instant::now();
+    Ok(true)
+}
+
 /// Errors validating a session's selected output lock.
 #[derive(Clone, Debug)]
 pub enum BoundOutputError {
@@ -999,5 +1027,34 @@ mod tests {
 
         let found = queue_play_from(&sid, missing).expect("play from missing");
         assert!(!found);
+    }
+
+    #[test]
+    fn queue_finish_now_playing_moves_current_to_history_and_clears_now_playing() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q5");
+        let a = 101;
+        queue_add_track_ids(&sid, vec![a]).expect("add");
+        let _ = queue_next_track_id(&sid).expect("next");
+
+        let changed = queue_finish_now_playing(&sid).expect("finish now playing");
+        assert!(changed);
+        let snapshot = queue_snapshot(&sid).expect("snapshot");
+        assert_eq!(snapshot.now_playing, None);
+        assert_eq!(snapshot.history.back().copied(), Some(a));
+    }
+
+    #[test]
+    fn queue_finish_now_playing_is_noop_when_nothing_playing() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let sid = make_session("Q", "q6");
+
+        let changed = queue_finish_now_playing(&sid).expect("finish now playing");
+        assert!(!changed);
+        let snapshot = queue_snapshot(&sid).expect("snapshot");
+        assert!(snapshot.now_playing.is_none());
+        assert!(snapshot.history.is_empty());
     }
 }

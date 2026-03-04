@@ -159,7 +159,7 @@ pub fn spawn_cast_worker(
             }
         };
 
-        let queue_service = QueueService::new(queue, status.clone(), events);
+        let queue_service = QueueService::new(queue, status.clone(), events.clone());
         let mut session: Option<CastSession> = None;
         let mut pending_play: Option<(PathBuf, String, Option<u64>, bool)> = None;
         let mut current_path: Option<PathBuf> = None;
@@ -344,6 +344,7 @@ pub fn spawn_cast_worker(
                         &mut last_duration_ms,
                         &status,
                         &queue_service,
+                        &events,
                         &cmd_tx,
                         &output_id,
                         &mut current_path,
@@ -416,6 +417,7 @@ fn handle_message(
     last_duration_ms: &mut Option<u64>,
     status: &StatusStore,
     queue_service: &QueueService,
+    events: &EventBus,
     cmd_tx: &Sender<BridgeCommand>,
     output_id: &str,
     current_path: &mut Option<PathBuf>,
@@ -527,6 +529,7 @@ fn handle_message(
                         last_duration_ms,
                         status,
                         queue_service,
+                        events,
                         cmd_tx,
                         output_id,
                         is_active,
@@ -618,6 +621,7 @@ fn apply_media_status(
     last_duration_ms: &mut Option<u64>,
     status: &StatusStore,
     queue_service: &QueueService,
+    events: &EventBus,
     cmd_tx: &Sender<BridgeCommand>,
     output_id: &str,
     is_active_output: bool,
@@ -688,47 +692,54 @@ fn apply_media_status(
     let should_session_advance = end_reason == Some(PlaybackEndReason::Eof);
     if should_session_advance && !*session_auto_advance_in_flight {
         if let Some(session_id) = bound_session_id.as_deref() {
-            if let Ok(Some(next_track_id)) =
-                crate::session_registry::queue_next_track_id(session_id)
-            {
-                let Some(next_path) = metadata
-                    .and_then(|db| db.track_path_for_id(next_track_id).ok().flatten())
-                    .map(PathBuf::from)
-                else {
-                    tracing::warn!(
-                        output_id = %output_id,
-                        session_id = %session_id,
-                        track_id = next_track_id,
-                        "cast session auto-advance track not found"
-                    );
-                    return;
-                };
-                let ext_hint = next_path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
-                let _ = cmd_tx.send(BridgeCommand::Play {
-                    path: next_path.clone(),
-                    ext_hint,
-                    seek_ms: None,
-                    start_paused: false,
-                });
-                *current_path = Some(next_path);
-                *session_auto_advance_in_flight = true;
-                if let Ok(mut statuses) = cast_statuses.lock() {
-                    let mut next_remote = remote.clone();
-                    next_remote.now_playing = current_path
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string());
-                    next_remote.paused = false;
-                    next_remote.elapsed_ms = None;
-                    next_remote.end_reason = None;
-                    statuses.insert(output_id.to_string(), next_remote);
+            match crate::session_registry::queue_next_track_id(session_id) {
+                Ok(Some(next_track_id)) => {
+                    let Some(next_path) = metadata
+                        .and_then(|db| db.track_path_for_id(next_track_id).ok().flatten())
+                        .map(PathBuf::from)
+                    else {
+                        tracing::warn!(
+                            output_id = %output_id,
+                            session_id = %session_id,
+                            track_id = next_track_id,
+                            "cast session auto-advance track not found"
+                        );
+                        return;
+                    };
+                    let ext_hint = next_path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    let _ = cmd_tx.send(BridgeCommand::Play {
+                        path: next_path.clone(),
+                        ext_hint,
+                        seek_ms: None,
+                        start_paused: false,
+                    });
+                    *current_path = Some(next_path);
+                    *session_auto_advance_in_flight = true;
+                    if let Ok(mut statuses) = cast_statuses.lock() {
+                        let mut next_remote = remote.clone();
+                        next_remote.now_playing = current_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string());
+                        next_remote.paused = false;
+                        next_remote.elapsed_ms = None;
+                        next_remote.end_reason = None;
+                        statuses.insert(output_id.to_string(), next_remote);
+                    }
+                    if let Ok(mut updates) = cast_status_updated_at.lock() {
+                        updates.insert(output_id.to_string(), Instant::now());
+                    }
                 }
-                if let Ok(mut updates) = cast_status_updated_at.lock() {
-                    updates.insert(output_id.to_string(), Instant::now());
+                Ok(None) => {
+                    if let Ok(true) = crate::session_registry::queue_finish_now_playing(session_id) {
+                        events.queue_changed();
+                        events.status_changed();
+                    }
                 }
+                Err(()) => {}
             }
         }
     }

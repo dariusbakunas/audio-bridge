@@ -156,6 +156,9 @@ export default function PlayerBar({
 
   const displayedVolume = volumeDragging ? volumeDraft : volumeValue;
   const displayedElapsedMs = (() => {
+    if (!hasNowPlaying) {
+      return null;
+    }
     if (status?.elapsed_ms === null || status?.elapsed_ms === undefined) {
       return status?.elapsed_ms ?? null;
     }
@@ -191,7 +194,7 @@ export default function PlayerBar({
         />
       </div>
       <div className="player-left">
-        {status?.title || status?.now_playing_track_id ? (
+        {hasNowPlaying ? (
           activeAlbumId ? (
             <button
               className="album-art album-art-button"
@@ -235,10 +238,10 @@ export default function PlayerBar({
         ) : null}
         <div>
           <div className="track-title">
-            {status?.title ?? "Nothing playing"}
+            {hasNowPlaying ? status?.title ?? "Unknown track" : "Nothing playing"}
           </div>
           <div className="muted small">
-            {status?.artist ?? (status?.now_playing_track_id ? "Unknown artist" : "Select a track to start")}
+            {hasNowPlaying ? status?.artist ?? "Unknown artist" : "Select a track to start"}
           </div>
         </div>
       </div>

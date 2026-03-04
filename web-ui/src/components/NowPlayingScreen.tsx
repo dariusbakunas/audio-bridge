@@ -35,8 +35,8 @@ export default function NowPlayingScreen({
   onPrevious,
   onNext
 }: NowPlayingScreenProps) {
-  const elapsedMs = status?.elapsed_ms ?? null;
-  const durationMs = status?.duration_ms ?? null;
+  const elapsedMs = hasNowPlaying ? (status?.elapsed_ms ?? null) : null;
+  const durationMs = hasNowPlaying ? (status?.duration_ms ?? null) : null;
   const progressPercent =
     elapsedMs !== null && durationMs && durationMs > 0 ? Math.min(100, (elapsedMs / durationMs) * 100) : 0;
 
@@ -45,16 +45,16 @@ export default function NowPlayingScreen({
       <div className="now-playing-artwork">
         <img
           className="now-playing-image"
-          src={nowPlayingCover && !nowPlayingCoverFailed ? nowPlayingCover : placeholderCover}
-          alt={status?.album ?? status?.title ?? "Album art"}
+          src={hasNowPlaying && nowPlayingCover && !nowPlayingCoverFailed ? nowPlayingCover : placeholderCover}
+          alt={hasNowPlaying ? (status?.album ?? status?.title ?? "Album art") : "Nothing playing"}
           onError={onCoverError}
         />
       </div>
 
       <div className="now-playing-copy">
-        <div className="now-playing-title">{status?.title ?? "Nothing playing"}</div>
-        <div className="now-playing-artist">{status?.artist ?? "Unknown artist"}</div>
-        <div className="now-playing-album">{status?.album ?? ""}</div>
+        <div className="now-playing-title">{hasNowPlaying ? status?.title ?? "Unknown track" : "Nothing playing"}</div>
+        <div className="now-playing-artist">{hasNowPlaying ? status?.artist ?? "Unknown artist" : "Select an album to start playback"}</div>
+        <div className="now-playing-album">{hasNowPlaying ? status?.album ?? "" : ""}</div>
       </div>
 
       <div className="now-playing-progress">
@@ -106,6 +106,7 @@ export default function NowPlayingScreen({
           <SkipForward className="icon" aria-hidden="true" />
         </button>
       </div>
+
     </section>
   );
 }

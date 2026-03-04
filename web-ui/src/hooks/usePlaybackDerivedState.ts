@@ -28,7 +28,9 @@ export function usePlaybackDerivedState({
   isDefaultSessionName
 }: UsePlaybackDerivedStateArgs) {
   const queueNowPlayingTrackId = useMemo(() => {
-    const item = queue.find((entry) => entry.kind === "track" && Boolean(entry.now_playing));
+    const item = queue.find(
+      (entry) => entry.kind === "track" && Boolean(entry.now_playing) && !Boolean(entry.played)
+    );
     return item?.kind === "track" ? item.id : null;
   }, [queue]);
 
@@ -42,19 +44,17 @@ export function usePlaybackDerivedState({
   }, [queue]);
 
   const hasPlayedHistory = Boolean(replayTrackId);
-  const hasQueueSnapshot = queue.length > 0;
-  const staleEndedStatus = !isLocalSession && hasPlayedHistory && queueNowPlayingTrackId === null;
-  const effectiveNowPlayingTrackId = !isLocalSession && hasQueueSnapshot
-    ? queueNowPlayingTrackId
-    : staleEndedStatus
-      ? null
-      : queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null;
+  // For remote sessions, queue stream is the source of truth for now-playing.
+  // This avoids stale title/track state when playback reaches EOF and status lags behind.
+  const effectiveNowPlayingTrackId = isLocalSession
+    ? queueNowPlayingTrackId ?? status?.now_playing_track_id ?? null
+    : queueNowPlayingTrackId;
   const hasNowPlaying = effectiveNowPlayingTrackId !== null;
   const canReplayFromHistory = Boolean(
     sessionId && (isLocalSession || activeOutputAvailable) && !hasNowPlaying && replayTrackId
   );
   const canTogglePlayback = Boolean(
-    sessionId && (isLocalSession || activeOutputAvailable) && (hasNowPlaying || canReplayFromHistory)
+    sessionId && (isLocalSession || activeOutputAvailable) && hasNowPlaying
   );
   const canControlVolume = Boolean(
     serverConnected && sessionId && !isLocalSession && activeOutputAvailable
@@ -71,15 +71,13 @@ export function usePlaybackDerivedState({
       ? "Local session is ready."
       : "Select an output to control playback."
     : !hasNowPlaying
-    ? canReplayFromHistory
-      ? "Replay the last track."
-      : "Select an album track to play."
+    ? "Select an album track to play."
     : undefined;
 
   const showGate = !serverConnected;
   const queueHasNext =
-    Boolean(sessionId && (activeOutputAvailable || isLocalSession)) &&
-    queue.some((item) => (item.kind === "track" ? !item.now_playing : true));
+    Boolean(sessionId && (activeOutputAvailable || isLocalSession) && hasNowPlaying) &&
+    queue.some((item) => item.kind === "track" && !item.now_playing && !Boolean(item.played));
   const deleteSessionDisabled =
     !serverConnected ||
     !sessionId ||

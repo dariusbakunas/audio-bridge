@@ -62,9 +62,6 @@ export function useMediaSessionControls({
       await handlePause();
       return;
     }
-    if (replayTrackId !== null) {
-      await handleQueuePlayFrom(replayTrackId);
-    }
   }, [
     effectiveNowPlayingTrackId,
     handlePause,
@@ -72,7 +69,6 @@ export function useMediaSessionControls({
     hasNowPlaying,
     isLocalSession,
     queue,
-    replayTrackId,
     reportError,
     resumeLocalFromStatus,
     sessionId,
@@ -87,10 +83,7 @@ export function useMediaSessionControls({
       }
       return;
     }
-    if (replayTrackId !== null) {
-      await handleQueuePlayFrom(replayTrackId);
-    }
-  }, [handlePause, handleQueuePlayFrom, hasNowPlaying, replayTrackId, status?.paused]);
+  }, [handlePause, hasNowPlaying, status?.paused]);
 
   const handlePauseMedia = useCallback(async () => {
     if (hasNowPlaying && !status?.paused) {

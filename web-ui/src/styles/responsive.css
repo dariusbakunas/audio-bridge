@@ -98,6 +98,10 @@
     z-index: 14;
   }
 
+  .app.has-gate .mobile-tab-bar {
+    display: none;
+  }
+
   .mobile-tab {
     border: none;
     border-radius: 999px;

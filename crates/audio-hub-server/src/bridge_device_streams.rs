@@ -299,87 +299,94 @@ fn apply_remote_status(
     }
     if session_eof && !*session_auto_advance_in_flight {
         if let Some((session_id, output_id)) = session_bound.clone() {
-            if let Ok(Some(next_track_id)) =
-                crate::session_registry::queue_next_track_id(&session_id)
-            {
-                let Some(next_path) = state
-                    .metadata
-                    .db
-                    .track_path_for_id(next_track_id)
-                    .ok()
-                    .flatten()
-                    .map(PathBuf::from)
-                    .and_then(|candidate| {
-                        state
-                            .output
-                            .controller
-                            .canonicalize_under_root(state, &candidate)
-                            .ok()
-                    })
-                else {
-                    tracing::warn!(
-                        session_id = %session_id,
-                        track_id = next_track_id,
-                        "session bridge auto-advance track not found"
-                    );
-                    return;
-                };
-                let Some(http_addr) = resolve_bridge_addr(state, bridge_id) else {
-                    return;
-                };
-                let device_id = parse_output_id(&output_id)
-                    .ok()
-                    .map(|(_, device_id)| device_id);
-                let Some(device_id) = device_id else {
-                    return;
-                };
-                let state_cloned = state.clone();
-                let output_id_cloned = output_id.clone();
-                let session_id_cloned = session_id.clone();
-                let bridge_id_cloned = bridge_id.to_string();
-                tokio::spawn(async move {
-                    let client = BridgeTransportClient::new_with_base(
-                        http_addr,
-                        state_cloned.providers.bridge.public_base_url.clone(),
-                        Some(state_cloned.metadata.db.clone()),
-                    );
-                    if let Ok(devices) = client.list_devices().await {
-                        if let Some(device_name) = devices
-                            .iter()
-                            .find(|d| d.id == device_id)
-                            .map(|d| d.name.clone())
-                        {
-                            let _ = client.set_device(&device_name, None).await;
-                            let ext_hint = next_path
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .unwrap_or("")
-                                .to_ascii_lowercase();
-                            let title = Some(next_path.to_string_lossy().to_string());
-                            let _ = client
-                                .play_path(
-                                    &next_path,
-                                    if ext_hint.is_empty() {
-                                        None
-                                    } else {
-                                        Some(ext_hint.as_str())
-                                    },
-                                    title.as_deref(),
-                                    None,
-                                    false,
-                                )
-                                .await;
-                            tracing::info!(
-                                bridge_id = %bridge_id_cloned,
-                                session_id = %session_id_cloned,
-                                output_id = %output_id_cloned,
-                                path = %next_path.to_string_lossy(),
-                                "session bridge auto-advance dispatched"
-                            );
+            match crate::session_registry::queue_next_track_id(&session_id) {
+                Ok(Some(next_track_id)) => {
+                    let Some(next_path) = state
+                        .metadata
+                        .db
+                        .track_path_for_id(next_track_id)
+                        .ok()
+                        .flatten()
+                        .map(PathBuf::from)
+                        .and_then(|candidate| {
+                            state
+                                .output
+                                .controller
+                                .canonicalize_under_root(state, &candidate)
+                                .ok()
+                        })
+                    else {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            track_id = next_track_id,
+                            "session bridge auto-advance track not found"
+                        );
+                        return;
+                    };
+                    let Some(http_addr) = resolve_bridge_addr(state, bridge_id) else {
+                        return;
+                    };
+                    let device_id = parse_output_id(&output_id)
+                        .ok()
+                        .map(|(_, device_id)| device_id);
+                    let Some(device_id) = device_id else {
+                        return;
+                    };
+                    let state_cloned = state.clone();
+                    let output_id_cloned = output_id.clone();
+                    let session_id_cloned = session_id.clone();
+                    let bridge_id_cloned = bridge_id.to_string();
+                    tokio::spawn(async move {
+                        let client = BridgeTransportClient::new_with_base(
+                            http_addr,
+                            state_cloned.providers.bridge.public_base_url.clone(),
+                            Some(state_cloned.metadata.db.clone()),
+                        );
+                        if let Ok(devices) = client.list_devices().await {
+                            if let Some(device_name) = devices
+                                .iter()
+                                .find(|d| d.id == device_id)
+                                .map(|d| d.name.clone())
+                            {
+                                let _ = client.set_device(&device_name, None).await;
+                                let ext_hint = next_path
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .unwrap_or("")
+                                    .to_ascii_lowercase();
+                                let title = Some(next_path.to_string_lossy().to_string());
+                                let _ = client
+                                    .play_path(
+                                        &next_path,
+                                        if ext_hint.is_empty() {
+                                            None
+                                        } else {
+                                            Some(ext_hint.as_str())
+                                        },
+                                        title.as_deref(),
+                                        None,
+                                        false,
+                                    )
+                                    .await;
+                                tracing::info!(
+                                    bridge_id = %bridge_id_cloned,
+                                    session_id = %session_id_cloned,
+                                    output_id = %output_id_cloned,
+                                    path = %next_path.to_string_lossy(),
+                                    "session bridge auto-advance dispatched"
+                                );
+                            }
                         }
+                    });
+                    *session_auto_advance_in_flight = true;
+                }
+                Ok(None) => {
+                    if let Ok(true) = crate::session_registry::queue_finish_now_playing(&session_id) {
+                        state.events.queue_changed();
+                        state.events.status_changed();
                     }
-                });
-                *session_auto_advance_in_flight = true;
+                }
+                Err(()) => {}
             }
         }
     }
