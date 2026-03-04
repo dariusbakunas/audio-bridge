@@ -86,8 +86,14 @@ export function useAlbumsState({
     if (!serverConnected) return;
     let mounted = true;
     const stream = new EventSource(apiUrl("/albums/stream"));
+    stream.onopen = () => {
+      if (!mounted) return;
+      setAlbumsError(null);
+      markServerConnected();
+    };
     stream.addEventListener("albums", () => {
       if (!mounted) return;
+      setAlbumsError(null);
       requestAlbumsReload();
     });
     stream.onerror = () => {
@@ -99,7 +105,7 @@ export function useAlbumsState({
       mounted = false;
       stream.close();
     };
-  }, [connectionError, requestAlbumsReload, serverConnected, streamKey]);
+  }, [connectionError, markServerConnected, requestAlbumsReload, serverConnected, streamKey]);
 
   const loadAlbumTracks = useCallback(
     async (id: number | null) => {
