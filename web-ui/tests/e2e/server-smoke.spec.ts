@@ -88,6 +88,66 @@ test("shows dummy bridge outputs and allows selecting one", async ({ page }) => 
   }
 });
 
+test("outputs from an owned bridge are disabled in another session", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Albums" })).toBeVisible();
+
+  const sessionSelect = page.getByRole("combobox", { name: "Playback session" });
+  await expect
+    .poll(async () => sessionSelect.isEnabled(), {
+      timeout: 30000
+    })
+    .toBe(true);
+  await expect
+    .poll(async () => (await sessionSelect.locator("option").allTextContents()).join("|"), {
+      timeout: 15000
+    })
+    .toContain("Default");
+  await sessionSelect.selectOption({ label: "Default" });
+
+  const outputButton = page.locator(".player-action-output");
+  await outputButton.click();
+  const outputsModal = page.locator(".modal");
+  await expect(outputsModal.locator(".card-header span").filter({ hasText: "Outputs" })).toBeVisible();
+
+  const defaultSessionRows = outputsModal.locator(".output-row:not(.locked)").filter({ hasText: "Dummy Output" });
+  const ownedRow = defaultSessionRows.first();
+  const ownedRowText = (await ownedRow.textContent()) ?? "";
+  const ownedOutputMatch = ownedRowText.match(/bridge:([^:\s]+):[^\s]+/);
+  expect(ownedOutputMatch).not.toBeNull();
+  const ownedBridgeId = ownedOutputMatch![1];
+  await ownedRow.click();
+  await outputsModal.getByRole("button", { name: "Close" }).click();
+  await expect(outputsModal).toBeHidden();
+
+  const createSessionButton = page.getByRole("button", { name: "Create new session" });
+  await expect(createSessionButton).toBeEnabled();
+  await createSessionButton.click();
+  await expect(page.locator(".modal .card-header span").filter({ hasText: "Create session" })).toBeVisible();
+
+  const name = `E2E Lock Check ${Date.now()}`;
+  await page.getByLabel("Name").fill(name);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+
+  await expect(sessionSelect).toHaveValue(/sess:/);
+  await expect
+    .poll(async () => (await sessionSelect.locator("option").allTextContents()).join("|"))
+    .toContain(name);
+
+  await outputButton.click();
+  await expect(outputsModal.locator(".card-header span").filter({ hasText: "Outputs" })).toBeVisible();
+
+  const bridgeOwnedRows = outputsModal
+    .locator(".output-row")
+    .filter({ hasText: `bridge:${ownedBridgeId}:` });
+  const bridgeOwnedCount = await bridgeOwnedRows.count();
+  expect(bridgeOwnedCount).toBeGreaterThan(0);
+  const bridgeRowsLocked = await bridgeOwnedRows.evaluateAll((rows) =>
+    rows.every((row) => row.classList.contains("locked") && (row as HTMLButtonElement).disabled)
+  );
+  expect(bridgeRowsLocked).toBe(true);
+});
+
 test("switching outputs during active playback preserves track and play/pause state", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Albums" })).toBeVisible();
