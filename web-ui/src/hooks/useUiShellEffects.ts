@@ -15,6 +15,10 @@ type UseUiShellEffectsArgs = {
   setSignalOpen: (value: boolean) => void;
   outputsOpen: boolean;
   setOutputsOpen: (value: boolean) => void;
+  settingsOpen: boolean;
+  queueViewOpen: boolean;
+  nowPlayingViewOpen: boolean;
+  sessionsViewOpen: boolean;
   albumViewId: number | null;
   setAlbumNotesOpen: (value: boolean) => void;
 };
@@ -34,6 +38,10 @@ export function useUiShellEffects({
   setSignalOpen,
   outputsOpen,
   setOutputsOpen,
+  settingsOpen,
+  queueViewOpen,
+  nowPlayingViewOpen,
+  sessionsViewOpen,
   albumViewId,
   setAlbumNotesOpen
 }: UseUiShellEffectsArgs) {
@@ -78,12 +86,10 @@ export function useUiShellEffects({
   }, [albumViewId, setAlbumNotesOpen]);
 
   useEffect(() => {
-    if (albumViewId === null) return;
+    window.scrollTo({ top: 0, behavior: "auto" });
     const main = document.querySelector<HTMLElement>(".main");
     if (main) {
-      main.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      main.scrollTo({ top: 0, behavior: "auto" });
     }
-  }, [albumViewId]);
+  }, [albumViewId, nowPlayingViewOpen, queueViewOpen, sessionsViewOpen, settingsOpen]);
 }

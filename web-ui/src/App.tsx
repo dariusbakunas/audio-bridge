@@ -332,6 +332,10 @@ export default function App() {
     setSignalOpen,
     outputsOpen,
     setOutputsOpen,
+    settingsOpen,
+    queueViewOpen,
+    nowPlayingViewOpen,
+    sessionsViewOpen,
     albumViewId,
     setAlbumNotesOpen
   });
