@@ -4,6 +4,7 @@ import { OutputInfo, SessionSummary, SessionVolumeResponse, StatusResponse } fro
 import { SettingsSection, ViewState } from "../hooks/useViewNavigation";
 import ConnectionGate from "./ConnectionGate";
 import MainContent from "./MainContent";
+import MobileTabBar from "./MobileTabBar";
 import NotificationsPanel from "./NotificationsPanel";
 import PlayerBar from "./PlayerBar";
 import SideNav from "./SideNav";
@@ -13,6 +14,9 @@ type AppChromeProps = {
   settingsOpen: boolean;
   showGate: boolean;
   navCollapsed: boolean;
+  queueViewOpen: boolean;
+  nowPlayingViewOpen: boolean;
+  sessionsViewOpen: boolean;
   onToggleNavCollapsed: () => void;
   navigateTo: (next: ViewState) => void;
   serverConnecting: boolean;
@@ -81,6 +85,9 @@ export default function AppChrome({
   settingsOpen,
   showGate,
   navCollapsed,
+  queueViewOpen,
+  nowPlayingViewOpen,
+  sessionsViewOpen,
   onToggleNavCollapsed,
   navigateTo,
   serverConnecting,
@@ -161,6 +168,9 @@ export default function AppChrome({
         <SideNav
           navCollapsed={navCollapsed}
           settingsOpen={settingsOpen}
+          queueViewOpen={queueViewOpen}
+          nowPlayingViewOpen={nowPlayingViewOpen}
+          sessionsViewOpen={sessionsViewOpen}
           onToggleCollapsed={onToggleNavCollapsed}
           navigateTo={navigateTo}
         />
@@ -172,7 +182,13 @@ export default function AppChrome({
             onGoBack={onGoBack}
             onGoForward={onGoForward}
             viewTitle={viewTitle}
-            showLibraryTools={!settingsOpen && albumViewId === null}
+            showLibraryTools={
+              !settingsOpen &&
+              !queueViewOpen &&
+              !nowPlayingViewOpen &&
+              !sessionsViewOpen &&
+              albumViewId === null
+            }
             albumSearch={albumSearch}
             onAlbumSearchChange={onAlbumSearchChange}
             albumViewMode={albumViewMode}
@@ -192,6 +208,14 @@ export default function AppChrome({
           {mainContent}
         </main>
       </div>
+
+      <MobileTabBar
+        settingsOpen={settingsOpen}
+        queueViewOpen={queueViewOpen}
+        nowPlayingViewOpen={nowPlayingViewOpen}
+        sessionsViewOpen={sessionsViewOpen}
+        navigateTo={navigateTo}
+      />
 
       <NotificationsPanel
         open={notificationsOpen}

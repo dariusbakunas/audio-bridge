@@ -4,13 +4,14 @@ import { SettingsSection } from "./useViewNavigation";
 
 type UseAppChromeActionsArgs = {
   navigateTo: (next: {
-    view: "albums" | "album" | "settings";
+    view: "albums" | "album" | "settings" | "queue" | "nowPlaying" | "sessions";
     albumId?: number | null;
     settingsSection?: SettingsSection;
   }) => void;
   isLocalSession: boolean;
+  compactLayout: boolean;
   setSignalOpen: (value: boolean) => void;
-  setQueueOpen: (value: (current: boolean) => boolean) => void;
+  setQueueOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   setOutputsOpen: (value: boolean) => void;
   handleDeleteSession: () => Promise<void>;
 };
@@ -18,6 +19,7 @@ type UseAppChromeActionsArgs = {
 export function useAppChromeActions({
   navigateTo,
   isLocalSession,
+  compactLayout,
   setSignalOpen,
   setQueueOpen,
   setOutputsOpen,
@@ -37,8 +39,15 @@ export function useAppChromeActions({
   }, [setSignalOpen]);
 
   const onQueueOpen = useCallback(() => {
+    if (compactLayout) {
+      setQueueOpen(false);
+      navigateTo({
+        view: "queue"
+      });
+      return;
+    }
     setQueueOpen((value) => !value);
-  }, [setQueueOpen]);
+  }, [compactLayout, navigateTo, setQueueOpen]);
 
   const onSelectOutput = useCallback(() => {
     if (!isLocalSession) {

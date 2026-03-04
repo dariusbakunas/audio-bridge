@@ -139,6 +139,27 @@
   gap: 10px;
 }
 
+.queue-screen {
+  margin-top: 18px;
+}
+
+.queue-screen-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.queue-screen-card .card-header {
+  padding: 14px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.queue-screen-card .queue-list {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+
 .queue-panel {
   display: flex;
   flex-direction: column;

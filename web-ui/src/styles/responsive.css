@@ -1,0 +1,385 @@
+@media (max-width: 760px) {
+  :root {
+    --header-height: 0px;
+    --player-height: 72px;
+    --mobile-nav-height: 60px;
+  }
+
+  .app {
+    padding-bottom: calc(var(--player-height) + var(--mobile-nav-height) + 20px);
+  }
+
+  .layout,
+  .layout.nav-collapsed {
+    --nav-width: 0px;
+  }
+
+  .layout.nav-collapsed .side-nav {
+    padding: 8px 12px;
+  }
+
+  .side-nav {
+    display: none;
+  }
+
+  .nav-brand,
+  .nav-collapse,
+  .nav-label {
+    display: none;
+  }
+
+  .nav-section {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .mobile-tab-section,
+  .queue-nav-section {
+    display: flex;
+  }
+
+  .layout.nav-collapsed .nav-section {
+    width: auto;
+  }
+
+  .nav-button {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 6px;
+    font-size: 0.78rem;
+  }
+
+  .mobile-tab-button {
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.65rem;
+    letter-spacing: 0.01em;
+    line-height: 1.05;
+  }
+
+  .mobile-tab-button .nav-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .layout.nav-collapsed .nav-button {
+    justify-content: center;
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .layout.nav-collapsed .nav-button span {
+    display: inline;
+  }
+
+  .main {
+    margin-left: 0;
+    width: 100%;
+    padding: 12px 12px 16px;
+  }
+
+  .mobile-tab-bar {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(var(--player-height) + 6px);
+    height: var(--mobile-nav-height);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--border-strong);
+    background: rgba(18, 21, 26, 0.96);
+    backdrop-filter: blur(14px) saturate(140%);
+    border-radius: 999px;
+    z-index: 14;
+  }
+
+  .mobile-tab {
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted-2);
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    font-size: 0.62rem;
+    cursor: pointer;
+  }
+
+  .mobile-tab .icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  .mobile-tab span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .mobile-tab.active {
+    background: rgba(212, 150, 95, 0.18);
+    color: var(--accent-strong);
+  }
+
+  .view-header {
+    display: none;
+  }
+
+  .view-header-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .view-header-row h1 {
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .view-nav {
+    display: none;
+  }
+
+  .view-header-actions {
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-tools,
+  .header-session {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .header-search {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .header-session {
+    gap: 6px;
+  }
+
+  .header-session-select {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .header-session .icon-btn,
+  .notification-btn {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .header-session,
+  .notification-btn {
+    display: none;
+  }
+
+  .now-playing-title {
+    font-size: 2.5rem;
+  }
+
+  .sessions-screen-header h2 {
+    font-size: 2.2rem;
+  }
+
+  .album-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .album-detail-top,
+  .album-hero-inner {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .album-cover.large {
+    max-width: min(300px, 100%);
+  }
+
+  .album-track-header {
+    display: none;
+  }
+
+  .album-track-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto 34px;
+    gap: 8px;
+    padding: 8px 6px;
+  }
+
+  .album-track-format {
+    display: none;
+  }
+
+  .album-track-duration {
+    font-size: 0.78rem;
+  }
+
+  .player-bar {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    height: var(--player-height);
+    padding: 8px 12px;
+    align-items: center;
+  }
+
+  .player-progress,
+  .player-middle,
+  .player-right {
+    display: none;
+  }
+
+  .player-left {
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .album-art {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .player-left .track-title {
+    margin-bottom: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .player-left .muted.small {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-header,
+  .settings-row,
+  .outputs-provider-header,
+  .settings-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .log-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --header-height: 0px;
+    --player-height: 72px;
+    --mobile-nav-height: 56px;
+  }
+
+  .view-nav .icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .view-nav .icon-btn + .icon-btn {
+    display: none;
+  }
+
+  .view-header-row h1 {
+    display: none;
+  }
+
+  .header-tools {
+    gap: 8px;
+  }
+
+  .view-toggle {
+    flex: 0 0 auto;
+  }
+
+  .mobile-tab-bar {
+    left: 6px;
+    right: 6px;
+    bottom: calc(var(--player-height) + 4px);
+  }
+
+  .mobile-tab {
+    font-size: 0.58rem;
+  }
+
+  .now-playing-title {
+    font-size: 2.1rem;
+  }
+
+  .now-playing-artist {
+    font-size: 1.5rem;
+  }
+
+  .sessions-screen-header h2 {
+    font-size: 1.9rem;
+  }
+
+  .header-session {
+    gap: 4px;
+  }
+
+  .header-session .icon-btn {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+
+  .notification-btn {
+    margin-left: auto;
+  }
+
+  .album-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .album-list-row {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .album-list-cover {
+    width: 56px;
+    height: 56px;
+  }
+
+  .album-list-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+    margin-top: 2px;
+  }
+
+  .album-actions,
+  .album-meta-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .track-menu {
+    width: min(280px, calc(100vw - 12px));
+  }
+
+  .player-volume-slider {
+    width: 64px;
+  }
+}

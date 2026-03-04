@@ -309,3 +309,159 @@
   position: relative;
   z-index: 1;
 }
+
+.now-playing-screen,
+.sessions-screen {
+  margin-top: 20px;
+}
+
+.now-playing-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.now-playing-artwork {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.now-playing-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.now-playing-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.now-playing-title {
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.now-playing-artist {
+  color: var(--ink);
+  font-size: 1.2rem;
+}
+
+.now-playing-album {
+  color: var(--muted);
+}
+
+.now-playing-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.now-playing-progress-track {
+  height: 4px;
+  background: var(--border-subtle);
+}
+
+.now-playing-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.now-playing-times {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.now-playing-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.now-playing-primary {
+  width: 58px;
+  height: 58px;
+}
+
+.sessions-screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sessions-screen-header h2 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.sessions-screen-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sessions-screen-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sessions-screen-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sessions-screen-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 14px 14px 12px;
+  color: var(--ink);
+}
+
+.sessions-screen-card.active {
+  border-color: rgba(212, 150, 95, 0.75);
+}
+
+.sessions-screen-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sessions-screen-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.sessions-screen-card-subtitle {
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+.sessions-screen-card-meta {
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  margin-top: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

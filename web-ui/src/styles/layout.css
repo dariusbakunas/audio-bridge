@@ -265,6 +265,18 @@
   gap: 8px;
 }
 
+.mobile-tab-section {
+  display: none;
+}
+
+.queue-nav-section {
+  display: none;
+}
+
+.mobile-tab-bar {
+  display: none;
+}
+
 .nav-label {
   text-transform: uppercase;
   letter-spacing: 0.2em;

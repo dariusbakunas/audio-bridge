@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import AppModals from "./components/AppModals";
 import AppChrome from "./components/AppChrome";
 import MainContent from "./components/MainContent";
@@ -29,6 +29,7 @@ import { useTrackMenu } from "./hooks/useTrackMenu";
 import { useToasts } from "./hooks/useToasts";
 import { useUiShellEffects } from "./hooks/useUiShellEffects";
 import { useViewNavigation } from "./hooks/useViewNavigation";
+import { useCompactLayout } from "./hooks/useCompactLayout";
 import {
   albumPlaceholder,
   describeMetadataEvent,
@@ -55,6 +56,12 @@ export default function App() {
     setRescanBusy,
     queueOpen,
     setQueueOpen,
+    queueViewOpen,
+    setQueueViewOpen,
+    nowPlayingViewOpen,
+    setNowPlayingViewOpen,
+    sessionsViewOpen,
+    setSessionsViewOpen,
     signalOpen,
     setSignalOpen,
     outputsOpen,
@@ -82,6 +89,8 @@ export default function App() {
   } = useAppUiState({
     navCollapsedKey: NAV_COLLAPSED_KEY
   });
+  const compactLayout = useCompactLayout();
+  const previousCompactLayoutRef = useRef<boolean>(compactLayout);
   const activeSessionIdRef = useRef<string | null>(null);
   const isLocalSessionRef = useRef<boolean>(false);
   const getClientId = useCallback(
@@ -167,10 +176,13 @@ export default function App() {
     connectionError,
     markServerConnected
   });
-  const { navigateTo, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
+  const { navigateTo, currentView, canGoBack, canGoForward, goBack, goForward } = useViewNavigation({
     setSettingsOpen,
     setAlbumViewId,
-    setSettingsSection
+    setSettingsSection,
+    setQueueViewOpen,
+    setNowPlayingViewOpen,
+    setSessionsViewOpen
   });
   const { trackMenuTrackId, trackMenuPosition, toggleTrackMenu, runTrackMenuAction } =
     useTrackMenu();
@@ -459,6 +471,7 @@ export default function App() {
     useAppChromeActions({
       navigateTo,
       isLocalSession,
+      compactLayout,
       setSignalOpen,
       setQueueOpen,
       setOutputsOpen,
@@ -482,11 +495,30 @@ export default function App() {
     reportError
   });
 
+  useEffect(() => {
+    const wasCompact = previousCompactLayoutRef.current;
+    previousCompactLayoutRef.current = compactLayout;
+    if (wasCompact && !compactLayout) {
+      if (
+        currentView.view === "nowPlaying" ||
+        currentView.view === "sessions" ||
+        currentView.view === "queue"
+      ) {
+        navigateTo({
+          view: "albums"
+        });
+      }
+    }
+  }, [compactLayout, currentView.view, navigateTo]);
+
   return (
     <AppChrome
       settingsOpen={settingsOpen}
       showGate={showGate}
       navCollapsed={navCollapsed}
+      queueViewOpen={queueViewOpen}
+      nowPlayingViewOpen={nowPlayingViewOpen}
+      sessionsViewOpen={sessionsViewOpen}
       onToggleNavCollapsed={() => setNavCollapsed((prev) => !prev)}
       navigateTo={navigateTo}
       serverConnecting={serverConnecting}
@@ -499,7 +531,15 @@ export default function App() {
       canGoForward={canGoForward}
       onGoBack={goBack}
       onGoForward={goForward}
-      viewTitle={viewTitle}
+      viewTitle={
+        currentView.view === "queue"
+          ? "Queue"
+          : currentView.view === "nowPlaying"
+            ? "Now Playing"
+            : currentView.view === "sessions"
+              ? "Sessions"
+              : viewTitle
+      }
       albumViewId={albumViewId}
       albumSearch={albumSearch}
       onAlbumSearchChange={setAlbumSearch}
@@ -550,6 +590,9 @@ export default function App() {
       mainContent={
         <MainContent
           settingsOpen={settingsOpen}
+          queueViewOpen={queueViewOpen}
+          nowPlayingViewOpen={nowPlayingViewOpen}
+          sessionsViewOpen={sessionsViewOpen}
           albumViewId={albumViewId}
           filteredAlbums={filteredAlbums}
           albumsLoading={albumsLoading}
@@ -566,6 +609,28 @@ export default function App() {
           onPlayAlbumById={handlePlayAlbumById}
           onPlayAlbumTrack={handlePlayAlbumTrack}
           onPause={handlePause}
+          queue={queue}
+          canQueuePlay={Boolean(sessionId && (activeOutputAvailable || isLocalSession))}
+          onQueuePause={handlePause}
+          onQueuePlayFrom={handleQueuePlayFrom}
+          onQueueClear={handleQueueClear}
+          status={status}
+          nowPlayingCover={nowPlayingCover}
+          nowPlayingCoverFailed={nowPlayingCoverFailed}
+          canTogglePlayback={canTogglePlayback}
+          canGoPrevious={canGoPrevious}
+          hasNowPlaying={hasNowPlaying}
+          queueHasNext={queueHasNext}
+          onPrimaryAction={handlePrimaryAction}
+          onPrevious={handlePrevious}
+          onNext={handleNext}
+          onCoverError={onCoverError}
+          sessions={sessions}
+          serverConnected={serverConnected}
+          onSessionChange={handleSessionChange}
+          onCreateSession={handleCreateSession}
+          onDeleteSession={onDeleteSession}
+          deleteSessionDisabled={deleteSessionDisabled}
           selectedAlbum={selectedAlbum}
           albumTracks={albumTracks}
           albumTracksLoading={albumTracksLoading}
@@ -678,7 +743,7 @@ export default function App() {
         albumViewId={albumViewId}
         onCloseCatalog={() => setCatalogOpen(false)}
         onCatalogUpdated={onCatalogUpdated}
-        queueOpen={queueOpen}
+        queueOpen={!compactLayout && queueOpen}
         queue={queue}
         formatMs={formatMs}
         placeholder={albumPlaceholder}

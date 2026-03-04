@@ -11,7 +11,7 @@ type AnalysisTarget = {
 
 type UseMainContentActionsArgs = {
   navigateTo: (next: {
-    view: "albums" | "album" | "settings";
+    view: "albums" | "album" | "settings" | "queue" | "nowPlaying" | "sessions";
     albumId?: number | null;
     settingsSection?: SettingsSection;
   }) => void;

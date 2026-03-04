@@ -1,5 +1,8 @@
 import AlbumDetailView from "./AlbumDetailView";
 import AlbumsView from "./AlbumsView";
+import NowPlayingScreen from "./NowPlayingScreen";
+import QueueScreen from "./QueueScreen";
+import SessionsScreen from "./SessionsScreen";
 import SettingsView from "./SettingsView";
 import { SettingsSection } from "../hooks/useViewNavigation";
 import {
@@ -9,6 +12,9 @@ import {
   MetadataEvent,
   OutputSettings,
   ProviderOutputs,
+  QueueItem,
+  SessionSummary,
+  StatusResponse,
   TrackSummary
 } from "../types";
 
@@ -25,6 +31,9 @@ type LogEventEntry = {
 
 type MainContentProps = {
   settingsOpen: boolean;
+  queueViewOpen: boolean;
+  nowPlayingViewOpen: boolean;
+  sessionsViewOpen: boolean;
   albumViewId: number | null;
   filteredAlbums: AlbumSummary[];
   albumsLoading: boolean;
@@ -41,6 +50,28 @@ type MainContentProps = {
   onPlayAlbumById: (albumId: number) => void;
   onPlayAlbumTrack: (track: TrackSummary) => void;
   onPause: () => void | Promise<void>;
+  queue: QueueItem[];
+  canQueuePlay: boolean;
+  onQueuePause: () => void | Promise<void>;
+  onQueuePlayFrom: (trackId: number) => void | Promise<void>;
+  onQueueClear: (clearQueue: boolean, clearHistory: boolean) => void | Promise<void>;
+  status: StatusResponse | null;
+  nowPlayingCover: string | null;
+  nowPlayingCoverFailed: boolean;
+  canTogglePlayback: boolean;
+  canGoPrevious: boolean;
+  hasNowPlaying: boolean;
+  queueHasNext: boolean;
+  onPrimaryAction: () => void | Promise<void>;
+  onPrevious: () => void | Promise<void>;
+  onNext: () => void | Promise<void>;
+  onCoverError: () => void;
+  sessions: SessionSummary[];
+  serverConnected: boolean;
+  onSessionChange: (nextSessionId: string) => void;
+  onCreateSession: () => void;
+  onDeleteSession: () => void;
+  deleteSessionDisabled: boolean;
   selectedAlbum: AlbumSummary | null;
   albumTracks: TrackSummary[];
   albumTracksLoading: boolean;
@@ -90,6 +121,9 @@ type MainContentProps = {
 
 export default function MainContent({
   settingsOpen,
+  queueViewOpen,
+  nowPlayingViewOpen,
+  sessionsViewOpen,
   albumViewId,
   filteredAlbums,
   albumsLoading,
@@ -106,6 +140,28 @@ export default function MainContent({
   onPlayAlbumById,
   onPlayAlbumTrack,
   onPause,
+  queue,
+  canQueuePlay,
+  onQueuePause,
+  onQueuePlayFrom,
+  onQueueClear,
+  status,
+  nowPlayingCover,
+  nowPlayingCoverFailed,
+  canTogglePlayback,
+  canGoPrevious,
+  hasNowPlaying,
+  queueHasNext,
+  onPrimaryAction,
+  onPrevious,
+  onNext,
+  onCoverError,
+  sessions,
+  serverConnected,
+  onSessionChange,
+  onCreateSession,
+  onDeleteSession,
+  deleteSessionDisabled,
   selectedAlbum,
   albumTracks,
   albumTracksLoading,
@@ -154,7 +210,38 @@ export default function MainContent({
 }: MainContentProps) {
   return (
     <>
-      {!settingsOpen && albumViewId === null ? (
+      {nowPlayingViewOpen && !settingsOpen ? (
+        <NowPlayingScreen
+          status={status}
+          nowPlayingCover={nowPlayingCover}
+          nowPlayingCoverFailed={nowPlayingCoverFailed}
+          placeholderCover={placeholder(status?.album, status?.artist)}
+          formatMs={formatMs}
+          canTogglePlayback={canTogglePlayback}
+          canGoPrevious={canGoPrevious}
+          hasNowPlaying={hasNowPlaying}
+          isPaused={isPaused}
+          queueHasItems={queueHasNext}
+          onCoverError={onCoverError}
+          onPrimaryAction={onPrimaryAction}
+          onPrevious={onPrevious}
+          onNext={onNext}
+        />
+      ) : null}
+
+      {sessionsViewOpen && !settingsOpen ? (
+        <SessionsScreen
+          sessionId={sessionId}
+          sessions={sessions}
+          serverConnected={serverConnected}
+          onSessionChange={onSessionChange}
+          onCreateSession={onCreateSession}
+          onDeleteSession={onDeleteSession}
+          deleteSessionDisabled={deleteSessionDisabled}
+        />
+      ) : null}
+
+      {!settingsOpen && !queueViewOpen && !nowPlayingViewOpen && !sessionsViewOpen && albumViewId === null ? (
         <section className="grid">
           <AlbumsView
             albums={filteredAlbums}
@@ -173,7 +260,20 @@ export default function MainContent({
         </section>
       ) : null}
 
-      {albumViewId !== null && !settingsOpen ? (
+      {queueViewOpen && !settingsOpen && !nowPlayingViewOpen && !sessionsViewOpen ? (
+        <QueueScreen
+          items={queue}
+          formatMs={formatMs}
+          placeholder={placeholder}
+          canPlay={canQueuePlay}
+          isPaused={isPaused}
+          onPause={onQueuePause}
+          onPlayFrom={onQueuePlayFrom}
+          onClear={onQueueClear}
+        />
+      ) : null}
+
+      {albumViewId !== null && !settingsOpen && !queueViewOpen && !nowPlayingViewOpen && !sessionsViewOpen ? (
         <AlbumDetailView
           album={selectedAlbum}
           tracks={albumTracks}

@@ -13,6 +13,9 @@ export function useAppUiState({ navCollapsedKey }: UseAppUiStateArgs) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [rescanBusy, setRescanBusy] = useState<boolean>(false);
   const [queueOpen, setQueueOpen] = useState<boolean>(false);
+  const [queueViewOpen, setQueueViewOpen] = useState<boolean>(false);
+  const [nowPlayingViewOpen, setNowPlayingViewOpen] = useState<boolean>(false);
+  const [sessionsViewOpen, setSessionsViewOpen] = useState<boolean>(false);
   const [signalOpen, setSignalOpen] = useState<boolean>(false);
   const [outputsOpen, setOutputsOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
@@ -47,6 +50,12 @@ export function useAppUiState({ navCollapsedKey }: UseAppUiStateArgs) {
     setRescanBusy,
     queueOpen,
     setQueueOpen,
+    queueViewOpen,
+    setQueueViewOpen,
+    nowPlayingViewOpen,
+    setNowPlayingViewOpen,
+    sessionsViewOpen,
+    setSessionsViewOpen,
     signalOpen,
     setSignalOpen,
     outputsOpen,

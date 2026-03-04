@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type SettingsSection = "metadata" | "logs" | "connection" | "outputs";
 
 export type ViewState = {
-  view: "albums" | "album" | "settings";
+  view: "albums" | "album" | "settings" | "queue" | "nowPlaying" | "sessions";
   albumId?: number | null;
   settingsSection?: SettingsSection;
 };
@@ -33,7 +33,16 @@ function parseBrowserHistoryState(value: unknown): ViewState | null {
   const state = value as Partial<BrowserViewHistoryState>;
   if (state.kind !== "audio_hub_view" || !state.view) return null;
   const view = state.view;
-  if (view.view !== "albums" && view.view !== "album" && view.view !== "settings") return null;
+  if (
+    view.view !== "albums" &&
+    view.view !== "album" &&
+    view.view !== "settings" &&
+    view.view !== "queue" &&
+    view.view !== "nowPlaying" &&
+    view.view !== "sessions"
+  ) {
+    return null;
+  }
   return {
     view: view.view,
     albumId: view.albumId ?? null,
@@ -45,12 +54,18 @@ type UseViewNavigationArgs = {
   setSettingsOpen: (value: boolean) => void;
   setAlbumViewId: (value: number | null) => void;
   setSettingsSection: (value: SettingsSection) => void;
+  setQueueViewOpen: (value: boolean) => void;
+  setNowPlayingViewOpen: (value: boolean) => void;
+  setSessionsViewOpen: (value: boolean) => void;
 };
 
 export function useViewNavigation({
   setSettingsOpen,
   setAlbumViewId,
-  setSettingsSection
+  setSettingsSection,
+  setQueueViewOpen,
+  setNowPlayingViewOpen,
+  setSessionsViewOpen
 }: UseViewNavigationArgs) {
   const initialViewState: ViewState = {
     view: "albums",
@@ -67,19 +82,56 @@ export function useViewNavigation({
     (state: ViewState) => {
       applyingHistoryRef.current = true;
       if (state.view === "settings") {
+        setQueueViewOpen(false);
+        setNowPlayingViewOpen(false);
+        setSessionsViewOpen(false);
         setSettingsSection(state.settingsSection ?? "metadata");
         setSettingsOpen(true);
         setAlbumViewId(null);
         return;
       }
+      if (state.view === "queue") {
+        setSettingsOpen(false);
+        setAlbumViewId(null);
+        setQueueViewOpen(true);
+        setNowPlayingViewOpen(false);
+        setSessionsViewOpen(false);
+        return;
+      }
+      if (state.view === "nowPlaying") {
+        setSettingsOpen(false);
+        setAlbumViewId(null);
+        setQueueViewOpen(false);
+        setNowPlayingViewOpen(true);
+        setSessionsViewOpen(false);
+        return;
+      }
+      if (state.view === "sessions") {
+        setSettingsOpen(false);
+        setAlbumViewId(null);
+        setQueueViewOpen(false);
+        setNowPlayingViewOpen(false);
+        setSessionsViewOpen(true);
+        return;
+      }
       setSettingsOpen(false);
+      setQueueViewOpen(false);
+      setNowPlayingViewOpen(false);
+      setSessionsViewOpen(false);
       if (state.view === "album") {
         setAlbumViewId(state.albumId ?? null);
         return;
       }
       setAlbumViewId(null);
     },
-    [setAlbumViewId, setSettingsOpen, setSettingsSection]
+    [
+      setAlbumViewId,
+      setNowPlayingViewOpen,
+      setQueueViewOpen,
+      setSessionsViewOpen,
+      setSettingsOpen,
+      setSettingsSection
+    ]
   );
 
   useEffect(() => {
@@ -186,6 +238,7 @@ export function useViewNavigation({
 
   return {
     navigateTo,
+    currentView: navState.stack[navState.index] ?? initialViewState,
     canGoBack,
     canGoForward,
     goBack,
