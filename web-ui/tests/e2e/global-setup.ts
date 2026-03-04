@@ -6,10 +6,13 @@ import {
   composePrintDiagnostics,
   composeDown,
   composeUp,
+  createDockerStateFromFixtureSeed,
+  createFixtureSeed,
   createDockerState,
   type DockerState,
   ensureDockerAvailable,
   ensureWebUiDistBuilt,
+  removeFixtureSeed,
   removeStateFile,
   removeTempRoot,
   saveState,
@@ -22,11 +25,25 @@ async function globalSetup(_config: FullConfig): Promise<void> {
   const multiStack = process.env.E2E_MULTI_STACK === "1";
   let states: DockerState[];
   if (multiStack) {
-    states = [
-      await createDockerState({ stateKey: "chromium", hubPort: process.env.E2E_HUB_PORT_CHROMIUM ?? "18081" }),
-      await createDockerState({ stateKey: "firefox", hubPort: process.env.E2E_HUB_PORT_FIREFOX ?? "18082" }),
-      await createDockerState({ stateKey: "webkit", hubPort: process.env.E2E_HUB_PORT_WEBKIT ?? "18083" })
-    ];
+    const seed = await createFixtureSeed();
+    try {
+      states = [
+        await createDockerStateFromFixtureSeed(seed.mediaDir, {
+          stateKey: "chromium",
+          hubPort: process.env.E2E_HUB_PORT_CHROMIUM ?? "18081"
+        }),
+        await createDockerStateFromFixtureSeed(seed.mediaDir, {
+          stateKey: "firefox",
+          hubPort: process.env.E2E_HUB_PORT_FIREFOX ?? "18082"
+        }),
+        await createDockerStateFromFixtureSeed(seed.mediaDir, {
+          stateKey: "webkit",
+          hubPort: process.env.E2E_HUB_PORT_WEBKIT ?? "18083"
+        })
+      ];
+    } finally {
+      await removeFixtureSeed(seed);
+    }
   } else {
     states = [await createDockerState()];
   }

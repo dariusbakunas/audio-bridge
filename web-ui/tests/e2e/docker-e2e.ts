@@ -34,6 +34,10 @@ export type DockerState = {
 };
 
 export type PersistedDockerState = DockerState | DockerState[];
+export type FixtureSeed = {
+  tempRoot: string;
+  mediaDir: string;
+};
 
 function runOrThrow(args: string[], env: NodeJS.ProcessEnv): void {
   const result = spawnSync("docker", args, {
@@ -94,6 +98,21 @@ export async function waitForHubHealthy(apiBase: string, timeoutMs: number): Pro
 }
 
 export async function createDockerState(options?: { hubPort?: string; stateKey?: string }): Promise<DockerState> {
+  const state = await createDockerStateSkeleton(options);
+  generateFixtures(state.mediaDir);
+  return state;
+}
+
+export async function createDockerStateFromFixtureSeed(
+  fixtureMediaDir: string,
+  options?: { hubPort?: string; stateKey?: string }
+): Promise<DockerState> {
+  const state = await createDockerStateSkeleton(options);
+  await copyFixtures(fixtureMediaDir, state.mediaDir);
+  return state;
+}
+
+async function createDockerStateSkeleton(options?: { hubPort?: string; stateKey?: string }): Promise<DockerState> {
   const now = Date.now();
   const random = Math.random().toString(36).slice(2, 8);
   const key = options?.stateKey ?? stateKey;
@@ -108,7 +127,6 @@ export async function createDockerState(options?: { hubPort?: string; stateKey?:
   await fs.mkdir(mediaDir, { recursive: true });
   await fs.mkdir(dataDir, { recursive: true });
   await writeHubConfig(hubConfigPath, bridge1Ipv4, bridge2Ipv4);
-  generateFixtures(mediaDir);
 
   return {
     composeProject,
@@ -122,6 +140,14 @@ export async function createDockerState(options?: { hubPort?: string; stateKey?:
     bridge1Ipv4,
     bridge2Ipv4
   };
+}
+
+export async function createFixtureSeed(): Promise<FixtureSeed> {
+  const seedRoot = await fs.mkdtemp(path.join("/tmp", "audio-hub-e2e-fixtures-"));
+  const mediaDir = path.join(seedRoot, "media");
+  await fs.mkdir(mediaDir, { recursive: true });
+  generateFixtures(mediaDir);
+  return { tempRoot: seedRoot, mediaDir };
 }
 
 function computeNetworkPlan(hubPort: string): { subnetCidr: string; bridge1Ipv4: string; bridge2Ipv4: string } {
@@ -152,6 +178,10 @@ function generateFixtures(outputDir: string): void {
   if (result.status !== 0) {
     throw new Error("failed to generate E2E fixtures from album-fixtures.yml");
   }
+}
+
+async function copyFixtures(sourceDir: string, targetDir: string): Promise<void> {
+  await fs.cp(sourceDir, targetDir, { recursive: true });
 }
 
 export async function saveState(state: PersistedDockerState): Promise<void> {
@@ -220,4 +250,8 @@ export function composePrintDiagnostics(state: DockerState): void {
 
 export async function removeTempRoot(state: DockerState): Promise<void> {
   await fs.rm(state.tempRoot, { recursive: true, force: true });
+}
+
+export async function removeFixtureSeed(seed: FixtureSeed): Promise<void> {
+  await fs.rm(seed.tempRoot, { recursive: true, force: true });
 }
