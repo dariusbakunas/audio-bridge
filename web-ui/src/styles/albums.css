@@ -262,10 +262,10 @@
 
 .album-notes {
   margin: 8px 0 18px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .album-notes-header {
@@ -292,6 +292,14 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+.album-notes-preview.expanded {
+  display: block;
+  -webkit-line-clamp: initial;
+  -webkit-box-orient: initial;
+  overflow: visible;
 }
 
 .album-notes-read {

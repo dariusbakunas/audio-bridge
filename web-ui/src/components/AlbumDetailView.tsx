@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlbumProfileResponse, AlbumSummary, TrackSummary } from "../types";
 import hiResBadge from "../assets/hi-res.png";
 import TrackMenu from "./TrackMenu";
@@ -66,6 +66,7 @@ export default function AlbumDetailView({
   nowPlayingTrackId
 }: AlbumDetailViewProps) {
   const heroRef = useRef<HTMLDivElement | null>(null);
+  const [notesExpanded, setNotesExpanded] = useState(false);
   const isActive = Boolean(album?.id && activeAlbumId === album.id && (isPlaying || isPaused));
   const isActivePlaying = Boolean(album?.id && activeAlbumId === album.id && isPlaying);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.duration_ms ?? 0), 0);
@@ -85,6 +86,9 @@ export default function AlbumDetailView({
   useEffect(() => {
     if (!heroRef.current) return;
     heroRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [album?.id]);
+  useEffect(() => {
+    setNotesExpanded(false);
   }, [album?.id]);
   const formatSampleRate = (hz?: number | null) => {
     if (!hz) return null;
@@ -207,16 +211,16 @@ export default function AlbumDetailView({
       <div className="album-tracklist">
           {albumNotes ? (
             <div className="album-notes">
-            <div className="album-notes-header">
+              <div className="album-notes-header">
                 <div className="album-notes-label">Album notes</div>
               </div>
-              <p className="album-notes-preview">{albumNotes}</p>
+              <p className={`album-notes-preview${notesExpanded ? " expanded" : ""}`}>{albumNotes}</p>
               <button
                 className="album-notes-read"
                 type="button"
-                onClick={onReadAlbumNotes}
+                onClick={() => setNotesExpanded((value) => !value)}
               >
-                READ MORE →
+                {notesExpanded ? "SHOW LESS ↑" : "READ MORE →"}
               </button>
             </div>
           ) : null}
