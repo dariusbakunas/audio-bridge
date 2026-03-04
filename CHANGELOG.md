@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-03-04
+
+### Added
+- Compact Web UI mode for narrow screens (mobile-style navigation, dedicated `Now Playing`/`Queue`/`Sessions` screens, and small-screen queue-first flow).
+- Bridge graceful-unregister callback path for clean disconnect handling:
+  - hub endpoint: `POST /providers/bridge/unregister`
+  - bridge shutdown notification to known hub origins.
+- E2E fixture generation tooling:
+  - YAML-driven album fixture definitions
+  - helper scripts to generate fixture audio from YAML and from existing albums.
+- Isolated Docker Compose E2E environment for Playwright runs with per-browser stack separation.
+- Bridge dummy output mode to support deterministic E2E execution.
+- Additional E2E coverage for library browsing, queue interactions, connection gate behavior, and previous/next control semantics.
+
+### Changed
+- E2E workflow now auto-generates audio fixtures before test runs and avoids regenerating them repeatedly in the same run.
+- Signal modal diagnostics now prioritize effective source/processing rates and clearer playback pipeline details.
+- Album notes UX now expands inline from album detail instead of relying on modal-style presentation.
+
+### Fixed
+- End-of-queue behavior now clears stale `now_playing` state and updates controls/UI correctly (`Nothing playing`, no stale active track, `Next` disabled at queue end).
+- Bridge/output cleanup now releases stale active output/session locks when a bridge exits gracefully.
+- Bridge exclusive-mode handling and status propagation for output/sample-rate reporting.
+- Settings view layout regressions where content could render behind the header after navigating from a scrolled album grid.
+- Albums live-stream recovery now clears stale disconnect error state after SSE reconnection/open.
+
 ## [0.15.0] - 2026-03-02
 
 ### Added
