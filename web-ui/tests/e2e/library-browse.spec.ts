@@ -152,6 +152,41 @@ test("local session can jump playback by playing a specific queue item", async (
   await expect(page.locator(".player-left .track-title")).toContainText("As If");
 });
 
+test("local session previous/next controls reflect history and queue boundaries", async ({ page }) => {
+  await page.goto("/");
+  await waitForAlbumsLoaded(page);
+  await switchToLocalSession(page);
+
+  await page
+    .locator(".album-card")
+    .filter({ hasText: "True North" })
+    .first()
+    .locator('.album-play[aria-label="Play True North"]')
+    .click();
+
+  const previousButton = page.getByRole("button", { name: "Previous" });
+  const nextButton = page.getByRole("button", { name: "Next" });
+  const trackTitle = page.locator(".player-left .track-title");
+
+  await expect(trackTitle).toContainText("I'm In");
+  await expect(previousButton).toBeDisabled();
+  await expect(nextButton).toBeEnabled();
+
+  await nextButton.click();
+  await expect(trackTitle).toContainText("Hunter In The Hills");
+  await expect(previousButton).toBeEnabled();
+
+  await previousButton.click();
+  await expect(trackTitle).toContainText("I'm In");
+
+  for (let i = 0; i < 11; i += 1) {
+    await expect(nextButton).toBeEnabled();
+    await nextButton.click();
+  }
+  await expect(trackTitle).toContainText("Oh My Word");
+  await expect(nextButton).toBeDisabled();
+});
+
 test("preserves search query and list mode when navigating album detail and back", async ({ page }) => {
   await page.goto("/");
   await waitForAlbumsLoaded(page);
